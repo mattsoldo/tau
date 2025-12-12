@@ -99,17 +99,16 @@ class ConfigLoader:
             state = await session.get(FixtureState, fixture.id)
             if state:
                 fixture_state = self.state_manager.fixtures[fixture.id]
-                fixture_state.brightness = state.brightness
-                fixture_state.color_temp = state.color_temp
-                fixture_state.hue = state.hue
-                fixture_state.saturation = state.saturation
+                # Convert int (0-1000) to float (0-1)
+                fixture_state.brightness = (state.current_brightness or 0) / 1000.0
+                fixture_state.color_temp = state.current_cct
                 if state.last_updated:
                     fixture_state.last_updated = state.last_updated.timestamp()
 
                 logger.debug(
                     "fixture_state_loaded",
                     fixture_id=fixture.id,
-                    brightness=state.brightness,
+                    brightness=fixture_state.brightness,
                 )
 
             count += 1
@@ -139,24 +138,13 @@ class ConfigLoader:
             group_state = self.state_manager.groups[group.id]
             group_state.circadian_enabled = group.circadian_enabled or False
 
-            # Load saved state if it exists
-            state = await session.get(GroupState, group.id)
-            if state:
-                group_state.brightness = state.brightness
-                group_state.color_temp = state.color_temp
-                group_state.hue = state.hue
-                group_state.saturation = state.saturation
-                group_state.circadian_brightness = state.circadian_brightness
-                group_state.circadian_color_temp = state.circadian_color_temp
-                if state.last_updated:
-                    group_state.last_updated = state.last_updated.timestamp()
-
-                logger.debug(
-                    "group_state_loaded",
-                    group_id=group.id,
-                    brightness=state.brightness,
-                    circadian_enabled=group_state.circadian_enabled,
-                )
+            # Note: GroupState in database only tracks circadian suspension and last scene
+            # For Phase 2, we just load the circadian enabled flag from the group itself
+            logger.debug(
+                "group_loaded",
+                group_id=group.id,
+                circadian_enabled=group_state.circadian_enabled,
+            )
 
             count += 1
 

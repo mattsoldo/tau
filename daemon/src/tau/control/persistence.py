@@ -100,12 +100,16 @@ class StatePersistence:
             # Check if state exists
             result = await session.get(FixtureState, fixture_id)
 
+            # Convert float brightness (0-1) to int (0-1000) for database
+            current_brightness = int(state_data.brightness * 1000)
+            current_cct = state_data.color_temp
+            is_on = state_data.brightness > 0.0
+
             if result:
                 # Update existing state
-                result.brightness = state_data.brightness
-                result.color_temp = state_data.color_temp
-                result.hue = state_data.hue
-                result.saturation = state_data.saturation
+                result.current_brightness = current_brightness
+                result.current_cct = current_cct
+                result.is_on = is_on
                 if state_data.last_updated:
                     result.last_updated = datetime.fromtimestamp(state_data.last_updated)
                 else:
@@ -114,10 +118,9 @@ class StatePersistence:
                 # Create new state
                 new_state = FixtureState(
                     fixture_id=fixture_id,
-                    brightness=state_data.brightness,
-                    color_temp=state_data.color_temp,
-                    hue=state_data.hue,
-                    saturation=state_data.saturation,
+                    current_brightness=current_brightness,
+                    current_cct=current_cct,
+                    is_on=is_on,
                     last_updated=datetime.fromtimestamp(state_data.last_updated)
                     if state_data.last_updated
                     else datetime.now(),
@@ -131,6 +134,9 @@ class StatePersistence:
     async def _save_group_states(self, session) -> int:
         """
         Save all group states to database
+
+        GroupState in the database only tracks circadian suspension and last active scene,
+        not brightness/color values. For Phase 2, we just ensure the record exists.
 
         Args:
             session: Async database session
@@ -146,29 +152,14 @@ class StatePersistence:
 
             if result:
                 # Update existing state
-                result.brightness = state_data.brightness
-                result.color_temp = state_data.color_temp
-                result.hue = state_data.hue
-                result.saturation = state_data.saturation
-                result.circadian_brightness = state_data.circadian_brightness
-                result.circadian_color_temp = state_data.circadian_color_temp
-                if state_data.last_updated:
-                    result.last_updated = datetime.fromtimestamp(state_data.last_updated)
-                else:
-                    result.last_updated = datetime.now()
+                # In Phase 2, we just ensure the record exists
+                # Circadian suspension and scene tracking will be added in Phase 4
+                pass
             else:
-                # Create new state
+                # Create new state record
                 new_state = GroupState(
                     group_id=group_id,
-                    brightness=state_data.brightness,
-                    color_temp=state_data.color_temp,
-                    hue=state_data.hue,
-                    saturation=state_data.saturation,
-                    circadian_brightness=state_data.circadian_brightness,
-                    circadian_color_temp=state_data.circadian_color_temp,
-                    last_updated=datetime.fromtimestamp(state_data.last_updated)
-                    if state_data.last_updated
-                    else datetime.now(),
+                    circadian_suspended=False,
                 )
                 session.add(new_state)
 
