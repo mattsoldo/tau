@@ -21,6 +21,7 @@ from tau.control import (
     StatePersistence,
     ConfigLoader,
 )
+from tau.hardware import HardwareManager
 
 logger = structlog.get_logger(__name__)
 
@@ -37,6 +38,7 @@ class TauDaemon:
         self.state_manager: Optional[StateManager] = None
         self.persistence: Optional[StatePersistence] = None
         self.config_loader: Optional[ConfigLoader] = None
+        self.hardware_manager: Optional[HardwareManager] = None
 
     async def startup(self):
         """Initialize all daemon components"""
@@ -64,7 +66,11 @@ class TauDaemon:
 
         # Initialize hardware interfaces (LabJack, OLA)
         logger.info("initializing_hardware", mock_mode=self.settings.labjack_mock)
-        # TODO: Initialize hardware in Phase 3
+        self.hardware_manager = HardwareManager(use_mock=self.settings.labjack_mock)
+        hardware_ok = await self.hardware_manager.initialize()
+        if not hardware_ok:
+            logger.error("hardware_initialization_failed")
+            raise RuntimeError("Failed to initialize hardware")
 
         # Create scheduler for periodic tasks
         self.scheduler = Scheduler()
@@ -97,10 +103,11 @@ class TauDaemon:
             await self.event_loop.stop()
 
         # Close hardware connections
-        # TODO: Close hardware in Phase 3
+        if self.hardware_manager:
+            await self.hardware_manager.shutdown()
 
         # Close database connections
-        # TODO: Close database connections in Phase 2
+        # TODO: Close database connections properly
 
         logger.info("tau_daemon_stopped")
 
