@@ -38,7 +38,7 @@ CREATE TABLE switch_models (
     
     -- Hardware Debounce & Curve (Locked to Model)
     debounce_ms INT DEFAULT 500,
-    dimming_curve VARCHAR(20) DEFAULT 'logarithmic',
+    dimming_curve VARCHAR(20) DEFAULT 'logarithmic' CHECK (dimming_curve IN ('linear', 'logarithmic')),
     
     requires_digital_pin BOOLEAN DEFAULT TRUE,
     requires_analog_pin BOOLEAN DEFAULT FALSE,
@@ -58,6 +58,9 @@ CREATE TABLE switches (
     -- Polymorphic Target
     target_group_id INT REFERENCES groups(id) ON DELETE SET NULL,
     target_fixture_id INT REFERENCES fixtures(id) ON DELETE SET NULL,
+    
+    -- Optional photo for UI
+    photo_url TEXT,
     
     CONSTRAINT one_target_only CHECK (
         (target_group_id IS NOT NULL AND target_fixture_id IS NULL) OR
@@ -105,7 +108,8 @@ CREATE TABLE circadian_profiles (
     description TEXT,
     
     -- Curve Data: Stored as JSON to allow flexible number of points.
-    -- Schema: [ {"time": "07:00", "brightness": 80, "cct": 5500}, ... ]
+    -- Schema: [ {"time": "07:00", "brightness": 800, "cct": 5500}, ... ]
+    -- Note: brightness is 0-1000 (tenths of a percent, e.g., 800 = 80.0%)
     curve_points JSONB NOT NULL,
     
     -- Interpolation Method: How to calculate values between points
@@ -121,9 +125,9 @@ INSERT INTO circadian_profiles (name, description, curve_points) VALUES
     'Bright day, warm evening. Good for Living Rooms.',
     '[
         {"time": "06:00", "brightness": 0, "cct": 2700},
-        {"time": "08:00", "brightness": 90, "cct": 4000},
-        {"time": "18:00", "brightness": 90, "cct": 3000},
-        {"time": "20:00", "brightness": 40, "cct": 2700},
+        {"time": "08:00", "brightness": 900, "cct": 4000},
+        {"time": "18:00", "brightness": 900, "cct": 3000},
+        {"time": "20:00", "brightness": 400, "cct": 2700},
         {"time": "23:00", "brightness": 0, "cct": 2200}
     ]'::jsonb
 ),
@@ -132,9 +136,9 @@ INSERT INTO circadian_profiles (name, description, curve_points) VALUES
     'Lower intensity, aggressive warm shift in evening.',
     '[
         {"time": "07:00", "brightness": 0, "cct": 2700},
-        {"time": "09:00", "brightness": 70, "cct": 4000},
-        {"time": "19:00", "brightness": 50, "cct": 2700},
-        {"time": "21:00", "brightness": 10, "cct": 2200}
+        {"time": "09:00", "brightness": 700, "cct": 4000},
+        {"time": "19:00", "brightness": 500, "cct": 2700},
+        {"time": "21:00", "brightness": 100, "cct": 2200}
     ]'::jsonb
 );
 
@@ -155,7 +159,7 @@ CREATE TABLE scene_values (
     -- The target of this specific value (Fixture or Group)
     fixture_id INT REFERENCES fixtures(id) ON DELETE CASCADE,
     
-    target_brightness_percent INT CHECK (target_brightness_percent BETWEEN 0 AND 100),
+    target_brightness INT CHECK (target_brightness BETWEEN 0 AND 1000), -- 0-1000 (tenths of a percent)
     target_cct_kelvin INT,
     
     PRIMARY KEY (scene_id, fixture_id)
@@ -167,7 +171,7 @@ CREATE TABLE scene_values (
 CREATE TABLE fixture_state (
     fixture_id INT PRIMARY KEY REFERENCES fixtures(id) ON DELETE CASCADE,
     
-    current_brightness INT DEFAULT 0,
+    current_brightness INT DEFAULT 0 CHECK (current_brightness BETWEEN 0 AND 1000), -- 0-1000 (tenths of a percent)
     current_cct INT DEFAULT 2700,
     is_on BOOLEAN DEFAULT FALSE,
     
