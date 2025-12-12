@@ -14,7 +14,13 @@ from tau.config import get_settings
 from tau.database import init_database
 from tau.api import create_app, set_daemon_instance
 from tau.logging_config import setup_logging
-from tau.control import EventLoop, Scheduler
+from tau.control import (
+    EventLoop,
+    Scheduler,
+    StateManager,
+    StatePersistence,
+    ConfigLoader,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -28,6 +34,9 @@ class TauDaemon:
         self.should_exit = False
         self.event_loop: Optional[EventLoop] = None
         self.scheduler: Optional[Scheduler] = None
+        self.state_manager: Optional[StateManager] = None
+        self.persistence: Optional[StatePersistence] = None
+        self.config_loader: Optional[ConfigLoader] = None
 
     async def startup(self):
         """Initialize all daemon components"""
@@ -43,12 +52,29 @@ class TauDaemon:
         # Set global daemon instance for API access
         set_daemon_instance(self)
 
+        # Initialize state management
+        logger.info("initializing_state_management")
+        self.state_manager = StateManager()
+        self.persistence = StatePersistence(self.state_manager)
+        self.config_loader = ConfigLoader(self.state_manager)
+
+        # Load configuration from database
+        logger.info("loading_configuration")
+        await self.config_loader.load_configuration()
+
         # Initialize hardware interfaces (LabJack, OLA)
         logger.info("initializing_hardware", mock_mode=self.settings.labjack_mock)
         # TODO: Initialize hardware in Phase 3
 
         # Create scheduler for periodic tasks
         self.scheduler = Scheduler()
+
+        # Schedule state persistence every 5 seconds
+        self.scheduler.schedule(
+            name="state_persistence",
+            callback=self.persistence.save_state,
+            interval_seconds=5.0,
+        )
 
         # Create and configure event loop
         self.event_loop = EventLoop(frequency_hz=self.settings.control_loop_hz)

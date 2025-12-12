@@ -54,7 +54,7 @@ def create_app(settings: Settings) -> FastAPI:
     # Status endpoint with event loop statistics
     @app.get("/status")
     async def get_status():
-        """Get daemon status including event loop statistics"""
+        """Get daemon status including event loop and state management statistics"""
         daemon = get_daemon_instance()
 
         response = {
@@ -68,6 +68,12 @@ def create_app(settings: Settings) -> FastAPI:
 
         if daemon and daemon.scheduler:
             response["scheduled_tasks"] = daemon.scheduler.get_statistics()
+
+        if daemon and daemon.state_manager:
+            response["state_manager"] = daemon.state_manager.get_statistics()
+
+        if daemon and daemon.persistence:
+            response["persistence"] = daemon.persistence.get_statistics()
 
         return response
 
