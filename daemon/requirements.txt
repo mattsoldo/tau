@@ -1,0 +1,49 @@
+# Tau Lighting Control Daemon - Python Dependencies
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+websockets==12.0
+
+# Database
+sqlalchemy==2.0.25
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Hardware Integration
+# LabJack U3-HV driver
+LabJackPython==2.1.0
+# OLA (Open Lighting Architecture) - requires system installation
+# Note: OLA Python bindings must be installed separately
+
+# Utilities
+python-dotenv==1.0.0
+pyyaml==6.0.1
+click==8.1.7
+
+# Async support
+aiofiles==23.2.1
+asyncio-mqtt==0.16.2
+
+# Logging
+structlog==24.1.0
+python-json-logger==2.0.7
+
+# Time handling
+python-dateutil==2.8.2
+pytz==2024.1
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+httpx==0.26.0
+
+# Development
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+isort==5.13.2

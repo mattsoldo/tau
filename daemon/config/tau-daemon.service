@@ -1,0 +1,32 @@
+[Unit]
+Description=Tau Smart Lighting Control Daemon
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=tau
+Group=tau
+WorkingDirectory=/opt/tau/daemon
+Environment="PATH=/opt/tau/daemon/venv/bin"
+EnvironmentFile=/opt/tau/.env
+ExecStart=/opt/tau/daemon/venv/bin/python -m tau.main
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tau-daemon
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/tau /opt/tau
+
+# Hardware access (uncomment when using real hardware)
+# SupplementaryGroups=plugdev dialout
+# DeviceAllow=/dev/bus/usb rw
+
+[Install]
+WantedBy=multi-user.target
