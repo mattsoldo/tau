@@ -12,8 +12,9 @@ from fastapi import FastAPI
 
 from tau.config import get_settings
 from tau.database import init_database
-from tau.api import create_app
+from tau.api import create_app, set_daemon_instance
 from tau.logging_config import setup_logging
+from tau.control import EventLoop, Scheduler
 
 logger = structlog.get_logger(__name__)
 
@@ -25,6 +26,8 @@ class TauDaemon:
         self.settings = get_settings()
         self.app: Optional[FastAPI] = None
         self.should_exit = False
+        self.event_loop: Optional[EventLoop] = None
+        self.scheduler: Optional[Scheduler] = None
 
     async def startup(self):
         """Initialize all daemon components"""
@@ -37,13 +40,25 @@ class TauDaemon:
         # Create FastAPI application
         self.app = create_app(self.settings)
 
+        # Set global daemon instance for API access
+        set_daemon_instance(self)
+
         # Initialize hardware interfaces (LabJack, OLA)
         logger.info("initializing_hardware", mock_mode=self.settings.labjack_mock)
-        # TODO: Initialize hardware in next phase
+        # TODO: Initialize hardware in Phase 3
+
+        # Create scheduler for periodic tasks
+        self.scheduler = Scheduler()
+
+        # Create and configure event loop
+        self.event_loop = EventLoop(frequency_hz=self.settings.control_loop_hz)
+
+        # Register scheduler as a callback (runs every loop iteration)
+        self.event_loop.register_callback(self.scheduler.tick)
 
         # Start control loop
-        logger.info("starting_control_loop")
-        # TODO: Start control loop in next phase
+        logger.info("starting_control_loop", frequency_hz=self.settings.control_loop_hz)
+        self.event_loop.start()
 
         logger.info("tau_daemon_ready", port=self.settings.daemon_port)
 
@@ -52,13 +67,14 @@ class TauDaemon:
         logger.info("tau_daemon_shutting_down")
 
         # Stop control loop
-        # TODO: Stop control loop
+        if self.event_loop:
+            await self.event_loop.stop()
 
         # Close hardware connections
-        # TODO: Close hardware connections
+        # TODO: Close hardware in Phase 3
 
         # Close database connections
-        # TODO: Close database connections
+        # TODO: Close database connections in Phase 2
 
         logger.info("tau_daemon_stopped")
 

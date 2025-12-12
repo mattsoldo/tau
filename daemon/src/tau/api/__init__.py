@@ -1,10 +1,25 @@
 """
 Tau Lighting Control API
 """
+from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from tau.config import Settings
+
+# Global reference to daemon (set by main.py)
+_daemon_instance: Optional[object] = None
+
+
+def set_daemon_instance(daemon):
+    """Set the global daemon instance for API access"""
+    global _daemon_instance
+    _daemon_instance = daemon
+
+
+def get_daemon_instance():
+    """Get the global daemon instance"""
+    return _daemon_instance
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -35,6 +50,26 @@ def create_app(settings: Settings) -> FastAPI:
             "version": settings.api_version,
             "service": "tau-daemon",
         }
+
+    # Status endpoint with event loop statistics
+    @app.get("/status")
+    async def get_status():
+        """Get daemon status including event loop statistics"""
+        daemon = get_daemon_instance()
+
+        response = {
+            "status": "running",
+            "version": settings.api_version,
+            "service": "tau-daemon",
+        }
+
+        if daemon and daemon.event_loop:
+            response["event_loop"] = daemon.event_loop.get_statistics()
+
+        if daemon and daemon.scheduler:
+            response["scheduled_tasks"] = daemon.scheduler.get_statistics()
+
+        return response
 
     # TODO: Register API routers in Phase 5
     # from tau.api.routes import fixtures, groups, scenes, control
