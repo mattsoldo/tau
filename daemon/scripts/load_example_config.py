@@ -94,12 +94,12 @@ async def load_configuration(config_file: str):
             profile = CircadianProfile(
                 name=profile_data['name'],
                 description=profile_data.get('description'),
-                keyframes=profile_data['keyframes']
+                curve_points=profile_data['keyframes']  # Note: YAML uses 'keyframes', DB uses 'curve_points'
             )
             session.add(profile)
             await session.flush()
             circadian_profiles_map[profile.name] = profile
-            print(f"   ✓ {profile.name} ({len(profile.keyframes)} keyframes)")
+            print(f"   ✓ {profile.name} ({len(profile.curve_points)} keyframes)")
 
         # 4. Create Groups
         print("\n4. Creating Groups...")
