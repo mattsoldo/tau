@@ -1,0 +1,219 @@
+# Tau Lighting Control - Example Configuration
+#
+# This file demonstrates the configuration structure for the Tau lighting system.
+# It can be loaded via the API or used as a reference for manual configuration.
+
+# Fixture Models
+fixture_models:
+  - manufacturer: "Generic"
+    model: "LED Strip 12V"
+    description: "Standard 12V LED strip with PWM dimming"
+    type: "simple_dimmable"
+    dmx_footprint: 1
+    mixing_type: "linear"
+
+  - manufacturer: "Phillips"
+    model: "Hue White Ambiance"
+    description: "Tunable white LED bulb 2200K-6500K"
+    type: "tunable_white"
+    dmx_footprint: 2
+    cct_min_kelvin: 2200
+    cct_max_kelvin: 6500
+    mixing_type: "perceptual"
+
+  - manufacturer: "ETC"
+    model: "Source Four LED Series 2"
+    description: "Professional theatrical fixture with full RGB+W"
+    type: "other"
+    dmx_footprint: 7
+    cct_min_kelvin: 2700
+    cct_max_kelvin: 6500
+    mixing_type: "perceptual"
+
+# Fixtures
+fixtures:
+  - name: "Kitchen Counter LEDs"
+    model: "Generic LED Strip 12V"
+    dmx_channel_start: 1
+
+  - name: "Living Room Ceiling 1"
+    model: "Phillips Hue White Ambiance"
+    dmx_channel_start: 10
+
+  - name: "Living Room Ceiling 2"
+    model: "Phillips Hue White Ambiance"
+    dmx_channel_start: 12
+
+  - name: "Bedroom Reading Light"
+    model: "Phillips Hue White Ambiance"
+    dmx_channel_start: 20
+
+  - name: "Office Desk Light"
+    model: "Generic LED Strip 12V"
+    dmx_channel_start: 30
+
+# Groups
+groups:
+  - name: "Living Room"
+    description: "All living room fixtures"
+    circadian_enabled: true
+    circadian_profile: "Standard Home"
+    fixtures:
+      - "Living Room Ceiling 1"
+      - "Living Room Ceiling 2"
+
+  - name: "Kitchen"
+    description: "Kitchen task lighting"
+    circadian_enabled: false
+    fixtures:
+      - "Kitchen Counter LEDs"
+
+  - name: "Bedroom"
+    description: "Bedroom fixtures"
+    circadian_enabled: true
+    circadian_profile: "Sleep Optimized"
+    fixtures:
+      - "Bedroom Reading Light"
+
+  - name: "Office"
+    description: "Home office workspace"
+    circadian_enabled: true
+    circadian_profile: "Work Focus"
+    fixtures:
+      - "Office Desk Light"
+
+# Circadian Profiles
+circadian_profiles:
+  - name: "Standard Home"
+    description: "Natural daylight simulation for living spaces"
+    keyframes:
+      - time: "06:00:00"
+        brightness: 0.2
+        cct: 2200
+      - time: "08:00:00"
+        brightness: 0.7
+        cct: 3500
+      - time: "12:00:00"
+        brightness: 1.0
+        cct: 5500
+      - time: "18:00:00"
+        brightness: 0.8
+        cct: 3000
+      - time: "22:00:00"
+        brightness: 0.2
+        cct: 2200
+
+  - name: "Sleep Optimized"
+    description: "Reduced blue light for better sleep"
+    keyframes:
+      - time: "06:00:00"
+        brightness: 0.1
+        cct: 2000
+      - time: "08:00:00"
+        brightness: 0.5
+        cct: 2700
+      - time: "20:00:00"
+        brightness: 0.3
+        cct: 2200
+      - time: "22:00:00"
+        brightness: 0.1
+        cct: 2000
+
+  - name: "Work Focus"
+    description: "High CCT for alertness and productivity"
+    keyframes:
+      - time: "07:00:00"
+        brightness: 0.6
+        cct: 4500
+      - time: "09:00:00"
+        brightness: 1.0
+        cct: 5500
+      - time: "12:00:00"
+        brightness: 1.0
+        cct: 6000
+      - time: "15:00:00"
+        brightness: 0.9
+        cct: 5000
+      - time: "18:00:00"
+        brightness: 0.5
+        cct: 3500
+
+# Scenes
+scenes:
+  - name: "Movie Time"
+    description: "Dim warm lighting for watching movies"
+    scope_group: "Living Room"
+    values:
+      - fixture: "Living Room Ceiling 1"
+        brightness: 100  # 10%
+        cct: 2200
+      - fixture: "Living Room Ceiling 2"
+        brightness: 100
+        cct: 2200
+
+  - name: "Entertaining"
+    description: "Bright inviting lighting for guests"
+    scope_group: "Living Room"
+    values:
+      - fixture: "Living Room Ceiling 1"
+        brightness: 800  # 80%
+        cct: 3500
+      - fixture: "Living Room Ceiling 2"
+        brightness: 800
+        cct: 3500
+
+  - name: "Reading Mode"
+    description: "Bright focused light for reading"
+    scope_group: "Bedroom"
+    values:
+      - fixture: "Bedroom Reading Light"
+        brightness: 1000  # 100%
+        cct: 4000
+
+  - name: "Goodnight"
+    description: "All lights off"
+    values:
+      - fixture: "Living Room Ceiling 1"
+        brightness: 0
+      - fixture: "Living Room Ceiling 2"
+        brightness: 0
+      - fixture: "Kitchen Counter LEDs"
+        brightness: 0
+      - fixture: "Bedroom Reading Light"
+        brightness: 0
+      - fixture: "Office Desk Light"
+        brightness: 0
+
+# Switch Models
+switch_models:
+  - manufacturer: "Lutron"
+    model: "Pico Remote"
+    input_type: "retractive"
+    debounce_ms: 50
+    requires_digital_pin: true
+    requires_analog_pin: false
+
+  - manufacturer: "Generic"
+    model: "Rotary Dimmer"
+    input_type: "rotary_abs"
+    debounce_ms: 100
+    dimming_curve: "logarithmic"
+    requires_digital_pin: false
+    requires_analog_pin: true
+
+# Switches
+switches:
+  - name: "Living Room Main Switch"
+    model: "Lutron Pico Remote"
+    labjack_digital_pin: 0
+    target_group: "Living Room"
+
+  - name: "Kitchen Dimmer"
+    model: "Generic Rotary Dimmer"
+    labjack_analog_pin: 0
+    target_group: "Kitchen"
+
+  - name: "Bedroom Bedside Button"
+    model: "Lutron Pico Remote"
+    labjack_digital_pin: 1
+    target_fixture: "Bedroom Reading Light"
