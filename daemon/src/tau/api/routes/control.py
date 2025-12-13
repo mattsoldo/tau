@@ -8,6 +8,11 @@ from tau.api.schemas import (
     CircadianControlRequest,
 )
 from tau.api import get_daemon_instance
+from tau.api.websocket import (
+    broadcast_fixture_state_change,
+    broadcast_group_state_change,
+    broadcast_circadian_change,
+)
 
 router = APIRouter()
 
@@ -53,6 +58,14 @@ async def control_fixture(
 
     if not updated:
         raise HTTPException(status_code=400, detail="No control values provided")
+
+    # Broadcast state change via WebSocket
+    state = daemon.state_manager.get_fixture_state(fixture_id)
+    await broadcast_fixture_state_change(
+        fixture_id=fixture_id,
+        brightness=state.brightness,
+        color_temp=state.color_temp
+    )
 
     return {"message": "Fixture control applied successfully"}
 
@@ -104,6 +117,14 @@ async def control_group(
     if not updated:
         raise HTTPException(status_code=400, detail="No control values provided")
 
+    # Broadcast state change via WebSocket
+    group_state = daemon.state_manager.get_group_state(group_id)
+    await broadcast_group_state_change(
+        group_id=group_id,
+        brightness=group_state.brightness,
+        color_temp=group_state.circadian_color_temp if group_state.circadian_enabled else None
+    )
+
     return {"message": "Group control applied successfully"}
 
 
@@ -127,11 +148,28 @@ async def control_group_circadian(
                 status_code=400,
                 detail="Failed to enable circadian (check if profile is assigned)"
             )
+
+        # Broadcast circadian enabled
+        group_state = daemon.state_manager.get_group_state(group_id)
+        await broadcast_circadian_change(
+            group_id=group_id,
+            enabled=True,
+            brightness=group_state.circadian_brightness if group_state else None,
+            color_temp=group_state.circadian_color_temp if group_state else None
+        )
+
         return {"message": "Circadian enabled successfully"}
     else:
         success = await daemon.lighting_controller.disable_circadian(group_id)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to disable circadian")
+
+        # Broadcast circadian disabled
+        await broadcast_circadian_change(
+            group_id=group_id,
+            enabled=False
+        )
+
         return {"message": "Circadian disabled successfully"}
 
 

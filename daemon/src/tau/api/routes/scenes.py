@@ -17,6 +17,7 @@ from tau.api.schemas import (
     SceneRecallRequest,
 )
 from tau.api import get_daemon_instance
+from tau.api.websocket import broadcast_scene_recalled
 
 router = APIRouter()
 
@@ -142,7 +143,8 @@ async def capture_scene(
 
 @router.post("/recall", status_code=200)
 async def recall_scene(
-    recall_data: SceneRecallRequest
+    recall_data: SceneRecallRequest,
+    session: AsyncSession = Depends(get_session)
 ):
     """Recall a scene (apply its values to fixtures)"""
     daemon = get_daemon_instance()
@@ -152,6 +154,11 @@ async def recall_scene(
             detail="Lighting controller not available"
         )
 
+    # Get scene name for broadcast
+    scene = await session.get(Scene, recall_data.scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
     # Use scene engine to recall
     success = await daemon.lighting_controller.scenes.recall_scene(
         scene_id=recall_data.scene_id,
@@ -159,6 +166,12 @@ async def recall_scene(
     )
 
     if not success:
-        raise HTTPException(status_code=404, detail="Scene not found or recall failed")
+        raise HTTPException(status_code=404, detail="Scene recall failed")
+
+    # Broadcast scene recalled event
+    await broadcast_scene_recalled(
+        scene_id=recall_data.scene_id,
+        scene_name=scene.name
+    )
 
     return {"message": "Scene recalled successfully"}

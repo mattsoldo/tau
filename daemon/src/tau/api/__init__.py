@@ -2,10 +2,12 @@
 Tau Lighting Control API
 """
 from typing import Optional
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+import uuid
 
 from tau.config import Settings
+from tau.api.websocket import connection_manager
 
 # Global reference to daemon (set by main.py)
 _daemon_instance: Optional[object] = None
@@ -82,6 +84,68 @@ def create_app(settings: Settings) -> FastAPI:
             response["lighting"] = daemon.lighting_controller.get_statistics()
 
         return response
+
+    # WebSocket endpoint
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """
+        WebSocket endpoint for real-time updates
+
+        Clients can connect to receive real-time notifications about:
+        - Fixture state changes
+        - Group state changes
+        - Scene recalls
+        - Circadian adjustments
+        - System status updates
+        """
+        connection_id = str(uuid.uuid4())
+        await connection_manager.connect(websocket, connection_id)
+
+        try:
+            while True:
+                # Receive messages from client (for subscription management, etc.)
+                data = await websocket.receive_json()
+
+                # Handle subscription requests
+                if data.get("action") == "subscribe":
+                    event_types = data.get("event_types", [])
+                    connection_manager.subscribe(connection_id, event_types)
+                    await connection_manager.send_personal_message(
+                        {
+                            "type": "subscription",
+                            "status": "subscribed",
+                            "event_types": event_types
+                        },
+                        connection_id
+                    )
+
+                elif data.get("action") == "unsubscribe":
+                    event_types = data.get("event_types", [])
+                    connection_manager.unsubscribe(connection_id, event_types)
+                    await connection_manager.send_personal_message(
+                        {
+                            "type": "subscription",
+                            "status": "unsubscribed",
+                            "event_types": event_types
+                        },
+                        connection_id
+                    )
+
+                elif data.get("action") == "ping":
+                    # Respond to ping with pong
+                    await connection_manager.send_personal_message(
+                        {"type": "pong"},
+                        connection_id
+                    )
+
+        except WebSocketDisconnect:
+            connection_manager.disconnect(connection_id)
+
+    # WebSocket statistics endpoint
+    @app.get("/ws/stats")
+    async def websocket_stats():
+        """Get WebSocket connection statistics"""
+        return connection_manager.get_statistics()
 
     # Register API routers
     from tau.api.routes import fixtures, groups, scenes, control, circadian
