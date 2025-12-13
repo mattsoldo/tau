@@ -13,7 +13,7 @@ from tau.hardware import HardwareManager
 from tau.logic.circadian import CircadianEngine
 from tau.logic.scenes import SceneEngine
 from tau.logic.switches import SwitchHandler
-from tau.database import get_session
+from tau.database import get_db_session
 
 logger = structlog.get_logger(__name__)
 
@@ -90,12 +90,16 @@ class LightingController:
     async def _load_circadian_mappings(self) -> None:
         """Load which groups have circadian profiles enabled"""
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 from sqlalchemy import select
+                from sqlalchemy.orm import selectinload
                 from tau.models.groups import Group
 
                 # Load all groups with circadian profiles
-                query = select(Group).where(Group.circadian_profile_id.isnot(None))
+                # Eagerly load the 'state' relationship to avoid lazy-loading issues
+                query = select(Group).where(Group.circadian_profile_id.isnot(None)).options(
+                    selectinload(Group.state)
+                )
                 result = await session.execute(query)
                 groups = result.scalars().all()
 

@@ -9,7 +9,7 @@ from datetime import datetime, time
 from typing import Dict, List, Optional, Tuple
 import structlog
 
-from tau.database import get_session
+from tau.database import get_db_session
 from tau.models import CircadianProfile
 
 logger = structlog.get_logger(__name__)
@@ -76,7 +76,7 @@ class CircadianEngine:
             True if loaded successfully, False otherwise
         """
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 profile = await session.get(CircadianProfile, profile_id)
 
                 if not profile:
@@ -84,9 +84,10 @@ class CircadianEngine:
                     return False
 
                 # Parse keyframes from JSONB data
+                # Note: Database model uses 'curve_points' field
                 keyframes = []
-                for kf_data in profile.keyframes:
-                    # keyframes is a list of dicts like:
+                for kf_data in profile.curve_points:
+                    # curve_points is a list of dicts like:
                     # {"time": "06:00:00", "brightness": 0.3, "cct": 2700}
                     time_str = kf_data["time"]
                     brightness = float(kf_data["brightness"])

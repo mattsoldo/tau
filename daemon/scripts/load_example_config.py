@@ -19,7 +19,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from tau.database import init_database, get_session
+from tau.database import init_database, get_db_session
 from tau.config import get_settings
 from tau.models.fixtures import FixtureModel, Fixture
 from tau.models.groups import Group, GroupFixture
@@ -41,7 +41,7 @@ async def load_configuration(config_file: str):
     settings = get_settings()
     await init_database(settings.database_url)
 
-    async with get_session() as session:
+    async with get_db_session() as session:
         # Track created objects for reference lookups
         fixture_models_map = {}
         fixtures_map = {}

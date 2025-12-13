@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import structlog
 from datetime import datetime
 
-from tau.database import get_session
+from tau.database import get_db_session
 from tau.models.scenes import Scene, SceneValue
 from tau.models.fixtures import Fixture
 from tau.control.state_manager import StateManager
@@ -56,7 +56,7 @@ class SceneEngine:
             True if loaded successfully, False otherwise
         """
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 scene = await session.get(Scene, scene_id)
 
                 if not scene:
@@ -110,7 +110,7 @@ class SceneEngine:
             ID of created scene, or None if failed
         """
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 # Determine which fixtures to capture
                 if fixture_ids is None:
                     # Get all fixtures from database
@@ -240,7 +240,7 @@ class SceneEngine:
             Dictionary with scene info, or None if not found
         """
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 scene = await session.get(Scene, scene_id)
 
                 if not scene:
@@ -276,7 +276,7 @@ class SceneEngine:
             List of scene info dictionaries
         """
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 from sqlalchemy import select
 
                 query = select(Scene)
@@ -315,7 +315,7 @@ class SceneEngine:
             True if deleted successfully, False otherwise
         """
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 scene = await session.get(Scene, scene_id)
 
                 if not scene:

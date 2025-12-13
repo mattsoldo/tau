@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from tau.control.state_manager import StateManager
-from tau.database import get_session
+from tau.database import get_db_session
 from tau.models import (
     Fixture,
     Group,
@@ -51,7 +51,7 @@ class ConfigLoader:
         logger.info("loading_configuration")
 
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 # Load fixtures
                 fixture_count = await self._load_fixtures(session)
 

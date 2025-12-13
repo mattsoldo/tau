@@ -91,9 +91,13 @@ async def close_database():
         await engine.dispose()
 
 
-@asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get an async database session"""
+    """
+    Get an async database session for FastAPI dependency injection.
+
+    This is an async generator that FastAPI's Depends() will handle automatically.
+    Do NOT use @asynccontextmanager decorator here as FastAPI expects a plain async generator.
+    """
     if async_session_maker is None:
         raise RuntimeError("Database not initialized. Call init_database() first.")
 
@@ -108,7 +112,26 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+@asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for FastAPI to get database session"""
-    async with get_session() as session:
-        yield session
+    """
+    Get an async database session as a context manager for use in application code.
+
+    Use this function with 'async with' in your application code:
+        async with get_db_session() as session:
+            # use session here
+
+    For FastAPI dependency injection, use get_session() instead (without @asynccontextmanager).
+    """
+    if async_session_maker is None:
+        raise RuntimeError("Database not initialized. Call init_database() first.")
+
+    async with async_session_maker() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

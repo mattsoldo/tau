@@ -9,7 +9,7 @@ from typing import Optional
 import structlog
 
 from tau.control.state_manager import StateManager
-from tau.database import get_session
+from tau.database import get_db_session
 from tau.models import FixtureState, GroupState
 
 logger = structlog.get_logger(__name__)
@@ -53,7 +53,7 @@ class StatePersistence:
         start_time = datetime.now()
 
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 # Save fixture states
                 fixture_count = await self._save_fixture_states(session)
 

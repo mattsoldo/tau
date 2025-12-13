@@ -11,7 +11,7 @@ from enum import Enum
 import time
 import structlog
 
-from tau.database import get_session
+from tau.database import get_db_session
 from tau.models.switches import Switch, SwitchModel
 from tau.control.state_manager import StateManager
 from tau.hardware import HardwareManager
@@ -87,7 +87,7 @@ class SwitchHandler:
             Number of switches loaded
         """
         try:
-            async with get_session() as session:
+            async with get_db_session() as session:
                 from sqlalchemy import select
                 from sqlalchemy.orm import selectinload
 
@@ -137,7 +137,8 @@ class SwitchHandler:
                 )
                 if voltage:
                     # Consider > 1.5V as pressed (TTL logic)
-                    digital_value = voltage[0] > 1.5
+                    # voltage is a dict mapping channel to value
+                    digital_value = voltage.get(switch.labjack_digital_pin, 0.0) > 1.5
 
             if model.requires_analog_pin and switch.labjack_analog_pin is not None:
                 # Read analog pin (for rotary encoders, analog dimmers)
@@ -146,7 +147,8 @@ class SwitchHandler:
                 )
                 if voltage:
                     # Normalize 0-2.4V to 0.0-1.0
-                    analog_value = min(1.0, voltage[0] / 2.4)
+                    # voltage is a dict mapping channel to value
+                    analog_value = min(1.0, voltage.get(switch.labjack_analog_pin, 0.0) / 2.4)
 
             # Process based on input type
             if model.input_type == "switch_simple":
