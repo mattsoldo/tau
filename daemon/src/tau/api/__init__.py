@@ -83,11 +83,13 @@ def create_app(settings: Settings) -> FastAPI:
 
         return response
 
-    # TODO: Register API routers in Phase 5
-    # from tau.api.routes import fixtures, groups, scenes, control
-    # app.include_router(fixtures.router, prefix="/api/fixtures", tags=["fixtures"])
-    # app.include_router(groups.router, prefix="/api/groups", tags=["groups"])
-    # app.include_router(scenes.router, prefix="/api/scenes", tags=["scenes"])
-    # app.include_router(control.router, prefix="/api/control", tags=["control"])
+    # Register API routers
+    from tau.api.routes import fixtures, groups, scenes, control, circadian
+
+    app.include_router(fixtures.router, prefix="/api/fixtures", tags=["fixtures"])
+    app.include_router(groups.router, prefix="/api/groups", tags=["groups"])
+    app.include_router(scenes.router, prefix="/api/scenes", tags=["scenes"])
+    app.include_router(control.router, prefix="/api/control", tags=["control"])
+    app.include_router(circadian.router, prefix="/api/circadian", tags=["circadian"])
 
     return app
