@@ -22,6 +22,7 @@ from tau.control import (
     ConfigLoader,
 )
 from tau.hardware import HardwareManager
+from tau.logic import LightingController
 
 logger = structlog.get_logger(__name__)
 
@@ -39,6 +40,7 @@ class TauDaemon:
         self.persistence: Optional[StatePersistence] = None
         self.config_loader: Optional[ConfigLoader] = None
         self.hardware_manager: Optional[HardwareManager] = None
+        self.lighting_controller: Optional[LightingController] = None
 
     async def startup(self):
         """Initialize all daemon components"""
@@ -72,6 +74,17 @@ class TauDaemon:
             logger.error("hardware_initialization_failed")
             raise RuntimeError("Failed to initialize hardware")
 
+        # Initialize lighting controller
+        logger.info("initializing_lighting_controller")
+        self.lighting_controller = LightingController(
+            self.state_manager,
+            self.hardware_manager
+        )
+        controller_ok = await self.lighting_controller.initialize()
+        if not controller_ok:
+            logger.error("lighting_controller_initialization_failed")
+            raise RuntimeError("Failed to initialize lighting controller")
+
         # Create scheduler for periodic tasks
         self.scheduler = Scheduler()
 
@@ -87,6 +100,9 @@ class TauDaemon:
 
         # Register scheduler as a callback (runs every loop iteration)
         self.event_loop.register_callback(self.scheduler.tick)
+
+        # Register lighting controller (runs every loop iteration)
+        self.event_loop.register_callback(self.lighting_controller.process_control_loop)
 
         # Start control loop
         logger.info("starting_control_loop", frequency_hz=self.settings.control_loop_hz)

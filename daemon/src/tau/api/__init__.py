@@ -78,6 +78,9 @@ def create_app(settings: Settings) -> FastAPI:
         if daemon and daemon.hardware_manager:
             response["hardware"] = daemon.hardware_manager.get_statistics()
 
+        if daemon and daemon.lighting_controller:
+            response["lighting"] = daemon.lighting_controller.get_statistics()
+
         return response
 
     # TODO: Register API routers in Phase 5
