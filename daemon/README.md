@@ -436,9 +436,10 @@ Event types:
 
 Interactive API documentation is available when the daemon is running:
 
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **OpenAPI JSON**: http://localhost:8000/openapi.json
+- **Swagger UI**: http://localhost:8000/docs - Interactive API explorer
+- **ReDoc**: http://localhost:8000/redoc - Alternative documentation UI
+- **OpenAPI JSON**: http://localhost:8000/openapi.json - Machine-readable schema
+- **API Reference**: [API_REFERENCE.md](API_REFERENCE.md) - Complete offline reference with examples
 
 ## Development
 
@@ -764,8 +765,13 @@ Contributions are welcome! Please:
 
 ## Support
 
-- **Documentation**: See `examples/README.md` and `deployment/DEPLOYMENT.md`
-- **API Docs**: http://localhost:8000/docs
+- **Documentation**:
+  - [README.md](README.md) - Project overview and quick start
+  - [API_REFERENCE.md](API_REFERENCE.md) - Complete API documentation with examples
+  - [deployment/DEPLOYMENT.md](deployment/DEPLOYMENT.md) - Production deployment guide
+  - [examples/README.md](examples/README.md) - Configuration documentation
+  - [tests/test_summary.md](tests/test_summary.md) - Test coverage report
+- **API Docs**: http://localhost:8000/docs - Interactive Swagger UI
 - **Issues**: https://github.com/yourusername/tau-daemon/issues
 - **Discussions**: https://github.com/yourusername/tau-daemon/discussions
 
