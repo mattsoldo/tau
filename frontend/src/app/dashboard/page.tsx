@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -98,61 +98,27 @@ export default function DashboardPage() {
   );
 
   // Refs for tracking switch input state (not reactive, used in intervals)
-  const switchRefs = useRef<{
-    lastState: boolean[];
-    pressTime: (number | null)[];
-    tapCount: number[];
-    holdInterval: (NodeJS.Timeout | null)[];
-    tapTimeout: (NodeJS.Timeout | null)[];
-    rampDirection: number[];
-  }>({
-    lastState: Array(8).fill(false),
-    pressTime: Array(8).fill(null),
-    tapCount: Array(8).fill(0),
-    holdInterval: Array(8).fill(null),
-    tapTimeout: Array(8).fill(null),
-    rampDirection: Array(8).fill(1),
+  const switchRefs = useRef({
+    lastState: Array(8).fill(false) as boolean[],
+    pressTime: Array(8).fill(null) as (number | null)[],
+    tapCount: Array(8).fill(0) as number[],
+    holdInterval: Array(8).fill(null) as (ReturnType<typeof setTimeout> | null)[],
+    tapTimeout: Array(8).fill(null) as (ReturnType<typeof setTimeout> | null)[],
+    rampDirection: Array(8).fill(1) as number[],
   });
 
   // Get current light state for a channel (for use in callbacks)
   const lightStatesRef = useRef(lightStates);
-  useEffect(() => {
-    lightStatesRef.current = lightStates;
-  }, [lightStates]);
-
-  // Execute tap action (PRD Section 10.2)
-  const executeTapAction = useCallback((channel: number, count: number) => {
-    setLightStates(prev => {
-      const newStates = [...prev];
-      const current = newStates[channel];
-
-      switch (count) {
-        case 1:
-          // Single tap - toggle on/off
-          if (current.lightOn) {
-            newStates[channel] = { brightness: 0, lightOn: false, scene: 'off' };
-          } else {
-            newStates[channel] = { brightness: 100, lightOn: true, scene: 'full' };
-          }
-          break;
-        case 2:
-          // Double tap - Scene 1 (75%)
-          newStates[channel] = { brightness: SCENE_1_BRIGHTNESS, lightOn: true, scene: 'scene1' };
-          break;
-        case 3:
-        default:
-          // Triple tap - Scene 2 (25%)
-          newStates[channel] = { brightness: SCENE_2_BRIGHTNESS, lightOn: true, scene: 'scene2' };
-          break;
-      }
-      return newStates;
-    });
-  }, []);
+  lightStatesRef.current = lightStates;
 
   // Handle switch input for a channel (PRD Section 10.1)
-  const handleSwitchInput = useCallback((channel: number, switchPressed: boolean) => {
+  // This function is intentionally not wrapped in useCallback - it's called from refs
+  const handleSwitchInput = (channel: number, switchPressed: boolean) => {
     const refs = switchRefs.current;
     const wasPressed = refs.lastState[channel];
+
+    // Skip if no state change (edge detection)
+    if (switchPressed === wasPressed) return;
 
     // Rising edge - switch pressed
     if (switchPressed && !wasPressed) {
@@ -201,8 +167,8 @@ export default function DashboardPage() {
 
       // Clear hold interval
       if (refs.holdInterval[channel]) {
-        clearTimeout(refs.holdInterval[channel] as NodeJS.Timeout);
-        clearInterval(refs.holdInterval[channel] as NodeJS.Timeout);
+        clearTimeout(refs.holdInterval[channel]);
+        clearInterval(refs.holdInterval[channel]);
         refs.holdInterval[channel] = null;
       }
 
@@ -212,31 +178,83 @@ export default function DashboardPage() {
 
         // Clear existing tap timeout
         if (refs.tapTimeout[channel]) {
-          clearTimeout(refs.tapTimeout[channel] as NodeJS.Timeout);
+          clearTimeout(refs.tapTimeout[channel]);
         }
 
         // Wait for more taps or execute
         refs.tapTimeout[channel] = setTimeout(() => {
-          executeTapAction(channel, refs.tapCount[channel]);
+          const count = refs.tapCount[channel];
           refs.tapCount[channel] = 0;
           refs.tapTimeout[channel] = null;
+
+          // Execute tap action inline (avoid stale closure)
+          setLightStates(prev => {
+            const newStates = [...prev];
+            const current = newStates[channel];
+
+            switch (count) {
+              case 1:
+                if (current.lightOn) {
+                  newStates[channel] = { brightness: 0, lightOn: false, scene: 'off' };
+                } else {
+                  newStates[channel] = { brightness: 100, lightOn: true, scene: 'full' };
+                }
+                break;
+              case 2:
+                newStates[channel] = { brightness: SCENE_1_BRIGHTNESS, lightOn: true, scene: 'scene1' };
+                break;
+              default:
+                newStates[channel] = { brightness: SCENE_2_BRIGHTNESS, lightOn: true, scene: 'scene2' };
+                break;
+            }
+            return newStates;
+          });
         }, TAP_WINDOW_MS);
       }
     }
 
     refs.lastState[channel] = switchPressed;
-  }, [executeTapAction]);
+  };
 
-  // Process digital inputs when status updates
+  // Store digital inputs in ref to track across polls
+  const digitalInputsRef = useRef<Record<string, boolean>>({});
+
+  // Fast polling for digital inputs (100ms for responsive tap detection)
   useEffect(() => {
-    if (!status?.hardware?.labjack?.digital_inputs) return;
+    let mounted = true;
 
-    const inputs = status.hardware.labjack.digital_inputs;
-    for (let i = 0; i < 8; i++) {
-      const isPressed = inputs[String(i)] === true;
-      handleSwitchInput(i, isPressed);
-    }
-  }, [status?.hardware?.labjack?.digital_inputs, handleSwitchInput]);
+    const pollDigitalInputs = async () => {
+      if (!mounted) return;
+
+      try {
+        const response = await fetch(`${API_URL}/api/labjack/status`);
+        if (!response.ok) return;
+
+        const data = await response.json();
+        const inputs = data.statistics?.digital_inputs || {};
+
+        // Process each channel
+        for (let i = 0; i < 8; i++) {
+          const key = String(i);
+          const isPressed = inputs[key] === true;
+          handleSwitchInput(i, isPressed);
+        }
+
+        digitalInputsRef.current = inputs;
+      } catch {
+        // Ignore errors in fast poll
+      }
+    };
+
+    // Poll every 100ms for responsive input detection
+    const interval = setInterval(pollDigitalInputs, 100);
+    pollDigitalInputs();
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
