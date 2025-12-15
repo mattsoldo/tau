@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LabJack Monitor - Tau Lighting System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        .header {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #2a5298; margin-bottom: 10px; }
+        .status-bar { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+        .status-item { display: flex; align-items: center; gap: 10px; }
+        .status-indicator {
+            width: 12px; height: 12px; border-radius: 50%; background: #ccc;
+        }
+        .status-indicator.online {
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+        .status-indicator.offline { background: #f44336; }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
+        }
+        .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .card h2 { color: #2a5298; margin-bottom: 15px; font-size: 1.2em; }
+        .channel-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        .channel {
+            background: #f5f5f5;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .channel.high {
+            background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+            border-color: #4caf50;
+        }
+        .channel.low {
+            background: #f5f5f5;
+            border-color: #ddd;
+        }
+        .channel-label { font-weight: bold; margin-bottom: 5px; color: #555; }
+        .channel-value { font-size: 1.1em; font-weight: bold; color: #2a5298; }
+        .channel-state {
+            font-size: 0.8em;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-top: 5px;
+            display: inline-block;
+        }
+        .channel-state.high { background: #4caf50; color: white; }
+        .channel-state.low { background: #9e9e9e; color: white; }
+
+        /* Light Simulator */
+        .brightness-card {
+            background: #1a1a1a;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+        .brightness-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, #ff9800, #ffeb3b);
+            opacity: var(--light-opacity, 0);
+            transition: opacity 0.2s ease-out;
+            z-index: 0;
+        }
+        .brightness-card > * {
+            position: relative;
+            z-index: 1;
+        }
+        .brightness-card h2 { color: white; }
+        .scene-indicator {
+            text-align: center;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            padding: 5px 15px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 20px;
+            display: inline-block;
+        }
+        .scene-indicator.scene-off { background: rgba(100,100,100,0.3); }
+        .scene-indicator.scene-full { background: rgba(255,200,0,0.4); }
+        .scene-indicator.scene-1 { background: rgba(100,200,255,0.4); }
+        .scene-indicator.scene-2 { background: rgba(200,100,255,0.4); }
+        .brightness-display {
+            text-align: center;
+            padding: 20px;
+        }
+        .brightness-value {
+            font-size: 4em;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .brightness-bar {
+            height: 30px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-top: 15px;
+        }
+        .brightness-fill {
+            height: 100%;
+            background: white;
+            transition: width 0.2s ease-out;
+            border-radius: 15px;
+        }
+        .brightness-controls {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+        .brightness-controls span {
+            padding: 5px 10px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 5px;
+        }
+        .brightness-controls span.active {
+            background: rgba(255,255,255,0.5);
+            font-weight: bold;
+        }
+        .no-connection {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .no-connection .brightness-value::after {
+            content: ' (No Connection)';
+            font-size: 0.3em;
+            display: block;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 10px;
+        }
+        .stat-item {
+            text-align: center;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+        .stat-label { font-size: 0.8em; color: #666; }
+        .stat-value { font-size: 1.3em; font-weight: bold; color: #2a5298; }
+        .event-log {
+            background: #f5f5f5;
+            border-radius: 5px;
+            padding: 10px;
+            height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+        .event-entry { padding: 3px 0; border-bottom: 1px solid #e0e0e0; }
+        .event-time { color: #666; margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>LabJack U3 Monitor</h1>
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="status-indicator" id="connection-status"></span>
+                <span id="connection-text">Checking...</span>
+            </div>
+            <div class="status-item">
+                <strong>Model:</strong>
+                <span id="model-display">--</span>
+            </div>
+            <div class="status-item">
+                <strong>Mode:</strong>
+                <span id="mode-display">--</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Light Simulator -->
+        <div class="card brightness-card" id="brightness-card">
+            <h2>Light Simulator</h2>
+            <div class="brightness-display">
+                <div style="text-align: center;">
+                    <span class="scene-indicator scene-off" id="scene-indicator">OFF</span>
+                </div>
+                <div class="brightness-value" id="brightness-value">0%</div>
+                <div class="brightness-bar">
+                    <div class="brightness-fill" id="brightness-fill" style="width: 0%"></div>
+                </div>
+                <div class="brightness-controls">
+                    <span id="light-state">OFF</span>
+                    <span id="fio0-indicator">FIO0: --</span>
+                    <span id="action-indicator">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- FIO Channels -->
+        <div class="card">
+            <h2>FIO Channels (0-7)</h2>
+            <div class="channel-grid" id="fio-channels"></div>
+        </div>
+
+        <!-- EIO Channels -->
+        <div class="card">
+            <h2>EIO Channels (8-15)</h2>
+            <div class="channel-grid" id="eio-channels"></div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="card">
+            <h2>Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Reads</div>
+                    <div class="stat-value" id="read-count">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Writes</div>
+                    <div class="stat-value" id="write-count">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Errors</div>
+                    <div class="stat-value" id="error-count">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Event Log -->
+        <div class="card">
+            <h2>Event Log</h2>
+            <div class="event-log" id="event-log"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let isConnected = false;
+
+        // Brightness simulation state (PRD Section 10.1)
+        let brightness = 0;
+        let lightOn = false;
+
+        // FIO0 switch input tracking
+        let lastSwitchState = false;
+        let switchPressTime = null;
+        let holdInterval = null;
+        let rampDirection = 1;  // 1 = up, -1 = down
+
+        // Multi-tap detection (PRD Section 10.2)
+        let tapCount = 0;
+        let tapTimeout = null;
+
+        // Timing constants (from PRD)
+        const TAP_WINDOW_MS = 500;      // Default tap window (200-900ms configurable)
+        const RAMP_INTERVAL_MS = 50;    // How often to update during hold
+        const RAMP_STEP = 2;            // Brightness change per interval
+
+        // Scene presets
+        const SCENE_1_BRIGHTNESS = 75;  // Double-click
+        const SCENE_2_BRIGHTNESS = 25;  // Triple-click
+
+        // Initialize channel displays
+        function initializeChannels() {
+            const fioContainer = document.getElementById('fio-channels');
+            const eioContainer = document.getElementById('eio-channels');
+
+            fioContainer.innerHTML = '';
+            eioContainer.innerHTML = '';
+
+            for (let i = 0; i < 8; i++) {
+                fioContainer.innerHTML += `
+                    <div class="channel low" id="ch-${i}">
+                        <div class="channel-label">FIO${i}</div>
+                        <div class="channel-value" id="val-${i}">--</div>
+                        <div class="channel-state low" id="state-${i}">LOW</div>
+                    </div>
+                `;
+            }
+
+            for (let i = 8; i < 16; i++) {
+                eioContainer.innerHTML += `
+                    <div class="channel low" id="ch-${i}">
+                        <div class="channel-label">EIO${i-8}</div>
+                        <div class="channel-value" id="val-${i}">--</div>
+                        <div class="channel-state low" id="state-${i}">LOW</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Log event
+        function logEvent(message) {
+            const log = document.getElementById('event-log');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'event-entry';
+            entry.innerHTML = `<span class="event-time">${time}</span>${message}`;
+            log.insertBefore(entry, log.firstChild);
+            while (log.children.length > 50) log.removeChild(log.lastChild);
+        }
+
+        // Current scene tracking
+        let currentScene = 'off';  // 'off', 'full', 'scene1', 'scene2', 'custom'
+
+        // Update brightness display
+        function updateBrightnessDisplay() {
+            document.getElementById('brightness-value').textContent = `${Math.round(brightness)}%`;
+            document.getElementById('brightness-fill').style.width = `${brightness}%`;
+            document.getElementById('light-state').textContent = lightOn ? 'ON' : 'OFF';
+            document.getElementById('light-state').className = lightOn ? 'active' : '';
+
+            // Update card background opacity based on brightness
+            const card = document.getElementById('brightness-card');
+            card.style.setProperty('--light-opacity', brightness / 100);
+
+            // Update scene indicator
+            const sceneEl = document.getElementById('scene-indicator');
+            sceneEl.className = 'scene-indicator';
+
+            if (!lightOn || brightness === 0) {
+                sceneEl.textContent = 'OFF';
+                sceneEl.classList.add('scene-off');
+                currentScene = 'off';
+            } else if (brightness === 100) {
+                sceneEl.textContent = 'FULL';
+                sceneEl.classList.add('scene-full');
+                currentScene = 'full';
+            } else if (brightness === SCENE_1_BRIGHTNESS) {
+                sceneEl.textContent = 'SCENE 1';
+                sceneEl.classList.add('scene-1');
+                currentScene = 'scene1';
+            } else if (brightness === SCENE_2_BRIGHTNESS) {
+                sceneEl.textContent = 'SCENE 2';
+                sceneEl.classList.add('scene-2');
+                currentScene = 'scene2';
+            } else {
+                sceneEl.textContent = 'CUSTOM';
+                currentScene = 'custom';
+            }
+        }
+
+        // Execute tap action based on tap count (PRD Section 10.2)
+        function executeTapAction(count, actionIndicator) {
+            switch (count) {
+                case 1:
+                    // Single tap - toggle on/off
+                    if (lightOn) {
+                        lightOn = false;
+                        brightness = 0;
+                        actionIndicator.textContent = 'TAP → OFF';
+                        logEvent('Single tap - light OFF');
+                    } else {
+                        lightOn = true;
+                        brightness = 100;
+                        actionIndicator.textContent = 'TAP → ON';
+                        logEvent('Single tap - light ON at 100%');
+                    }
+                    break;
+
+                case 2:
+                    // Double tap - Scene 1 (75%)
+                    lightOn = true;
+                    brightness = SCENE_1_BRIGHTNESS;
+                    actionIndicator.textContent = `DOUBLE → ${SCENE_1_BRIGHTNESS}%`;
+                    logEvent(`Double tap - Scene 1 at ${SCENE_1_BRIGHTNESS}%`);
+                    break;
+
+                case 3:
+                default:
+                    // Triple tap (or more) - Scene 2 (25%)
+                    lightOn = true;
+                    brightness = SCENE_2_BRIGHTNESS;
+                    actionIndicator.textContent = `TRIPLE → ${SCENE_2_BRIGHTNESS}%`;
+                    logEvent(`Triple tap - Scene 2 at ${SCENE_2_BRIGHTNESS}%`);
+                    break;
+            }
+            updateBrightnessDisplay();
+        }
+
+        // Handle FIO0 input (PRD Section 10.1 - Retractive Switch)
+        // Note: HIGH = switch pressed, LOW = switch released
+        function handleSwitchInput(switchPressed) {
+            const fioIndicator = document.getElementById('fio0-indicator');
+            const actionIndicator = document.getElementById('action-indicator');
+
+            fioIndicator.textContent = `FIO0: ${switchPressed ? 'PRESSED' : 'RELEASED'}`;
+            fioIndicator.className = switchPressed ? 'active' : '';
+
+            // Detect press (rising edge - HIGH means switch pressed)
+            if (switchPressed && !lastSwitchState) {
+                switchPressTime = Date.now();
+                actionIndicator.textContent = 'PRESSED';
+
+                // Start hold detection - begin ramping after TAP_WINDOW
+                holdInterval = setTimeout(() => {
+                    // Hold detected - start ramping
+                    if (lightOn) {
+                        // Light ON + Hold → ramp down
+                        rampDirection = -1;
+                        actionIndicator.textContent = 'RAMPING DOWN';
+                        logEvent('Hold detected - ramping DOWN');
+                    } else {
+                        // Light OFF + Hold → ramp up from 0
+                        brightness = 0;
+                        rampDirection = 1;
+                        lightOn = true;
+                        actionIndicator.textContent = 'RAMPING UP';
+                        logEvent('Hold detected - ramping UP from 0%');
+                    }
+
+                    // Start continuous ramping
+                    holdInterval = setInterval(() => {
+                        brightness = Math.max(0, Math.min(100, brightness + (rampDirection * RAMP_STEP)));
+                        updateBrightnessDisplay();
+
+                        // Turn off if ramped to 0
+                        if (brightness <= 0) {
+                            lightOn = false;
+                        }
+                    }, RAMP_INTERVAL_MS);
+                }, TAP_WINDOW_MS);
+            }
+
+            // Detect release (falling edge - LOW means switch released)
+            if (!switchPressed && lastSwitchState) {
+                const pressDuration = Date.now() - switchPressTime;
+
+                // Clear any hold interval
+                if (holdInterval) {
+                    clearTimeout(holdInterval);
+                    clearInterval(holdInterval);
+                    holdInterval = null;
+                }
+
+                // Was it a tap (< TAP_WINDOW)?
+                if (pressDuration < TAP_WINDOW_MS) {
+                    // Count this tap
+                    tapCount++;
+                    actionIndicator.textContent = `TAP x${tapCount}`;
+
+                    // Clear existing tap timeout
+                    if (tapTimeout) {
+                        clearTimeout(tapTimeout);
+                    }
+
+                    // Wait for more taps or execute after TAP_WINDOW
+                    tapTimeout = setTimeout(() => {
+                        executeTapAction(tapCount, actionIndicator);
+                        tapCount = 0;
+                        tapTimeout = null;
+                    }, TAP_WINDOW_MS);
+                } else {
+                    actionIndicator.textContent = 'RELEASED';
+                    logEvent(`Released at ${Math.round(brightness)}%`);
+                    updateBrightnessDisplay();
+                }
+            }
+
+            lastSwitchState = switchPressed;
+        }
+
+        // Poll status
+        async function pollStatus() {
+            try {
+                const response = await fetch(`${API_URL}/api/labjack/status`);
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+                isConnected = data.connected;
+
+                // Update connection status
+                const statusEl = document.getElementById('connection-status');
+                const textEl = document.getElementById('connection-text');
+                const modelEl = document.getElementById('model-display');
+                const modeEl = document.getElementById('mode-display');
+                const brightnessCard = document.getElementById('brightness-card');
+
+                if (isConnected) {
+                    statusEl.className = 'status-indicator online';
+                    textEl.textContent = 'Connected';
+                    modelEl.textContent = data.model || 'U3';
+                    modeEl.textContent = data.mock_mode ? 'Mock' : 'Hardware';
+                    brightnessCard.classList.remove('no-connection');
+                } else {
+                    statusEl.className = 'status-indicator offline';
+                    textEl.textContent = 'Disconnected';
+                    brightnessCard.classList.add('no-connection');
+                }
+
+                // Update statistics
+                const stats = data.statistics || {};
+                document.getElementById('read-count').textContent = stats.read_count || 0;
+                document.getElementById('write-count').textContent = stats.write_count || 0;
+                document.getElementById('error-count').textContent = stats.error_count || 0;
+
+                // Update channels (API returns string keys like "0", "1", etc.)
+                const digitalInputs = stats.digital_inputs || {};
+                const analogInputs = stats.analog_inputs || {};
+                const channelModes = stats.channel_modes || {};
+
+                for (let i = 0; i < 16; i++) {
+                    const chEl = document.getElementById(`ch-${i}`);
+                    const valEl = document.getElementById(`val-${i}`);
+                    const stateEl = document.getElementById(`state-${i}`);
+
+                    if (!chEl) continue;
+
+                    const key = String(i);  // API uses string keys
+                    const mode = channelModes[key] || 'analog';
+                    const isDigital = mode === 'digital-in' || mode === 'digital-out';
+                    const digitalState = digitalInputs[key] === true;
+                    const analogValue = parseFloat(analogInputs[key]) || 0;
+
+                    if (isDigital) {
+                        valEl.textContent = digitalState ? 'HIGH' : 'LOW';
+                        stateEl.textContent = digitalState ? 'HIGH' : 'LOW';
+                        stateEl.className = `channel-state ${digitalState ? 'high' : 'low'}`;
+                        chEl.className = `channel ${digitalState ? 'high' : 'low'}`;
+                    } else {
+                        valEl.textContent = `${analogValue.toFixed(2)}V`;
+                        const isHigh = analogValue > 1.5;
+                        stateEl.textContent = isHigh ? 'HIGH' : 'LOW';
+                        stateEl.className = `channel-state ${isHigh ? 'high' : 'low'}`;
+                        chEl.className = `channel ${isHigh ? 'high' : 'low'}`;
+                    }
+                }
+
+                // Update brightness from FIO0 (only if connected)
+                if (isConnected) {
+                    const fio0 = digitalInputs['0'] === true;
+                    handleSwitchInput(fio0);
+                }
+
+            } catch (error) {
+                console.error('Poll error:', error);
+                document.getElementById('connection-status').className = 'status-indicator offline';
+                document.getElementById('connection-text').textContent = 'Connection Error';
+                document.getElementById('brightness-card').classList.add('no-connection');
+            }
+        }
+
+        // Configure all FIO channels (0-7) as digital inputs
+        async function configureInputs() {
+            try {
+                for (let i = 0; i < 8; i++) {
+                    await fetch(`${API_URL}/api/labjack/configure-channel`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ channel: i, mode: 'digital-in' })
+                    });
+                }
+                logEvent('Configured FIO0-FIO7 as digital inputs');
+            } catch (error) {
+                logEvent('Error configuring inputs: ' + error.message);
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            initializeChannels();
+            await configureInputs();
+            setInterval(pollStatus, 100); // Poll every 100ms
+            pollStatus();
+            logEvent('Monitor started');
+        });
+    </script>
+</body>
+</html>
