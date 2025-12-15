@@ -22,6 +22,17 @@ class FixtureModelCreate(FixtureModelBase):
     pass
 
 
+class FixtureModelUpdate(BaseModel):
+    manufacturer: Optional[str] = Field(None, max_length=100)
+    model: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = None
+    type: Optional[str] = Field(None, pattern="^(simple_dimmable|tunable_white|dim_to_warm|non_dimmable|other)$")
+    dmx_footprint: Optional[int] = Field(None, ge=1, le=512)
+    cct_min_kelvin: Optional[int] = Field(None, ge=1000, le=10000)
+    cct_max_kelvin: Optional[int] = Field(None, ge=1000, le=10000)
+    mixing_type: Optional[str] = Field(None, pattern="^(linear|perceptual|logarithmic|custom)$")
+
+
 class FixtureModelResponse(FixtureModelBase):
     id: int
     created_at: datetime

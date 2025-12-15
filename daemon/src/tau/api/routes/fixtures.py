@@ -11,6 +11,7 @@ from tau.models.fixtures import Fixture, FixtureModel
 from tau.models.state import FixtureState
 from tau.api.schemas import (
     FixtureModelCreate,
+    FixtureModelUpdate,
     FixtureModelResponse,
     FixtureCreate,
     FixtureUpdate,
@@ -54,6 +55,27 @@ async def get_fixture_model(
     model = await session.get(FixtureModel, model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Fixture model not found")
+    return model
+
+
+@router.patch("/models/{model_id}", response_model=FixtureModelResponse)
+async def update_fixture_model(
+    model_id: int,
+    model_data: FixtureModelUpdate,
+    session: AsyncSession = Depends(get_session)
+):
+    """Update a fixture model"""
+    model = await session.get(FixtureModel, model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Fixture model not found")
+
+    # Update fields
+    update_data = model_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(model, field, value)
+
+    await session.commit()
+    await session.refresh(model)
     return model
 
 

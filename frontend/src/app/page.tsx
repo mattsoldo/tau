@@ -28,6 +28,20 @@ export default function HomePage() {
             </div>
           </Link>
 
+          {/* Configuration */}
+          <Link href="/config" className="block bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-lg shadow-lg p-6 text-white hover:from-indigo-500 hover:to-indigo-600 transition-all hover:shadow-xl hover:-translate-y-0.5">
+            <h2 className="text-2xl font-semibold mb-2">System Configuration</h2>
+            <p className="text-indigo-200">
+              Configure fixture models, switches, groups, scenes, and circadian profiles
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+              <span>Open Configuration</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
           {/* LabJack Monitor */}
           <a href="http://localhost:8000/labjack_monitor.html" target="_blank" rel="noopener noreferrer" className="block bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg shadow-lg p-6 text-white hover:from-slate-600 hover:to-slate-700 transition-all hover:shadow-xl hover:-translate-y-0.5">
             <h2 className="text-2xl font-semibold mb-2">LabJack Monitor</h2>
