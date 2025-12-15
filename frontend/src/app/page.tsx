@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function HomePage() {
   return (
     <main className="container mx-auto px-4 py-8">
@@ -12,16 +14,39 @@ export default function HomePage() {
         </header>
 
         <div className="grid gap-6">
+          {/* Dashboard CTA */}
+          <Link href="/dashboard" className="block bg-gradient-to-br from-amber-500 to-amber-600 rounded-lg shadow-lg p-6 text-white hover:from-amber-600 hover:to-amber-700 transition-all hover:shadow-xl hover:-translate-y-0.5">
+            <h2 className="text-2xl font-semibold mb-2">System Dashboard</h2>
+            <p className="text-amber-100">
+              View real-time system status, hardware metrics, and fixture states
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+              <span>Open Dashboard</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
+          {/* LabJack Monitor */}
+          <a href="http://localhost:8000/labjack_monitor.html" target="_blank" rel="noopener noreferrer" className="block bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg shadow-lg p-6 text-white hover:from-slate-600 hover:to-slate-700 transition-all hover:shadow-xl hover:-translate-y-0.5">
+            <h2 className="text-2xl font-semibold mb-2">LabJack Monitor</h2>
+            <p className="text-slate-300">
+              Monitor digital I/O channels and test switch behavior with light simulation
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+              <span>Open Monitor</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </div>
+          </a>
+
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-2xl font-semibold mb-4">Welcome to Tau</h2>
             <p className="text-gray-700 mb-4">
               This is the web interface for the Tau smart lighting control system.
-              The system is currently initializing...
             </p>
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
-              <span>Connecting to daemon...</span>
-            </div>
           </div>
 
           <div className="grid md:grid-cols-3 gap-4">

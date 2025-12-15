@@ -2,8 +2,11 @@
 Tau Lighting Control API
 """
 from typing import Optional
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import uuid
 
 from tau.config import Settings
@@ -309,5 +312,23 @@ Use this endpoint to monitor system performance and debug issues.
     app.include_router(control.router, prefix="/api/control", tags=["control"])
     app.include_router(circadian.router, prefix="/api/circadian", tags=["circadian"])
     app.include_router(labjack.router, prefix="/api/labjack", tags=["hardware"])
+
+    # Serve static HTML files (LabJack monitor, etc.)
+    # Navigate from tau/api/__init__.py up to daemon directory
+    static_dir = Path(__file__).resolve().parent.parent.parent.parent
+
+    @app.get("/labjack_monitor.html")
+    async def labjack_monitor():
+        file_path = static_dir / "labjack_monitor.html"
+        if file_path.exists():
+            return FileResponse(file_path, media_type="text/html")
+        return {"error": f"File not found at {file_path}"}
+
+    @app.get("/ola_mock_interface.html")
+    async def ola_interface():
+        file_path = static_dir / "ola_mock_interface.html"
+        if file_path.exists():
+            return FileResponse(file_path, media_type="text/html")
+        return {"error": f"File not found at {file_path}"}
 
     return app
