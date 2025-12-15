@@ -1,9 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Timing constants (PRD Section 10.1-10.2)
+const TAP_WINDOW_MS = 500;
+const RAMP_INTERVAL_MS = 50;
+const RAMP_STEP = 2;
+const SCENE_1_BRIGHTNESS = 75;
+const SCENE_2_BRIGHTNESS = 25;
 
 interface SystemStatus {
   status: string;
@@ -61,6 +68,12 @@ interface Fixture {
   dmx_channel_start: number;
 }
 
+interface LightState {
+  brightness: number;
+  lightOn: boolean;
+  scene: 'off' | 'full' | 'scene1' | 'scene2' | 'custom';
+}
+
 function formatNumber(num: number): string {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
@@ -78,6 +91,152 @@ export default function DashboardPage() {
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [currentTime, setCurrentTime] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Light simulator state for each FIO channel
+  const [lightStates, setLightStates] = useState<LightState[]>(
+    Array(8).fill(null).map(() => ({ brightness: 0, lightOn: false, scene: 'off' as const }))
+  );
+
+  // Refs for tracking switch input state (not reactive, used in intervals)
+  const switchRefs = useRef<{
+    lastState: boolean[];
+    pressTime: (number | null)[];
+    tapCount: number[];
+    holdInterval: (NodeJS.Timeout | null)[];
+    tapTimeout: (NodeJS.Timeout | null)[];
+    rampDirection: number[];
+  }>({
+    lastState: Array(8).fill(false),
+    pressTime: Array(8).fill(null),
+    tapCount: Array(8).fill(0),
+    holdInterval: Array(8).fill(null),
+    tapTimeout: Array(8).fill(null),
+    rampDirection: Array(8).fill(1),
+  });
+
+  // Get current light state for a channel (for use in callbacks)
+  const lightStatesRef = useRef(lightStates);
+  useEffect(() => {
+    lightStatesRef.current = lightStates;
+  }, [lightStates]);
+
+  // Execute tap action (PRD Section 10.2)
+  const executeTapAction = useCallback((channel: number, count: number) => {
+    setLightStates(prev => {
+      const newStates = [...prev];
+      const current = newStates[channel];
+
+      switch (count) {
+        case 1:
+          // Single tap - toggle on/off
+          if (current.lightOn) {
+            newStates[channel] = { brightness: 0, lightOn: false, scene: 'off' };
+          } else {
+            newStates[channel] = { brightness: 100, lightOn: true, scene: 'full' };
+          }
+          break;
+        case 2:
+          // Double tap - Scene 1 (75%)
+          newStates[channel] = { brightness: SCENE_1_BRIGHTNESS, lightOn: true, scene: 'scene1' };
+          break;
+        case 3:
+        default:
+          // Triple tap - Scene 2 (25%)
+          newStates[channel] = { brightness: SCENE_2_BRIGHTNESS, lightOn: true, scene: 'scene2' };
+          break;
+      }
+      return newStates;
+    });
+  }, []);
+
+  // Handle switch input for a channel (PRD Section 10.1)
+  const handleSwitchInput = useCallback((channel: number, switchPressed: boolean) => {
+    const refs = switchRefs.current;
+    const wasPressed = refs.lastState[channel];
+
+    // Rising edge - switch pressed
+    if (switchPressed && !wasPressed) {
+      refs.pressTime[channel] = Date.now();
+
+      // Start hold detection
+      refs.holdInterval[channel] = setTimeout(() => {
+        const currentState = lightStatesRef.current[channel];
+
+        // Start ramping
+        if (currentState.lightOn) {
+          refs.rampDirection[channel] = -1; // Ramp down
+        } else {
+          refs.rampDirection[channel] = 1; // Ramp up
+          setLightStates(prev => {
+            const newStates = [...prev];
+            newStates[channel] = { brightness: 0, lightOn: true, scene: 'custom' };
+            return newStates;
+          });
+        }
+
+        // Continuous ramping
+        refs.holdInterval[channel] = setInterval(() => {
+          setLightStates(prev => {
+            const newStates = [...prev];
+            const current = newStates[channel];
+            const newBrightness = Math.max(0, Math.min(100, current.brightness + (refs.rampDirection[channel] * RAMP_STEP)));
+            const lightOn = newBrightness > 0;
+
+            let scene: LightState['scene'] = 'custom';
+            if (!lightOn || newBrightness === 0) scene = 'off';
+            else if (newBrightness === 100) scene = 'full';
+            else if (newBrightness === SCENE_1_BRIGHTNESS) scene = 'scene1';
+            else if (newBrightness === SCENE_2_BRIGHTNESS) scene = 'scene2';
+
+            newStates[channel] = { brightness: newBrightness, lightOn, scene };
+            return newStates;
+          });
+        }, RAMP_INTERVAL_MS);
+      }, TAP_WINDOW_MS);
+    }
+
+    // Falling edge - switch released
+    if (!switchPressed && wasPressed) {
+      const pressDuration = Date.now() - (refs.pressTime[channel] || 0);
+
+      // Clear hold interval
+      if (refs.holdInterval[channel]) {
+        clearTimeout(refs.holdInterval[channel] as NodeJS.Timeout);
+        clearInterval(refs.holdInterval[channel] as NodeJS.Timeout);
+        refs.holdInterval[channel] = null;
+      }
+
+      // Was it a tap?
+      if (pressDuration < TAP_WINDOW_MS) {
+        refs.tapCount[channel]++;
+
+        // Clear existing tap timeout
+        if (refs.tapTimeout[channel]) {
+          clearTimeout(refs.tapTimeout[channel] as NodeJS.Timeout);
+        }
+
+        // Wait for more taps or execute
+        refs.tapTimeout[channel] = setTimeout(() => {
+          executeTapAction(channel, refs.tapCount[channel]);
+          refs.tapCount[channel] = 0;
+          refs.tapTimeout[channel] = null;
+        }, TAP_WINDOW_MS);
+      }
+    }
+
+    refs.lastState[channel] = switchPressed;
+  }, [executeTapAction]);
+
+  // Process digital inputs when status updates
+  useEffect(() => {
+    if (!status?.hardware?.labjack?.digital_inputs) return;
+
+    const inputs = status.hardware.labjack.digital_inputs;
+    for (let i = 0; i < 8; i++) {
+      const isPressed = inputs[String(i)] === true;
+      handleSwitchInput(i, isPressed);
+    }
+  }, [status?.hardware?.labjack?.digital_inputs, handleSwitchInput]);
 
   useEffect(() => {
     const updateTime = () => {
@@ -301,20 +460,81 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* FIO Channels Card */}
+          {/* FIO Channels Card with Light Simulators */}
           <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex justify-between items-center mb-5">
               <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">FIO Channels</span>
+              <span className="font-mono text-[10px] text-[#636366]">tap • double • triple • hold</span>
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-3">
               {[0, 1, 2, 3, 4, 5, 6, 7].map(i => {
                 const isHigh = status?.hardware?.labjack?.digital_inputs?.[String(i)] === true;
+                const light = lightStates[i];
+                const brightness = light.brightness;
+
+                // Scene colors for the label
+                const sceneColors: Record<string, string> = {
+                  off: 'text-[#636366]',
+                  full: 'text-amber-400',
+                  scene1: 'text-blue-400',
+                  scene2: 'text-purple-400',
+                  custom: 'text-[#a1a1a6]',
+                };
+
+                const sceneLabels: Record<string, string> = {
+                  off: 'OFF',
+                  full: 'FULL',
+                  scene1: 'S1',
+                  scene2: 'S2',
+                  custom: `${Math.round(brightness)}%`,
+                };
+
                 return (
-                  <div key={i} className={`aspect-square rounded-[10px] flex flex-col items-center justify-center border transition-all ${isHigh ? 'bg-amber-500/15 border-amber-500' : 'bg-[#111113] border-[#2a2a2f]'}`}>
-                    <span className="font-mono text-[10px] text-[#636366]">FIO{i}</span>
-                    <span className={`font-mono text-[11px] font-semibold mt-1 ${isHigh ? 'text-amber-500' : 'text-[#a1a1a6]'}`}>
-                      {isHigh ? 'HIGH' : 'LOW'}
-                    </span>
+                  <div
+                    key={i}
+                    className="relative rounded-xl overflow-hidden border transition-all"
+                    style={{
+                      borderColor: isHigh ? 'rgb(245 158 11)' : brightness > 0 ? 'rgb(245 158 11 / 0.3)' : 'rgb(42 42 47)',
+                    }}
+                  >
+                    {/* Light glow background */}
+                    <div
+                      className="absolute inset-0 transition-opacity duration-200"
+                      style={{
+                        background: 'linear-gradient(135deg, rgb(245 158 11), rgb(253 224 71))',
+                        opacity: brightness / 100,
+                      }}
+                    />
+                    {/* Dark overlay for readability */}
+                    <div
+                      className="absolute inset-0 bg-[#111113] transition-opacity duration-200"
+                      style={{ opacity: 1 - (brightness / 100) * 0.85 }}
+                    />
+                    {/* Content */}
+                    <div className="relative z-10 p-3 flex flex-col items-center">
+                      {/* Channel label and state */}
+                      <div className="flex items-center justify-between w-full mb-2">
+                        <span className="font-mono text-[10px] text-[#636366]">FIO{i}</span>
+                        <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${isHigh ? 'bg-amber-500/30 text-amber-400' : 'bg-[#2a2a2f] text-[#636366]'}`}>
+                          {isHigh ? 'HIGH' : 'LOW'}
+                        </span>
+                      </div>
+                      {/* Brightness percentage */}
+                      <div className={`font-mono text-2xl font-bold ${brightness > 50 ? 'text-[#111113]' : 'text-white'}`}>
+                        {Math.round(brightness)}%
+                      </div>
+                      {/* Scene indicator */}
+                      <div className={`font-mono text-[10px] mt-1 ${brightness > 50 ? 'text-[#111113]/70' : sceneColors[light.scene]}`}>
+                        {sceneLabels[light.scene]}
+                      </div>
+                      {/* Mini progress bar */}
+                      <div className="w-full h-1 bg-black/20 rounded-full mt-2 overflow-hidden">
+                        <div
+                          className="h-full bg-white rounded-full transition-all duration-200"
+                          style={{ width: `${brightness}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 );
               })}
