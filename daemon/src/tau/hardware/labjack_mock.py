@@ -27,6 +27,15 @@ class LabJackMock(LabJackInterface):
         # Simulated analog input values (16 channels)
         self.analog_inputs: Dict[int, float] = {i: 0.0 for i in range(16)}
 
+        # Simulated digital input states (16 channels)
+        self.digital_inputs: Dict[int, bool] = {i: False for i in range(16)}
+
+        # Simulated digital output states (16 channels)
+        self.digital_outputs: Dict[int, bool] = {i: False for i in range(16)}
+
+        # Track channel modes (analog, digital-in, digital-out)
+        self.channel_modes: Dict[int, str] = {i: 'analog' for i in range(16)}
+
         # Simulated PWM output values (2 channels)
         self.pwm_outputs: Dict[int, float] = {0: 0.0, 1: 0.0}
 
@@ -199,6 +208,107 @@ class LabJackMock(LabJackInterface):
             count=len(outputs),
         )
 
+    async def read_digital_input(self, channel: int) -> bool:
+        """
+        Read simulated digital input
+
+        Args:
+            channel: Digital input channel (0-15)
+
+        Returns:
+            True for HIGH, False for LOW
+        """
+        if not self.connected:
+            logger.error("labjack_not_connected", operation="read_digital_input")
+            raise RuntimeError("LabJack not connected")
+
+        if channel < 0 or channel > 15:
+            raise ValueError(f"Invalid channel: {channel} (must be 0-15)")
+
+        # Auto-configure channel if needed
+        if self.channel_modes[channel] == 'analog':
+            await self.configure_channel(channel, 'digital-in')
+
+        # Simulate read delay
+        await asyncio.sleep(0.0001)
+
+        self.read_count += 1
+        state = self.digital_inputs[channel]
+
+        logger.debug(
+            "labjack_digital_read",
+            channel=channel,
+            state="HIGH" if state else "LOW",
+        )
+
+        return state
+
+    async def write_digital_output(self, channel: int, state: bool) -> None:
+        """
+        Write simulated digital output
+
+        Args:
+            channel: Digital output channel (0-15)
+            state: True for HIGH, False for LOW
+        """
+        if not self.connected:
+            logger.error("labjack_not_connected", operation="write_digital_output")
+            raise RuntimeError("LabJack not connected")
+
+        if channel < 0 or channel > 15:
+            raise ValueError(f"Invalid channel: {channel} (must be 0-15)")
+
+        # Auto-configure channel if needed
+        if self.channel_modes[channel] != 'digital-out':
+            await self.configure_channel(channel, 'digital-out')
+
+        # Simulate write delay
+        await asyncio.sleep(0.0001)
+
+        self.digital_outputs[channel] = state
+        self.write_count += 1
+
+        logger.debug(
+            "labjack_digital_write",
+            channel=channel,
+            state="HIGH" if state else "LOW",
+        )
+
+    async def configure_channel(self, channel: int, mode: str) -> None:
+        """
+        Configure channel as analog or digital I/O
+
+        Args:
+            channel: Channel number (0-15)
+            mode: 'analog', 'digital-in', or 'digital-out'
+        """
+        if not self.connected:
+            logger.error("labjack_not_connected", operation="configure_channel")
+            raise RuntimeError("LabJack not connected")
+
+        if channel < 0 or channel > 15:
+            raise ValueError(f"Invalid channel: {channel} (must be 0-15)")
+
+        if mode not in ('analog', 'digital-in', 'digital-out'):
+            raise ValueError(f"Invalid mode: {mode}")
+
+        # EIO pins (8-15) cannot be analog in real hardware
+        if channel >= 8 and mode == 'analog':
+            logger.warning(
+                "eio_pins_digital_only",
+                channel=channel,
+                message="EIO pins (8-15) are digital only, ignoring analog configuration"
+            )
+            mode = 'digital-in'  # Default to digital input
+
+        self.channel_modes[channel] = mode
+
+        logger.debug(
+            "labjack_channel_configured",
+            channel=channel,
+            mode=mode,
+        )
+
     def get_statistics(self) -> dict:
         """
         Get mock driver statistics
@@ -212,8 +322,15 @@ class LabJackMock(LabJackInterface):
             "write_count": self.write_count,
             "error_count": self.error_count,
             "analog_inputs": dict(self.analog_inputs),
+            "digital_inputs": dict(self.digital_inputs),
+            "digital_outputs": dict(self.digital_outputs),
+            "channel_modes": dict(self.channel_modes),
             "pwm_outputs": dict(self.pwm_outputs),
         }
+
+    def is_mock(self) -> bool:
+        """Check if this is a mock driver"""
+        return True
 
     # Helper methods for testing
 
@@ -237,3 +354,21 @@ class LabJackMock(LabJackInterface):
 
         self.analog_inputs[channel] = voltage
         logger.debug("analog_input_simulated", channel=channel, voltage=voltage)
+
+    def simulate_digital_input(self, channel: int, state: bool) -> None:
+        """
+        Simulate a digital input change (for testing)
+
+        Args:
+            channel: Channel to simulate
+            state: True for HIGH, False for LOW
+        """
+        if channel < 0 or channel > 15:
+            raise ValueError(f"Invalid channel: {channel}")
+
+        self.digital_inputs[channel] = state
+        logger.debug(
+            "digital_input_simulated",
+            channel=channel,
+            state="HIGH" if state else "LOW"
+        )

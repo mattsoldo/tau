@@ -2,6 +2,51 @@
 
 A high-performance Python daemon for controlling smart lighting systems with circadian rhythm support, scene management, and physical switch integration. Designed for home automation and professional lighting installations.
 
+## 🚀 Current Status: **FULLY OPERATIONAL**
+
+All components are running and verified:
+- ✅ Backend daemon (FastAPI) on port 8000
+- ✅ Frontend server on port 3000
+- ✅ PostgreSQL database with example data
+- ✅ WebSocket real-time updates
+- ✅ Mock hardware interfaces (LabJack & OLA)
+- ✅ **Native macOS support** (Intel & Apple Silicon)
+
+### 📋 Quick Access Links
+
+| Interface | URL | Description |
+|-----------|-----|-------------|
+| **Main Dashboard** | http://localhost:3000/ | System overview and navigation |
+| **Lighting Control** | http://localhost:3000/test_frontend.html | Full fixture/group/scene control |
+| **OLA Mock Interface** | http://localhost:3000/ola_mock_interface.html | DMX channel visualization |
+| **API Documentation** | http://localhost:8000/docs | Interactive Swagger UI |
+| **API (ReDoc)** | http://localhost:8000/redoc | Alternative API docs |
+| **System Status** | http://localhost:8000/status | Real-time system metrics |
+
+### 🔍 Verify System Health
+
+```bash
+python verify_system.py  # Check all components
+python demo_control.py   # Run lighting demo
+```
+
+### 🍎 macOS Quick Start
+
+The system runs natively on macOS (Intel & Apple Silicon):
+
+```bash
+# Option 1: Double-click to start
+open TauLighting.command
+
+# Option 2: Automated setup
+./setup_mac.sh
+
+# Option 3: Test Mac compatibility
+python test_mac_compatibility.py
+```
+
+See [MAC_DEPLOYMENT.md](MAC_DEPLOYMENT.md) for detailed macOS instructions.
+
 ## Features
 
 - ⏰ **Circadian Rhythm Engine** - Automatic daylight simulation with customizable profiles

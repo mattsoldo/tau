@@ -27,7 +27,9 @@ class HardwareManager:
         self,
         labjack_driver: Optional[LabJackInterface] = None,
         ola_driver: Optional[OLAInterface] = None,
-        use_mock: bool = True,
+        labjack_mock: bool = True,
+        ola_mock: bool = True,
+        use_mock: Optional[bool] = None,  # Deprecated, kept for backward compatibility
     ):
         """
         Initialize hardware manager
@@ -35,13 +37,20 @@ class HardwareManager:
         Args:
             labjack_driver: LabJack driver instance (or None to create default)
             ola_driver: OLA driver instance (or None to create default)
-            use_mock: If True, use mock drivers; if False, use real drivers
+            labjack_mock: If True, use mock LabJack driver
+            ola_mock: If True, use mock OLA driver
+            use_mock: Deprecated - use labjack_mock and ola_mock instead
         """
-        self.use_mock = use_mock
+        # Handle deprecated use_mock parameter
+        if use_mock is not None:
+            labjack_mock = use_mock
+            ola_mock = use_mock
+
+        self.use_mock = labjack_mock  # Keep for backward compatibility
 
         # Create drivers if not provided
         if labjack_driver is None:
-            if use_mock:
+            if labjack_mock:
                 self.labjack = LabJackMock()
             else:
                 # Import real driver only if needed
@@ -52,7 +61,7 @@ class HardwareManager:
             self.labjack = labjack_driver
 
         if ola_driver is None:
-            if use_mock:
+            if ola_mock:
                 self.ola = OLAMock()
             else:
                 # Import real driver only if needed
@@ -72,7 +81,8 @@ class HardwareManager:
 
         logger.info(
             "hardware_manager_initialized",
-            use_mock=use_mock,
+            labjack_mock=labjack_mock,
+            ola_mock=ola_mock,
             labjack=self.labjack.name,
             ola=self.ola.name,
         )
@@ -168,15 +178,34 @@ class HardwareManager:
 
     async def read_switch_inputs(self, channels: list[int]) -> Dict[int, float]:
         """
-        Read switch analog inputs
+        Read switch inputs (analog or digital based on channel mode)
 
         Args:
             channels: List of LabJack channels to read
 
         Returns:
-            Dictionary mapping channel to voltage
+            Dictionary mapping channel to voltage (3.3V for digital HIGH, 0.0V for LOW)
         """
-        return await self.labjack.read_analog_inputs(channels)
+        readings = {}
+
+        for channel in channels:
+            # Check the channel mode
+            if hasattr(self.labjack, 'channel_modes'):
+                mode = self.labjack.channel_modes.get(channel, 'analog')
+
+                if mode in ('digital-in', 'digital-out'):
+                    # Read as digital and convert to voltage representation
+                    state = await self.labjack.read_digital_input(channel)
+                    # Represent HIGH as 3.3V, LOW as 0V for compatibility
+                    readings[channel] = 3.3 if state else 0.0
+                else:
+                    # Read as analog
+                    readings[channel] = await self.labjack.read_analog_input(channel)
+            else:
+                # Fallback to analog read if channel_modes not available
+                readings[channel] = await self.labjack.read_analog_input(channel)
+
+        return readings
 
     async def set_led_pwm(self, channel: int, brightness: float) -> None:
         """

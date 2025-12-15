@@ -301,12 +301,13 @@ Use this endpoint to monitor system performance and debug issues.
         return connection_manager.get_statistics()
 
     # Register API routers
-    from tau.api.routes import fixtures, groups, scenes, control, circadian
+    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack
 
     app.include_router(fixtures.router, prefix="/api/fixtures", tags=["fixtures"])
     app.include_router(groups.router, prefix="/api/groups", tags=["groups"])
     app.include_router(scenes.router, prefix="/api/scenes", tags=["scenes"])
     app.include_router(control.router, prefix="/api/control", tags=["control"])
     app.include_router(circadian.router, prefix="/api/circadian", tags=["circadian"])
+    app.include_router(labjack.router, prefix="/api/labjack", tags=["hardware"])
 
     return app

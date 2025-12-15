@@ -67,8 +67,11 @@ class TauDaemon:
         await self.config_loader.load_configuration()
 
         # Initialize hardware interfaces (LabJack, OLA)
-        logger.info("initializing_hardware", mock_mode=self.settings.labjack_mock)
-        self.hardware_manager = HardwareManager(use_mock=self.settings.labjack_mock)
+        logger.info("initializing_hardware", labjack_mock=self.settings.labjack_mock, ola_mock=self.settings.ola_mock)
+        self.hardware_manager = HardwareManager(
+            labjack_mock=self.settings.labjack_mock,
+            ola_mock=self.settings.ola_mock
+        )
         hardware_ok = await self.hardware_manager.initialize()
         if not hardware_ok:
             logger.error("hardware_initialization_failed")

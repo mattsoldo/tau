@@ -77,8 +77,17 @@ async def list_fixtures(
     session: AsyncSession = Depends(get_session)
 ):
     """List all fixtures"""
+    import structlog
+    logger = structlog.get_logger(__name__)
+
+    # Debug: Log database connection info
+    logger.debug("list_fixtures_called", session_id=id(session))
+
     result = await session.execute(select(Fixture))
     fixtures = result.scalars().all()
+
+    logger.debug("list_fixtures_result", count=len(fixtures), fixtures=[f.id for f in fixtures])
+
     return fixtures
 
 

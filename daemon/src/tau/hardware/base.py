@@ -120,6 +120,41 @@ class LabJackInterface(HardwareDriver):
         pass
 
     @abstractmethod
+    async def read_digital_input(self, channel: int) -> bool:
+        """
+        Read digital input state
+
+        Args:
+            channel: Channel number (0-15)
+
+        Returns:
+            True for HIGH, False for LOW
+        """
+        pass
+
+    @abstractmethod
+    async def write_digital_output(self, channel: int, state: bool) -> None:
+        """
+        Write digital output state
+
+        Args:
+            channel: Channel number (0-15)
+            state: True for HIGH, False for LOW
+        """
+        pass
+
+    @abstractmethod
+    async def configure_channel(self, channel: int, mode: str) -> None:
+        """
+        Configure channel as analog input, digital input, or digital output
+
+        Args:
+            channel: Channel number (0-15)
+            mode: 'analog', 'digital-in', or 'digital-out'
+        """
+        pass
+
+    @abstractmethod
     def get_statistics(self) -> dict:
         """
         Get driver statistics
