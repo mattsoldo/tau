@@ -119,6 +119,7 @@ class Fixture(Base):
 
     # DMX Configuration
     dmx_channel_start: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    secondary_dmx_channel: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, unique=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

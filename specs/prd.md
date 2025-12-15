@@ -96,7 +96,18 @@ Fixture models define one of the following types:
 - The system must prevent overlapping DMX channel assignments.
 - Fixture creation must validate channel availability based on footprint.
 
-### 4.3 Mixing Type
+### 4.3 Merged Fixtures (Non-Consecutive Channels)
+
+Some tunable white installations use separate LED drivers for warm and cool channels, which may be assigned to non-consecutive DMX addresses. The system supports this via fixture merging:
+
+- Two single-channel fixtures can be merged into one dual-channel fixture
+- The primary fixture retains its name; the secondary fixture is deleted
+- The secondary's DMX address is stored as `secondary_dmx_channel`
+- Merged fixtures display as "CH X+Y" (e.g., "CH 1+5")
+- The fixture model should be changed to a tunable white type
+- Merged fixtures can be unmerged, but this does not recreate the deleted fixture
+
+### 4.4 Mixing Type
 
 Fixture models define a **mixing type**:
 - Linear

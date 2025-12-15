@@ -17,6 +17,7 @@ from tau.api.schemas import (
     FixtureUpdate,
     FixtureResponse,
     FixtureStateResponse,
+    FixtureMergeRequest,
 )
 
 router = APIRouter()
@@ -179,6 +180,15 @@ async def update_fixture(
     # Update fields
     update_data = fixture_data.model_dump(exclude_unset=True)
 
+    # Check if fixture_model_id is being changed and exists
+    if "fixture_model_id" in update_data:
+        model = await session.get(FixtureModel, update_data["fixture_model_id"])
+        if not model:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Fixture model {update_data['fixture_model_id']} not found"
+            )
+
     # Check if DMX channel is being changed and is available
     if "dmx_channel_start" in update_data:
         result = await session.execute(
@@ -226,3 +236,106 @@ async def get_fixture_state(
     if not state:
         raise HTTPException(status_code=404, detail="Fixture state not found")
     return state
+
+
+@router.post("/merge", response_model=FixtureResponse)
+async def merge_fixtures(
+    merge_data: FixtureMergeRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Merge two fixtures into one tunable white fixture.
+
+    The primary fixture keeps its name.
+    The secondary fixture's DMX channel becomes the secondary_dmx_channel.
+    If target_model_id is provided, the primary fixture's model is updated.
+    The secondary fixture is deleted after merge.
+    """
+    import structlog
+    logger = structlog.get_logger(__name__)
+
+    # Get both fixtures
+    primary = await session.get(Fixture, merge_data.primary_fixture_id)
+    secondary = await session.get(Fixture, merge_data.secondary_fixture_id)
+
+    if not primary:
+        raise HTTPException(status_code=404, detail="Primary fixture not found")
+    if not secondary:
+        raise HTTPException(status_code=404, detail="Secondary fixture not found")
+
+    if primary.id == secondary.id:
+        raise HTTPException(status_code=400, detail="Cannot merge a fixture with itself")
+
+    # Check if primary already has a secondary channel
+    if primary.secondary_dmx_channel is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Primary fixture already has a secondary DMX channel"
+        )
+
+    # If target_model_id provided, verify it exists
+    if merge_data.target_model_id:
+        target_model = await session.get(FixtureModel, merge_data.target_model_id)
+        if not target_model:
+            raise HTTPException(status_code=404, detail="Target fixture model not found")
+
+    logger.info(
+        "merge_fixtures",
+        primary_id=primary.id,
+        primary_name=primary.name,
+        primary_dmx=primary.dmx_channel_start,
+        secondary_id=secondary.id,
+        secondary_name=secondary.name,
+        secondary_dmx=secondary.dmx_channel_start,
+        target_model_id=merge_data.target_model_id
+    )
+
+    # Update primary fixture with secondary's DMX channel
+    primary.secondary_dmx_channel = secondary.dmx_channel_start
+
+    # Update model if target_model_id provided
+    if merge_data.target_model_id:
+        primary.fixture_model_id = merge_data.target_model_id
+
+    # Delete the secondary fixture's state first (if exists)
+    secondary_state = await session.get(FixtureState, secondary.id)
+    if secondary_state:
+        await session.delete(secondary_state)
+
+    # Delete the secondary fixture
+    await session.delete(secondary)
+
+    await session.commit()
+    await session.refresh(primary)
+
+    logger.info(
+        "merge_fixtures_complete",
+        merged_fixture_id=primary.id,
+        dmx_channels=f"{primary.dmx_channel_start}+{primary.secondary_dmx_channel}",
+        new_model_id=primary.fixture_model_id
+    )
+
+    return primary
+
+
+@router.post("/{fixture_id}/unmerge", response_model=FixtureResponse)
+async def unmerge_fixture(
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Unmerge a fixture by removing its secondary DMX channel.
+    Does NOT recreate the secondary fixture - just removes the secondary channel reference.
+    """
+    fixture = await session.get(Fixture, fixture_id)
+    if not fixture:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+
+    if fixture.secondary_dmx_channel is None:
+        raise HTTPException(status_code=400, detail="Fixture has no secondary channel to unmerge")
+
+    fixture.secondary_dmx_channel = None
+    await session.commit()
+    await session.refresh(fixture)
+
+    return fixture

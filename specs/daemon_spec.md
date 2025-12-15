@@ -310,12 +310,35 @@ Sets group_state.circadian_suspended=true and timestamp.
 POST /groups/:id/circadian/resume
 Sets group_state.circadian_suspended=false.
 
-10.7 Configuration view
+10.7 Fixture merge/unmerge
+
+POST /fixtures/merge
+Request:
+
+{
+  "primary_fixture_id": 1,
+  "secondary_fixture_id": 2,
+  "target_model_id": 3  // Optional - tunable white model to apply
+}
+
+Behavior:
+	•	Combines two single-channel fixtures into one dual-channel tunable white fixture
+	•	Primary fixture keeps its name, secondary's DMX channel becomes secondary_dmx_channel
+	•	If target_model_id provided, updates the fixture's model
+	•	Secondary fixture is deleted
+	•	Useful for warm+cool LED drivers that need separate DMX channels
+
+POST /fixtures/:id/unmerge
+Behavior:
+	•	Removes secondary_dmx_channel from the fixture
+	•	Does NOT recreate the deleted secondary fixture
+
+10.8 Configuration view
 
 GET /config
 Returns effective daemon configuration.
 
-10.8 Event stream (recommended)
+10.9 Event stream (recommended)
 
 GET /events
 Server-Sent Events (SSE) stream for:

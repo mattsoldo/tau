@@ -45,6 +45,7 @@ class FixtureBase(BaseModel):
     name: str = Field(..., max_length=100)
     fixture_model_id: int = Field(..., gt=0)
     dmx_channel_start: int = Field(..., ge=1, le=512)
+    secondary_dmx_channel: Optional[int] = Field(None, ge=1, le=512)
 
 
 class FixtureCreate(FixtureBase):
@@ -53,7 +54,16 @@ class FixtureCreate(FixtureBase):
 
 class FixtureUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
+    fixture_model_id: Optional[int] = Field(None, gt=0)
     dmx_channel_start: Optional[int] = Field(None, ge=1, le=512)
+    secondary_dmx_channel: Optional[int] = Field(None, ge=1, le=512)
+
+
+class FixtureMergeRequest(BaseModel):
+    """Request to merge two fixtures into one tunable white fixture"""
+    primary_fixture_id: int = Field(..., gt=0, description="Fixture to keep")
+    secondary_fixture_id: int = Field(..., gt=0, description="Fixture to merge in (will be deleted)")
+    target_model_id: Optional[int] = Field(None, gt=0, description="Optional tunable white model to apply")
 
 
 class FixtureResponse(FixtureBase):

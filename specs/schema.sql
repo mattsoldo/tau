@@ -23,8 +23,10 @@ CREATE TABLE fixtures (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     fixture_model_id INT NOT NULL REFERENCES fixture_models(id) ON DELETE RESTRICT,
-    dmx_channel_start INT NOT NULL UNIQUE, 
-    
+    dmx_channel_start INT NOT NULL UNIQUE,
+    -- Secondary DMX channel for merged tunable white fixtures (warm+cool on separate channels)
+    secondary_dmx_channel INT UNIQUE,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     -- No overrides here. The model dictates behavior.
 );

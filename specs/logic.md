@@ -56,3 +56,22 @@ $$t = \frac{K_{target} - K_{warm}}{K_{cool} - K_{warm}}$$
 2. Apply Trigonometric Power Correction:
    - $Cool\_Channel = B_{target} \times \sin(t \times \frac{\pi}{2})$
    - $Warm\_Channel = B_{target} \times \cos(t \times \frac{\pi}{2})$
+
+## DMX Channel Mapping for Merged Fixtures
+
+Standard tunable white fixtures use consecutive DMX channels (e.g., CH 1 for warm, CH 2 for cool). However, some installations have separate LED drivers for warm and cool channels that may be assigned to non-consecutive DMX addresses.
+
+**Merged Fixture DMX Output:**
+
+| Fixture Configuration | DMX Output |
+| :--- | :--- |
+| Standard (dmx_footprint=2) | Warm → `dmx_channel_start`, Cool → `dmx_channel_start + 1` |
+| Merged (has secondary_dmx_channel) | Warm → `dmx_channel_start`, Cool → `secondary_dmx_channel` |
+
+**Example:**
+- Fixture with `dmx_channel_start=1`, `secondary_dmx_channel=5`
+- At 50% brightness, 3500K:
+  - Warm channel (CH 1): ~64 (0.5 × 0.5 × 255)
+  - Cool channel (CH 5): ~64 (0.5 × 0.5 × 255)
+
+The mixing algorithm output is the same; only the DMX address mapping differs.
