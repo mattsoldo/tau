@@ -1,0 +1,107 @@
+# Tau Lighting Control - Production Docker Compose Configuration
+# This configuration supports real hardware (LabJack USB devices)
+
+version: '3.8'
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: tau-postgres
+    environment:
+      POSTGRES_DB: tau_lighting
+      POSTGRES_USER: tau_daemon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tau_daemon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Tau daemon with real hardware support
+  tau-daemon:
+    build: .
+    container_name: tau-daemon
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://tau_daemon:${POSTGRES_PASSWORD}@postgres:5432/tau_lighting
+
+      # API Configuration
+      DAEMON_PORT: 8000
+      API_TITLE: "Tau Lighting Control"
+      API_VERSION: "0.1.0"
+      API_DOCS_ENABLED: "false"  # Disable docs in production
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-WARNING}
+
+      # Control Loop
+      CONTROL_LOOP_HZ: 30
+
+      # Hardware (real mode)
+      LABJACK_MOCK: "false"
+      OLA_MOCK: "false"
+
+    # USB Device Access Options (choose one):
+
+    # Option 1: Privileged mode (easiest but less secure)
+    privileged: true
+
+    # Option 2: Specific device mapping (more secure, requires device path)
+    # devices:
+    #   - /dev/bus/usb:/dev/bus/usb  # All USB devices
+    #   # OR specific LabJack device (find with lsusb)
+    #   # - /dev/bus/usb/001/004:/dev/bus/usb/001/004
+
+    # Option 3: Device cgroup rules (most secure)
+    # device_cgroup_rules:
+    #   - 'c 189:* rwm'  # USB devices
+
+    # Additional volumes for USB device information
+    volumes:
+      - ./logs:/var/log/tau
+      - /dev/bus/usb:/dev/bus/usb:ro  # USB device information (read-only)
+
+    ports:
+      - "8000:8000"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx reverse proxy (optional but recommended for production)
+  nginx:
+    image: nginx:alpine
+    container_name: tau-nginx
+    depends_on:
+      - tau-daemon
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./labjack_monitor.html:/usr/share/nginx/html/labjack_monitor.html:ro
+      - ./test_frontend.html:/usr/share/nginx/html/test_frontend.html:ro
+      - ./ola_mock_interface.html:/usr/share/nginx/html/ola_mock_interface.html:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: tau-network

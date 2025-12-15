@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tau Lighting Control - Test Frontend</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        h1 { color: #4a9eff; }
+        h2 { color: #6ab7ff; margin-top: 30px; }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+        }
+        .status.connected {
+            background: #1b5e20;
+            border-color: #2e7d32;
+        }
+        .status.error {
+            background: #b71c1c;
+            border-color: #c62828;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .card {
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .card h3 {
+            margin-top: 0;
+            color: #8ab4f8;
+        }
+        button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #6ab7ff;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+        .brightness-value {
+            text-align: center;
+            font-size: 1.2em;
+            margin: 5px 0;
+        }
+        pre {
+            background: #0a0a0a;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 0.9em;
+        }
+        .ws-log {
+            background: #0a0a0a;
+            border: 1px solid #3a3a3a;
+            border-radius: 5px;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+        }
+        .log-entry.info { color: #81c784; }
+        .log-entry.error { color: #ef5350; }
+        .log-entry.warning { color: #ffb74d; }
+    </style>
+</head>
+<body>
+    <h1>🏠 Tau Lighting Control System</h1>
+
+    <div id="connection-status" class="status">
+        <strong>Daemon Status:</strong> <span id="status-text">Checking...</span>
+    </div>
+
+    <div id="ws-status" class="status">
+        <strong>WebSocket:</strong> <span id="ws-status-text">Not connected</span>
+    </div>
+
+    <h2>System Information</h2>
+    <pre id="system-info">Loading...</pre>
+
+    <h2>Fixtures</h2>
+    <div id="fixtures" class="grid">Loading fixtures...</div>
+
+    <h2>Groups</h2>
+    <div id="groups" class="grid">Loading groups...</div>
+
+    <h2>Scenes</h2>
+    <div id="scenes" class="grid">Loading scenes...</div>
+
+    <h2>WebSocket Log</h2>
+    <div id="ws-log" class="ws-log"></div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        const WS_URL = 'ws://localhost:8000/ws';
+        let ws = null;
+        let fixtures = [];
+        let groups = [];
+        let scenes = [];
+
+        // WebSocket logging
+        function wsLog(message, type = 'info') {
+            const log = document.getElementById('ws-log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // Check daemon status
+        async function checkStatus() {
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('connection-status').className = 'status connected';
+                    document.getElementById('status-text').textContent = `Connected (v${data.version})`;
+                    return true;
+                }
+            } catch (error) {
+                document.getElementById('connection-status').className = 'status error';
+                document.getElementById('status-text').textContent = `Error: ${error.message}`;
+                console.error('Connection error:', error);
+            }
+            return false;
+        }
+
+        // Load system info
+        async function loadSystemInfo() {
+            try {
+                const response = await fetch(`${API_URL}/status`);
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('system-info').textContent = JSON.stringify(data, null, 2);
+                }
+            } catch (error) {
+                document.getElementById('system-info').textContent = `Error: ${error.message}`;
+            }
+        }
+
+        // Load fixtures
+        async function loadFixtures() {
+            try {
+                const response = await fetch(`${API_URL}/api/fixtures/`);
+                if (response.ok) {
+                    fixtures = await response.json();
+                    displayFixtures();
+                }
+            } catch (error) {
+                document.getElementById('fixtures').innerHTML = `<div class="status error">Error loading fixtures: ${error.message}</div>`;
+            }
+        }
+
+        // Display fixtures
+        function displayFixtures() {
+            const container = document.getElementById('fixtures');
+            if (fixtures.length === 0) {
+                container.innerHTML = '<div class="status">No fixtures found</div>';
+                return;
+            }
+
+            container.innerHTML = fixtures.map(fixture => `
+                <div class="card">
+                    <h3>${fixture.name}</h3>
+                    <p>ID: ${fixture.id} | Channel: ${fixture.dmx_channel_start}</p>
+                    <div class="brightness-value" id="brightness-${fixture.id}">0%</div>
+                    <input type="range" min="0" max="100" value="0"
+                           onchange="setFixtureBrightness(${fixture.id}, this.value)">
+                    <div>
+                        <button onclick="setFixtureBrightness(${fixture.id}, 0)">Off</button>
+                        <button onclick="setFixtureBrightness(${fixture.id}, 50)">50%</button>
+                        <button onclick="setFixtureBrightness(${fixture.id}, 100)">Full</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Set fixture brightness
+        async function setFixtureBrightness(fixtureId, brightness) {
+            try {
+                const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ brightness: brightness / 100 })
+                });
+                if (response.ok) {
+                    document.getElementById(`brightness-${fixtureId}`).textContent = `${brightness}%`;
+                    wsLog(`Set fixture ${fixtureId} to ${brightness}%`);
+                }
+            } catch (error) {
+                wsLog(`Error setting fixture ${fixtureId}: ${error.message}`, 'error');
+            }
+        }
+
+        // Load groups
+        async function loadGroups() {
+            try {
+                const response = await fetch(`${API_URL}/api/groups/`);
+                if (response.ok) {
+                    groups = await response.json();
+                    displayGroups();
+                }
+            } catch (error) {
+                document.getElementById('groups').innerHTML = `<div class="status error">Error loading groups: ${error.message}</div>`;
+            }
+        }
+
+        // Display groups
+        function displayGroups() {
+            const container = document.getElementById('groups');
+            if (groups.length === 0) {
+                container.innerHTML = '<div class="status">No groups found</div>';
+                return;
+            }
+
+            container.innerHTML = groups.map(group => `
+                <div class="card">
+                    <h3>${group.name}</h3>
+                    <p>${group.description || 'No description'}</p>
+                    <p>Circadian: ${group.circadian_enabled ? '✅ Enabled' : '❌ Disabled'}</p>
+                    <div class="brightness-value" id="group-brightness-${group.id}">0%</div>
+                    <input type="range" min="0" max="100" value="0"
+                           onchange="setGroupBrightness(${group.id}, this.value)">
+                    <div>
+                        <button onclick="setGroupBrightness(${group.id}, 0)">Off</button>
+                        <button onclick="setGroupBrightness(${group.id}, 100)">Full</button>
+                        ${group.circadian_enabled ?
+                            `<button onclick="toggleCircadian(${group.id}, false)">Disable Circadian</button>` :
+                            `<button onclick="toggleCircadian(${group.id}, true)">Enable Circadian</button>`
+                        }
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Set group brightness
+        async function setGroupBrightness(groupId, brightness) {
+            try {
+                const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ brightness: brightness / 100 })
+                });
+                if (response.ok) {
+                    document.getElementById(`group-brightness-${groupId}`).textContent = `${brightness}%`;
+                    wsLog(`Set group ${groupId} to ${brightness}%`);
+                }
+            } catch (error) {
+                wsLog(`Error setting group ${groupId}: ${error.message}`, 'error');
+            }
+        }
+
+        // Toggle circadian
+        async function toggleCircadian(groupId, enable) {
+            try {
+                const response = await fetch(`${API_URL}/api/control/groups/${groupId}/circadian`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enable })
+                });
+                if (response.ok) {
+                    wsLog(`Circadian ${enable ? 'enabled' : 'disabled'} for group ${groupId}`);
+                    loadGroups(); // Refresh
+                }
+            } catch (error) {
+                wsLog(`Error toggling circadian: ${error.message}`, 'error');
+            }
+        }
+
+        // Load scenes
+        async function loadScenes() {
+            try {
+                const response = await fetch(`${API_URL}/api/scenes/`);
+                if (response.ok) {
+                    scenes = await response.json();
+                    displayScenes();
+                }
+            } catch (error) {
+                document.getElementById('scenes').innerHTML = `<div class="status error">Error loading scenes: ${error.message}</div>`;
+            }
+        }
+
+        // Display scenes
+        function displayScenes() {
+            const container = document.getElementById('scenes');
+            if (scenes.length === 0) {
+                container.innerHTML = '<div class="status">No scenes found</div>';
+                return;
+            }
+
+            container.innerHTML = scenes.map(scene => `
+                <div class="card">
+                    <h3>${scene.name}</h3>
+                    <p>ID: ${scene.id}</p>
+                    <button onclick="recallScene(${scene.id})">Recall Scene</button>
+                </div>
+            `).join('');
+        }
+
+        // Recall scene
+        async function recallScene(sceneId) {
+            try {
+                const response = await fetch(`${API_URL}/api/scenes/recall`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scene_id: sceneId })
+                });
+                if (response.ok) {
+                    wsLog(`Recalled scene ${sceneId}`);
+                }
+            } catch (error) {
+                wsLog(`Error recalling scene: ${error.message}`, 'error');
+            }
+        }
+
+        // Setup WebSocket
+        function setupWebSocket() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                document.getElementById('ws-status').className = 'status connected';
+                document.getElementById('ws-status-text').textContent = 'Connected';
+                wsLog('WebSocket connected');
+
+                // Subscribe to all events
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    data: {
+                        events: ['fixture_state', 'group_state', 'scene_recalled']
+                    }
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                wsLog(`WS: ${message.type} - ${JSON.stringify(message.data)}`);
+            };
+
+            ws.onerror = (error) => {
+                wsLog(`WebSocket error: ${error}`, 'error');
+            };
+
+            ws.onclose = () => {
+                document.getElementById('ws-status').className = 'status error';
+                document.getElementById('ws-status-text').textContent = 'Disconnected';
+                wsLog('WebSocket disconnected', 'warning');
+
+                // Reconnect after 5 seconds
+                setTimeout(setupWebSocket, 5000);
+            };
+        }
+
+        // Initialize
+        async function init() {
+            const connected = await checkStatus();
+            if (connected) {
+                await loadSystemInfo();
+                await loadFixtures();
+                await loadGroups();
+                await loadScenes();
+                setupWebSocket();
+            }
+        }
+
+        // Start
+        init();
+
+        // Refresh status every 10 seconds
+        setInterval(checkStatus, 10000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OLA Mock Interface - Tau Lighting</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #4a9eff;
+            border-bottom: 2px solid #4a9eff;
+            padding-bottom: 10px;
+        }
+
+        .notice {
+            background: #2a4a7a;
+            border: 1px solid #4a9eff;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .notice h3 {
+            margin-top: 0;
+            color: #8ab4f8;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .card {
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .card h2 {
+            color: #8ab4f8;
+            margin-top: 0;
+        }
+
+        .universe {
+            background: #1a1a1a;
+            border: 1px solid #4a4a4a;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        .universe h3 {
+            color: #6ab7ff;
+            margin: 0 0 10px 0;
+        }
+
+        .channel-grid {
+            display: grid;
+            grid-template-columns: repeat(16, 1fr);
+            gap: 2px;
+            margin: 10px 0;
+        }
+
+        .channel {
+            background: #0a0a0a;
+            border: 1px solid #2a2a2a;
+            padding: 5px;
+            text-align: center;
+            font-size: 0.8em;
+            border-radius: 2px;
+        }
+
+        .channel.active {
+            background: linear-gradient(135deg, #4a9eff 0%, #6ab7ff 100%);
+            color: white;
+            font-weight: bold;
+        }
+
+        .channel-value {
+            font-size: 0.7em;
+            color: #888;
+        }
+
+        .channel.active .channel-value {
+            color: white;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #2a4a7a;
+            color: white;
+            padding: 10px;
+            text-align: left;
+        }
+
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #3a3a3a;
+        }
+
+        .status-online {
+            color: #4caf50;
+        }
+
+        .status-offline {
+            color: #f44336;
+        }
+
+        button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #6ab7ff;
+        }
+
+        .back-link {
+            display: inline-block;
+            color: #4a9eff;
+            text-decoration: none;
+            margin-bottom: 20px;
+            padding: 5px 10px;
+            border: 1px solid #4a9eff;
+            border-radius: 5px;
+        }
+
+        .back-link:hover {
+            background: #4a9eff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← Back to Dashboard</a>
+
+        <h1>OLA Mock Interface</h1>
+
+        <div class="notice">
+            <h3>⚠️ Running in Mock Mode</h3>
+            <p>The system is currently running with <strong>OLA_MOCK=true</strong>. This is a simulated interface showing what the OLA web interface would display in production.</p>
+            <p>To use real OLA:</p>
+            <ol>
+                <li>Install OLA: <code>brew install ola</code> (macOS) or <code>apt install ola</code> (Ubuntu)</li>
+                <li>Start OLA daemon: <code>olad -c ~/.olad</code></li>
+                <li>Set <code>OLA_MOCK=false</code> in environment</li>
+                <li>Access real OLA interface at <a href="http://localhost:9090" style="color: #8ab4f8;">http://localhost:9090</a></li>
+            </ol>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h2>DMX Universes</h2>
+                <div class="universe">
+                    <h3>Universe 0 - Main Lighting</h3>
+                    <p>Active Channels: 50 / 512</p>
+                    <div class="channel-grid" id="universe-0"></div>
+                </div>
+
+                <div class="universe">
+                    <h3>Universe 1 - Effects</h3>
+                    <p>Active Channels: 0 / 512</p>
+                    <div class="channel-grid" id="universe-1"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Configured Fixtures</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Channel</th>
+                            <th>Universe</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fixture-list">
+                        <tr>
+                            <td>Kitchen Counter LEDs</td>
+                            <td>1-2</td>
+                            <td>0</td>
+                            <td id="fixture-1-value">0</td>
+                        </tr>
+                        <tr>
+                            <td>Living Room Ceiling 1</td>
+                            <td>10-11</td>
+                            <td>0</td>
+                            <td id="fixture-10-value">0</td>
+                        </tr>
+                        <tr>
+                            <td>Living Room Ceiling 2</td>
+                            <td>12-13</td>
+                            <td>0</td>
+                            <td id="fixture-12-value">0</td>
+                        </tr>
+                        <tr>
+                            <td>Bedroom Reading Light</td>
+                            <td>20-21</td>
+                            <td>0</td>
+                            <td id="fixture-20-value">0</td>
+                        </tr>
+                        <tr>
+                            <td>Office Desk Light</td>
+                            <td>30-31</td>
+                            <td>0</td>
+                            <td id="fixture-30-value">0</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Plugin Status</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Plugin</th>
+                        <th>Status</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>ArtNet</td>
+                        <td class="status-online">✓ Active</td>
+                        <td>Ethernet-based DMX protocol</td>
+                    </tr>
+                    <tr>
+                        <td>USB DMX</td>
+                        <td class="status-offline">✗ Not Connected</td>
+                        <td>USB DMX interfaces</td>
+                    </tr>
+                    <tr>
+                        <td>E1.31 (sACN)</td>
+                        <td class="status-online">✓ Active</td>
+                        <td>Streaming ACN protocol</td>
+                    </tr>
+                    <tr>
+                        <td>Mock Plugin</td>
+                        <td class="status-online">✓ Active</td>
+                        <td>Simulated DMX output for testing</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Actions</h2>
+            <button onclick="blackout()">Blackout All</button>
+            <button onclick="testChannels()">Test All Channels</button>
+            <button onclick="refreshData()">Refresh</button>
+            <button onclick="showDMXMonitor()">DMX Monitor</button>
+        </div>
+    </div>
+
+    <script>
+        // Generate channel displays for Universe 0
+        function generateChannels() {
+            const universe0 = document.getElementById('universe-0');
+            const activeChannels = [1, 2, 10, 11, 12, 13, 20, 21, 30, 31];
+
+            for (let i = 1; i <= 64; i++) {
+                const channelDiv = document.createElement('div');
+                channelDiv.className = activeChannels.includes(i) ? 'channel active' : 'channel';
+                channelDiv.innerHTML = `
+                    <div>${i}</div>
+                    <div class="channel-value">${activeChannels.includes(i) ? Math.floor(Math.random() * 255) : 0}</div>
+                `;
+                universe0.appendChild(channelDiv);
+            }
+
+            // Universe 1 (empty)
+            const universe1 = document.getElementById('universe-1');
+            for (let i = 1; i <= 64; i++) {
+                const channelDiv = document.createElement('div');
+                channelDiv.className = 'channel';
+                channelDiv.innerHTML = `
+                    <div>${i}</div>
+                    <div class="channel-value">0</div>
+                `;
+                universe1.appendChild(channelDiv);
+            }
+        }
+
+        function blackout() {
+            alert('Blackout command sent (mock mode)');
+            document.querySelectorAll('.channel-value').forEach(el => {
+                el.textContent = '0';
+            });
+        }
+
+        function testChannels() {
+            alert('Running channel test sequence (mock mode)');
+            document.querySelectorAll('.channel.active .channel-value').forEach(el => {
+                el.textContent = '255';
+            });
+        }
+
+        function refreshData() {
+            // Simulate random DMX values for active channels
+            document.querySelectorAll('.channel.active .channel-value').forEach(el => {
+                el.textContent = Math.floor(Math.random() * 255);
+            });
+        }
+
+        function showDMXMonitor() {
+            alert('DMX Monitor would open in a new window in production mode.\n\nThe monitor shows real-time DMX packet analysis and timing information.');
+        }
+
+        // Initialize
+        generateChannels();
+
+        // Simulate live updates
+        setInterval(() => {
+            document.querySelectorAll('.channel.active .channel-value').forEach(el => {
+                // Simulate slight value changes
+                const current = parseInt(el.textContent);
+                const change = Math.floor(Math.random() * 10) - 5;
+                const newValue = Math.max(0, Math.min(255, current + change));
+                el.textContent = newValue;
+            });
+        }, 2000);
+    </script>
+</body>
+</html>
