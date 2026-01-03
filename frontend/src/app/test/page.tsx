@@ -266,13 +266,16 @@ export default function LightTestPage() {
     const existingTimer = groupDebounceTimers.current.get(groupId);
     if (existingTimer) clearTimeout(existingTimer);
 
-    // Store user-set value immediately
+    // Store user-set value immediately and force re-render
     const existing = userGroupGoalState.current.get(groupId);
     userGroupGoalState.current.set(groupId, {
       brightness,
       cct: existing?.cct,
       timestamp: Date.now(),
     });
+
+    // Force immediate UI update by updating state
+    setGroupsWithFixtures(prev => [...prev]);
 
     const timer = setTimeout(async () => {
       try {
@@ -295,13 +298,16 @@ export default function LightTestPage() {
     const existingTimer = groupDebounceTimers.current.get(timerKey);
     if (existingTimer) clearTimeout(existingTimer);
 
-    // Store user-set value immediately
+    // Store user-set value immediately and force re-render
     const existing = userGroupGoalState.current.get(groupId);
     userGroupGoalState.current.set(groupId, {
       brightness: existing?.brightness,
       cct: colorTemp,
       timestamp: Date.now(),
     });
+
+    // Force immediate UI update by updating state
+    setGroupsWithFixtures(prev => [...prev]);
 
     const timer = setTimeout(async () => {
       try {
@@ -682,7 +688,15 @@ export default function LightTestPage() {
                             </span>
                           </div>
                         </div>
-                        <div className="relative">
+                        <div className="relative h-2">
+                          {/* Background showing current and goal */}
+                          <div className="absolute top-0 left-0 right-0 h-2 bg-[#2a2a2f] rounded-full pointer-events-none">
+                            <div
+                              className="h-full bg-green-500/40 rounded-full transition-all duration-100"
+                              style={{ width: `${getGroupCurrentBrightness(group)}%` }}
+                              title={`Average current: ${Math.round(getGroupCurrentBrightness(group))}%`}
+                            />
+                          </div>
                           <input
                             type="range"
                             min="0"
@@ -692,25 +706,20 @@ export default function LightTestPage() {
                               const value = parseInt(e.target.value) / 100;
                               sendGroupControl(group.id, value);
                             }}
-                            className="relative z-10 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
+                            className="absolute top-0 left-0 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
+                              [&::-webkit-slider-runnable-track]:h-2
+                              [&::-webkit-slider-runnable-track]:rounded-full
+                              [&::-webkit-slider-runnable-track]:bg-transparent
                               [&::-webkit-slider-thumb]:appearance-none
                               [&::-webkit-slider-thumb]:w-5
                               [&::-webkit-slider-thumb]:h-5
                               [&::-webkit-slider-thumb]:rounded-full
                               [&::-webkit-slider-thumb]:bg-amber-500
                               [&::-webkit-slider-thumb]:cursor-pointer
-                              [&::-webkit-slider-thumb]:shadow-lg
-                              [&::-webkit-slider-thumb]:ring-2
-                              [&::-webkit-slider-thumb]:ring-amber-400/50"
+                              [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+                              [&::-webkit-slider-thumb]:border-2
+                              [&::-webkit-slider-thumb]:border-amber-400"
                           />
-                          {/* Background showing current and goal */}
-                          <div className="absolute top-0 left-0 right-0 h-2 bg-[#2a2a2f] rounded-full pointer-events-none -z-0">
-                            <div
-                              className="h-full bg-green-500/40 rounded-full transition-all duration-100"
-                              style={{ width: `${getGroupCurrentBrightness(group)}%` }}
-                              title={`Average current: ${Math.round(getGroupCurrentBrightness(group))}%`}
-                            />
-                          </div>
                         </div>
                         <div className="flex justify-between mt-2">
                           {[0, 25, 50, 75, 100].map((val) => (
@@ -744,30 +753,10 @@ export default function LightTestPage() {
                                 </span>
                               </div>
                             </div>
-                            <div className="relative">
-                              <input
-                                type="range"
-                                min={cctMin}
-                                max={cctMax}
-                                value={groupCct}
-                                onChange={(e) => {
-                                  const value = parseInt(e.target.value);
-                                  sendGroupCctControl(group.id, value);
-                                }}
-                                className="relative z-10 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
-                                  [&::-webkit-slider-thumb]:appearance-none
-                                  [&::-webkit-slider-thumb]:w-5
-                                  [&::-webkit-slider-thumb]:h-5
-                                  [&::-webkit-slider-thumb]:rounded-full
-                                  [&::-webkit-slider-thumb]:bg-white
-                                  [&::-webkit-slider-thumb]:border
-                                  [&::-webkit-slider-thumb]:border-[#636366]
-                                  [&::-webkit-slider-thumb]:cursor-pointer
-                                  [&::-webkit-slider-thumb]:shadow-lg"
-                              />
+                            <div className="relative h-2">
                               {/* Background gradient with current position indicator */}
                               <div
-                                className="absolute top-0 left-0 right-0 h-2 rounded-full pointer-events-none -z-0"
+                                className="absolute top-0 left-0 right-0 h-2 rounded-full pointer-events-none"
                                 style={{
                                   background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})`,
                                 }}
@@ -781,6 +770,29 @@ export default function LightTestPage() {
                                   title={`Average current: ${groupCurrentCct}K`}
                                 />
                               </div>
+                              <input
+                                type="range"
+                                min={cctMin}
+                                max={cctMax}
+                                value={groupCct}
+                                onChange={(e) => {
+                                  const value = parseInt(e.target.value);
+                                  sendGroupCctControl(group.id, value);
+                                }}
+                                className="absolute top-0 left-0 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
+                                  [&::-webkit-slider-runnable-track]:h-2
+                                  [&::-webkit-slider-runnable-track]:rounded-full
+                                  [&::-webkit-slider-runnable-track]:bg-transparent
+                                  [&::-webkit-slider-thumb]:appearance-none
+                                  [&::-webkit-slider-thumb]:w-5
+                                  [&::-webkit-slider-thumb]:h-5
+                                  [&::-webkit-slider-thumb]:rounded-full
+                                  [&::-webkit-slider-thumb]:bg-white
+                                  [&::-webkit-slider-thumb]:border-2
+                                  [&::-webkit-slider-thumb]:border-gray-600
+                                  [&::-webkit-slider-thumb]:cursor-pointer
+                                  [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+                              />
                             </div>
                             <div className="flex justify-between mt-2">
                               {[cctMin, Math.round((cctMin + cctMax) / 2), cctMax].map((val) => (
@@ -895,32 +907,35 @@ export default function LightTestPage() {
                                           </span>
                                         </div>
                                       </div>
-                                      <div className="relative">
-                                        <input
-                                          type="range"
-                                          min="0"
-                                          max="100"
-                                          value={brightness}
-                                          onChange={(e) => handleFixtureBrightnessChange(fixture, parseInt(e.target.value))}
-                                          className="relative z-10 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
-                                            [&::-webkit-slider-thumb]:appearance-none
-                                            [&::-webkit-slider-thumb]:w-4
-                                            [&::-webkit-slider-thumb]:h-4
-                                            [&::-webkit-slider-thumb]:rounded-full
-                                            [&::-webkit-slider-thumb]:bg-amber-500
-                                            [&::-webkit-slider-thumb]:cursor-pointer
-                                            [&::-webkit-slider-thumb]:shadow-lg
-                                            [&::-webkit-slider-thumb]:ring-2
-                                            [&::-webkit-slider-thumb]:ring-amber-400/50"
-                                        />
+                                      <div className="relative h-1.5">
                                         {/* Background showing current and goal */}
-                                        <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#2a2a2f] rounded-full pointer-events-none -z-0">
+                                        <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#2a2a2f] rounded-full pointer-events-none">
                                           <div
                                             className="h-full bg-green-500/40 rounded-full transition-all duration-100"
                                             style={{ width: `${currentBrightness}%` }}
                                             title={`Current: ${Math.round(currentBrightness)}%`}
                                           />
                                         </div>
+                                        <input
+                                          type="range"
+                                          min="0"
+                                          max="100"
+                                          value={brightness}
+                                          onChange={(e) => handleFixtureBrightnessChange(fixture, parseInt(e.target.value))}
+                                          className="absolute top-0 left-0 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
+                                            [&::-webkit-slider-runnable-track]:h-1.5
+                                            [&::-webkit-slider-runnable-track]:rounded-full
+                                            [&::-webkit-slider-runnable-track]:bg-transparent
+                                            [&::-webkit-slider-thumb]:appearance-none
+                                            [&::-webkit-slider-thumb]:w-4
+                                            [&::-webkit-slider-thumb]:h-4
+                                            [&::-webkit-slider-thumb]:rounded-full
+                                            [&::-webkit-slider-thumb]:bg-amber-500
+                                            [&::-webkit-slider-thumb]:cursor-pointer
+                                            [&::-webkit-slider-thumb]:shadow-[0_2px_6px_rgba(0,0,0,0.3)]
+                                            [&::-webkit-slider-thumb]:border-2
+                                            [&::-webkit-slider-thumb]:border-amber-400"
+                                        />
                                       </div>
                                     </div>
                                   )}
@@ -939,27 +954,10 @@ export default function LightTestPage() {
                                           </span>
                                         </div>
                                       </div>
-                                      <div className="relative">
-                                        <input
-                                          type="range"
-                                          min={cctMin}
-                                          max={cctMax}
-                                          value={cct}
-                                          onChange={(e) => handleFixtureCctChange(fixture, parseInt(e.target.value))}
-                                          className="relative z-10 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
-                                            [&::-webkit-slider-thumb]:appearance-none
-                                            [&::-webkit-slider-thumb]:w-4
-                                            [&::-webkit-slider-thumb]:h-4
-                                            [&::-webkit-slider-thumb]:rounded-full
-                                            [&::-webkit-slider-thumb]:bg-white
-                                            [&::-webkit-slider-thumb]:border
-                                            [&::-webkit-slider-thumb]:border-[#636366]
-                                            [&::-webkit-slider-thumb]:cursor-pointer
-                                            [&::-webkit-slider-thumb]:shadow-lg"
-                                        />
+                                      <div className="relative h-1.5">
                                         {/* Background gradient with current position indicator */}
                                         <div
-                                          className="absolute top-0 left-0 right-0 h-1.5 rounded-full pointer-events-none -z-0"
+                                          className="absolute top-0 left-0 right-0 h-1.5 rounded-full pointer-events-none"
                                           style={{
                                             background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})`,
                                           }}
@@ -973,6 +971,26 @@ export default function LightTestPage() {
                                             title={`Current: ${currentCct}K`}
                                           />
                                         </div>
+                                        <input
+                                          type="range"
+                                          min={cctMin}
+                                          max={cctMax}
+                                          value={cct}
+                                          onChange={(e) => handleFixtureCctChange(fixture, parseInt(e.target.value))}
+                                          className="absolute top-0 left-0 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
+                                            [&::-webkit-slider-runnable-track]:h-1.5
+                                            [&::-webkit-slider-runnable-track]:rounded-full
+                                            [&::-webkit-slider-runnable-track]:bg-transparent
+                                            [&::-webkit-slider-thumb]:appearance-none
+                                            [&::-webkit-slider-thumb]:w-4
+                                            [&::-webkit-slider-thumb]:h-4
+                                            [&::-webkit-slider-thumb]:rounded-full
+                                            [&::-webkit-slider-thumb]:bg-white
+                                            [&::-webkit-slider-thumb]:border-2
+                                            [&::-webkit-slider-thumb]:border-gray-600
+                                            [&::-webkit-slider-thumb]:cursor-pointer
+                                            [&::-webkit-slider-thumb]:shadow-[0_2px_6px_rgba(0,0,0,0.3)]"
+                                        />
                                       </div>
                                     </div>
                                   )}
