@@ -117,6 +117,7 @@ export default function LightTestPage() {
   const debounceTimers = useRef<Map<number, NodeJS.Timeout>>(new Map());
   const groupDebounceTimers = useRef<Map<number, NodeJS.Timeout>>(new Map());
   const userGoalState = useRef<Map<number, { brightness: number; cct: number; timestamp: number }>>(new Map());
+  const userGroupGoalState = useRef<Map<number, { brightness?: number; cct?: number; timestamp: number }>>(new Map());
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -265,6 +266,14 @@ export default function LightTestPage() {
     const existingTimer = groupDebounceTimers.current.get(groupId);
     if (existingTimer) clearTimeout(existingTimer);
 
+    // Store user-set value immediately
+    const existing = userGroupGoalState.current.get(groupId);
+    userGroupGoalState.current.set(groupId, {
+      brightness,
+      cct: existing?.cct,
+      timestamp: Date.now(),
+    });
+
     const timer = setTimeout(async () => {
       try {
         await fetch(`${API_URL}/api/control/groups/${groupId}`, {
@@ -285,6 +294,14 @@ export default function LightTestPage() {
     const timerKey = groupId + 10000; // Offset to avoid collisions with brightness timers
     const existingTimer = groupDebounceTimers.current.get(timerKey);
     if (existingTimer) clearTimeout(existingTimer);
+
+    // Store user-set value immediately
+    const existing = userGroupGoalState.current.get(groupId);
+    userGroupGoalState.current.set(groupId, {
+      brightness: existing?.brightness,
+      cct: colorTemp,
+      timestamp: Date.now(),
+    });
 
     const timer = setTimeout(async () => {
       try {
@@ -373,6 +390,7 @@ export default function LightTestPage() {
     try {
       await fetch(`${API_URL}/api/control/all-off`, { method: 'POST' });
       userGoalState.current.clear();
+      userGroupGoalState.current.clear();
       fetchData();
     } catch (err) {
       console.error('All off error:', err);
@@ -383,6 +401,7 @@ export default function LightTestPage() {
     try {
       await fetch(`${API_URL}/api/control/panic`, { method: 'POST' });
       userGoalState.current.clear();
+      userGroupGoalState.current.clear();
       fetchData();
     } catch (err) {
       console.error('All on error:', err);
@@ -393,15 +412,33 @@ export default function LightTestPage() {
   const supportsCct = (fixture: FixtureWithState): boolean => fixture.model?.type === 'tunable_white';
   const isDimmable = (fixture: FixtureWithState): boolean => fixture.model?.type !== 'non_dimmable';
 
-  // Calculate group average brightness
+  // Get group brightness - prioritize user-set value, fall back to average
   const getGroupBrightness = (group: GroupWithFixtures): number => {
+    const userGoal = userGroupGoalState.current.get(group.id);
+    const now = Date.now();
+    const isUserControlling = userGoal && userGoal.brightness !== undefined && (now - userGoal.timestamp) < 5000;
+
+    if (isUserControlling) {
+      return userGoal.brightness! * 100; // User-set value in percentage
+    }
+
+    // Fall back to calculating average from fixtures
     if (group.fixtures.length === 0) return 0;
     const total = group.fixtures.reduce((sum, f) => sum + ((f.state?.goal_brightness ?? 0) / 10), 0);
     return total / group.fixtures.length;
   };
 
-  // Calculate group average CCT (only from tunable white fixtures)
+  // Get group CCT - prioritize user-set value, fall back to average
   const getGroupCct = (group: GroupWithFixtures): number | null => {
+    const userGoal = userGroupGoalState.current.get(group.id);
+    const now = Date.now();
+    const isUserControlling = userGoal && userGoal.cct !== undefined && (now - userGoal.timestamp) < 5000;
+
+    if (isUserControlling) {
+      return userGoal.cct!; // User-set CCT value
+    }
+
+    // Fall back to calculating average from tunable fixtures
     const tunableFixtures = group.fixtures.filter(f => f.model?.type === 'tunable_white');
     if (tunableFixtures.length === 0) return null;
     const total = tunableFixtures.reduce((sum, f) => sum + (f.state?.goal_cct ?? 2700), 0);
@@ -605,7 +642,14 @@ export default function LightTestPage() {
                         {/* Group brightness indicator */}
                         <div className="text-right">
                           <div className="text-2xl font-bold tabular-nums">{Math.round(avgBrightness)}%</div>
-                          <div className="text-xs text-[#636366]">avg brightness</div>
+                          <div className="text-xs text-[#636366]">
+                            {(() => {
+                              const userGoal = userGroupGoalState.current.get(group.id);
+                              const now = Date.now();
+                              const isUserSet = userGoal && userGoal.brightness !== undefined && (now - userGoal.timestamp) < 5000;
+                              return isUserSet ? 'group brightness' : 'avg brightness';
+                            })()}
+                          </div>
                         </div>
                       </div>
 

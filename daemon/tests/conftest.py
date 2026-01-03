@@ -296,3 +296,117 @@ def mock_time():
             self.current += seconds
 
     return MockTime()
+
+
+# ============================================================================
+# Model Instance Fixtures
+# ============================================================================
+
+@pytest_asyncio.fixture
+async def test_fixture_model(db_session: AsyncSession):
+    """Create a test fixture model."""
+    from tau.models.fixtures import FixtureModel
+
+    model = FixtureModel(
+        manufacturer="Test Manufacturer",
+        model="TW-100",
+        type="tunable_white",
+        dmx_footprint=2,
+        cct_min_kelvin=2700,
+        cct_max_kelvin=6500,
+        warm_xy_x=0.5268,
+        warm_xy_y=0.4133,
+        cool_xy_x=0.3135,
+        cool_xy_y=0.3237,
+        warm_lumens=800,
+        cool_lumens=900,
+        gamma=2.2,
+    )
+    db_session.add(model)
+    await db_session.commit()
+    await db_session.refresh(model)
+    return model
+
+
+@pytest_asyncio.fixture
+async def test_fixture(db_session: AsyncSession, test_fixture_model):
+    """Create a test fixture."""
+    from tau.models.fixtures import Fixture
+
+    fixture = Fixture(
+        name="Test Fixture",
+        fixture_model_id=test_fixture_model.id,
+        dmx_channel_start=1,
+        dmx_universe=0,
+        room="Living Room",
+    )
+    db_session.add(fixture)
+    await db_session.commit()
+    await db_session.refresh(fixture)
+    return fixture
+
+
+@pytest_asyncio.fixture
+async def test_tunable_fixture(db_session: AsyncSession, test_fixture_model):
+    """Create a test tunable white fixture."""
+    from tau.models.fixtures import Fixture
+
+    fixture = Fixture(
+        name="Test Tunable Fixture",
+        fixture_model_id=test_fixture_model.id,
+        dmx_channel_start=10,
+        dmx_universe=0,
+        secondary_dmx_channel=11,
+        room="Bedroom",
+    )
+    db_session.add(fixture)
+    await db_session.commit()
+    await db_session.refresh(fixture)
+    return fixture
+
+
+@pytest_asyncio.fixture
+async def test_group(db_session: AsyncSession):
+    """Create a test group."""
+    from tau.models.groups import Group
+
+    group = Group(
+        name="Test Group",
+        description="Test group for integration tests",
+        is_system=False,
+    )
+    db_session.add(group)
+    await db_session.commit()
+    await db_session.refresh(group)
+    return group
+
+
+@pytest_asyncio.fixture
+async def test_fixtures_in_group(db_session: AsyncSession, test_group, test_fixture_model):
+    """Create multiple test fixtures in a group."""
+    from tau.models.fixtures import Fixture
+    from tau.models.fixture_group_membership import FixtureGroupMembership
+
+    fixtures = []
+    for i in range(3):
+        fixture = Fixture(
+            name=f"Test Fixture {i+1}",
+            fixture_model_id=test_fixture_model.id,
+            dmx_channel_start=(i+1) * 10,
+            dmx_universe=0,
+            room="Test Room",
+        )
+        db_session.add(fixture)
+        await db_session.commit()
+        await db_session.refresh(fixture)
+
+        # Add to group
+        membership = FixtureGroupMembership(
+            fixture_id=fixture.id,
+            group_id=test_group.id,
+        )
+        db_session.add(membership)
+        fixtures.append(fixture)
+
+    await db_session.commit()
+    return fixtures
