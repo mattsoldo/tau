@@ -86,5 +86,36 @@ class CircadianProfile(Base):
         ),
     )
 
+    @property
+    def keyframes(self) -> List[Dict[str, Any]]:
+        """
+        Expose curve_points as keyframes for API schema compatibility.
+
+        Converts:
+        - "HH:MM" times to "HH:MM:SS" format
+        - Integer brightness (0-1000) to float (0.0-1.0) if needed
+        """
+        if not self.curve_points:
+            return []
+
+        result = []
+        for point in self.curve_points:
+            keyframe = dict(point)
+            # Convert HH:MM to HH:MM:SS if needed
+            time_val = keyframe.get("time", "")
+            if len(time_val) == 5:  # "HH:MM" format
+                keyframe["time"] = f"{time_val}:00"
+            # Convert integer brightness (0-1000) to float (0.0-1.0) if needed
+            brightness = keyframe.get("brightness", 0)
+            if isinstance(brightness, int) and brightness > 1:
+                keyframe["brightness"] = brightness / 1000.0
+            result.append(keyframe)
+        return result
+
+    @keyframes.setter
+    def keyframes(self, value: List[Dict[str, Any]]) -> None:
+        """Allow setting keyframes which maps to curve_points."""
+        self.curve_points = value
+
     def __repr__(self) -> str:
         return f"<CircadianProfile(id={self.id}, name={self.name}, type={self.interpolation_type})>"

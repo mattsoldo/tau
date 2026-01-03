@@ -91,6 +91,7 @@ class Group(Base):
         "GroupState",
         back_populates="group",
         uselist=False,
+        cascade="all, delete-orphan",
     )
 
     # Scenes scoped to this group

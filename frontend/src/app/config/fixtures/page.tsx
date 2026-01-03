@@ -1896,7 +1896,7 @@ export default function FixturesPage() {
                               value={editValue}
                               onChange={(e) => setEditValue(e.target.value)}
                               onKeyDown={handleEditKeyDown}
-                              onBlur={saveEdit}
+                              onBlur={() => saveEdit()}
                               autoFocus
                               className="w-full px-2 py-1 bg-[#1a1a1f] border border-amber-500/50 rounded text-white text-sm focus:outline-none focus:border-amber-500"
                             />
