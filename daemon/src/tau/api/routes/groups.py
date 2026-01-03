@@ -85,15 +85,6 @@ async def update_group(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    # Protect system groups from name/description changes
-    if group.is_system:
-        update_data = group_data.model_dump(exclude_unset=True)
-        if "name" in update_data or "description" in update_data:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot modify system group name or description"
-            )
-
     # Update fields
     update_data = group_data.model_dump(exclude_unset=True)
 
@@ -121,13 +112,6 @@ async def delete_group(
     group = await session.get(Group, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-
-    # Protect system groups from deletion
-    if group.is_system:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete system group"
-        )
 
     await session.delete(group)
     await session.commit()

@@ -77,14 +77,6 @@ effective_brightness = fixture.brightness * group.brightness * circadian.brightn
 - **Expiry check frequency**: Every 30 seconds (900 iterations at 30 Hz control loop)
 - **Expiry behavior**: When expired, the fixture silently returns to circadian/group control
 
-### "All Fixtures" System Group
-
-A special system group (`is_system=true`) that:
-- Contains all fixtures automatically (membership populated on daemon startup)
-- Cannot be deleted or renamed
-- Appears first in UI group lists
-- Controlling this group clears all individual overrides system-wide
-
 ## Tunable White Mixing Algorithm
 
 How the backend translates Target Brightness (B) and Target Kelvin (K) into DMX channels Warm (W) and Cool (C).

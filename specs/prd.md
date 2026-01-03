@@ -184,16 +184,6 @@ Lower-level assignments override higher-level ones.
 - Group-level controls propagate to member fixtures.
 - Group-level controls **clear individual fixture overrides** for all member fixtures.
 
-### 7.3 System Groups
-
-The system automatically creates and maintains the "All Fixtures" system group:
-
-- **Auto-population**: Contains all fixtures in the system automatically
-- **Protected**: Cannot be deleted or renamed by users
-- **UI ordering**: Appears first in all group lists
-- **Circadian support**: May have a circadian profile assigned
-- **Override clearing**: Controlling this group clears all individual overrides system-wide
-
 ---
 
 ## 8. Scenes
@@ -399,7 +389,7 @@ System behavior:
 
 ### 15.2 Default View
 
-- Displays all groups (system groups first)
+- Displays all groups
 - Group on/off control
 - Scene selection
 - Expandable to show fixtures with override indicators

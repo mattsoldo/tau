@@ -90,7 +90,7 @@ CREATE TABLE groups (
     name VARCHAR(100) NOT NULL,
     description TEXT,
 
-    -- System flag (built-in groups like "All Fixtures" cannot be deleted)
+    -- Reserved for future system-managed groups
     is_system BOOLEAN DEFAULT FALSE,
 
     -- Circadian Configuration [cite: 144]

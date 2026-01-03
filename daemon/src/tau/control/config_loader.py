@@ -53,9 +53,6 @@ class ConfigLoader:
 
         try:
             async with get_db_session() as session:
-                # Ensure "All Fixtures" system group exists
-                await self._ensure_all_fixtures_group(session)
-
                 # Load fixtures
                 fixture_count = await self._load_fixtures(session)
 
@@ -64,9 +61,6 @@ class ConfigLoader:
 
                 # Load group memberships
                 membership_count = await self._load_group_memberships(session)
-
-                # Add all fixtures to "All Fixtures" group (in-memory only)
-                await self._populate_all_fixtures_group(session)
 
             logger.info(
                 "configuration_loaded",
@@ -215,74 +209,3 @@ class ConfigLoader:
             count += 1
 
         return count
-
-    async def _ensure_all_fixtures_group(self, session) -> None:
-        """
-        Ensure the "All Fixtures" system group exists in the database.
-
-        This is a special group that automatically contains all fixtures.
-        It cannot be deleted or edited by users.
-
-        Args:
-            session: Async database session
-        """
-        # Check if system group already exists
-        result = await session.execute(
-            select(Group).where(Group.is_system == True)  # noqa: E712
-        )
-        system_group = result.scalar_one_or_none()
-
-        if system_group is None:
-            # Create the "All Fixtures" system group
-            system_group = Group(
-                name="All Fixtures",
-                description="System group containing all fixtures",
-                is_system=True,
-                circadian_enabled=False,
-            )
-            session.add(system_group)
-            await session.commit()
-            await session.refresh(system_group)
-            logger.info(
-                "all_fixtures_group_created",
-                group_id=system_group.id,
-            )
-        else:
-            logger.debug(
-                "all_fixtures_group_exists",
-                group_id=system_group.id,
-            )
-
-    async def _populate_all_fixtures_group(self, session) -> None:
-        """
-        Add all fixtures to the "All Fixtures" group in the state manager.
-
-        This is done in-memory only - the group membership is automatic
-        and doesn't need to be persisted to the database.
-
-        Args:
-            session: Async database session
-        """
-        # Get the system group
-        result = await session.execute(
-            select(Group).where(Group.is_system == True)  # noqa: E712
-        )
-        system_group = result.scalar_one_or_none()
-
-        if system_group is None:
-            logger.warning("all_fixtures_group_not_found")
-            return
-
-        # Add all fixtures to this group in state manager
-        all_fixtures_group_id = system_group.id
-        fixture_count = 0
-
-        for fixture_id in self.state_manager.fixtures.keys():
-            self.state_manager.add_fixture_to_group(fixture_id, all_fixtures_group_id)
-            fixture_count += 1
-
-        logger.info(
-            "all_fixtures_group_populated",
-            group_id=all_fixtures_group_id,
-            fixture_count=fixture_count,
-        )

@@ -260,7 +260,7 @@ export default function LightTestPage() {
     debounceTimers.current.set(fixtureId, timer);
   }, []);
 
-  // Send group control command
+  // Send group brightness control command
   const sendGroupControl = useCallback(async (groupId: number, brightness: number) => {
     const existingTimer = groupDebounceTimers.current.get(groupId);
     if (existingTimer) clearTimeout(existingTimer);
@@ -278,6 +278,27 @@ export default function LightTestPage() {
     }, 50);
 
     groupDebounceTimers.current.set(groupId, timer);
+  }, []);
+
+  // Send group CCT control command
+  const sendGroupCctControl = useCallback(async (groupId: number, colorTemp: number) => {
+    const timerKey = groupId + 10000; // Offset to avoid collisions with brightness timers
+    const existingTimer = groupDebounceTimers.current.get(timerKey);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const timer = setTimeout(async () => {
+      try {
+        await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ color_temp: colorTemp }),
+        });
+      } catch (err) {
+        console.error('Group CCT control error:', err);
+      }
+    }, 50);
+
+    groupDebounceTimers.current.set(timerKey, timer);
   }, []);
 
   // Update fixture state locally
@@ -377,6 +398,28 @@ export default function LightTestPage() {
     if (group.fixtures.length === 0) return 0;
     const total = group.fixtures.reduce((sum, f) => sum + ((f.state?.goal_brightness ?? 0) / 10), 0);
     return total / group.fixtures.length;
+  };
+
+  // Calculate group average CCT (only from tunable white fixtures)
+  const getGroupCct = (group: GroupWithFixtures): number | null => {
+    const tunableFixtures = group.fixtures.filter(f => f.model?.type === 'tunable_white');
+    if (tunableFixtures.length === 0) return null;
+    const total = tunableFixtures.reduce((sum, f) => sum + (f.state?.goal_cct ?? 2700), 0);
+    return Math.round(total / tunableFixtures.length);
+  };
+
+  // Check if group has any tunable white fixtures
+  const groupHasTunableFixtures = (group: GroupWithFixtures): boolean => {
+    return group.fixtures.some(f => f.model?.type === 'tunable_white');
+  };
+
+  // Get CCT range for group (min/max from all tunable fixtures)
+  const getGroupCctRange = (group: GroupWithFixtures): { min: number; max: number } => {
+    const tunableFixtures = group.fixtures.filter(f => f.model?.type === 'tunable_white');
+    if (tunableFixtures.length === 0) return { min: 2700, max: 6500 };
+    const min = Math.min(...tunableFixtures.map(f => f.model?.cct_min_kelvin ?? 2700));
+    const max = Math.max(...tunableFixtures.map(f => f.model?.cct_max_kelvin ?? 6500));
+    return { min, max };
   };
 
   // Count overrides in group
@@ -604,6 +647,54 @@ export default function LightTestPage() {
                           ))}
                         </div>
                       </div>
+
+                      {/* Group CCT Slider - only shown if group has tunable white fixtures */}
+                      {groupHasTunableFixtures(group) && (() => {
+                        const groupCct = getGroupCct(group) ?? 3500;
+                        const { min: cctMin, max: cctMax } = getGroupCctRange(group);
+                        return (
+                          <div className="mt-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-sm text-[#a1a1a6]">Group Color Temperature</label>
+                              <span className="text-sm font-medium tabular-nums">{groupCct}K</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={cctMin}
+                              max={cctMax}
+                              value={groupCct}
+                              onChange={(e) => {
+                                const value = parseInt(e.target.value);
+                                sendGroupCctControl(group.id, value);
+                              }}
+                              className="w-full h-2 rounded-full appearance-none cursor-pointer
+                                [&::-webkit-slider-thumb]:appearance-none
+                                [&::-webkit-slider-thumb]:w-5
+                                [&::-webkit-slider-thumb]:h-5
+                                [&::-webkit-slider-thumb]:rounded-full
+                                [&::-webkit-slider-thumb]:bg-white
+                                [&::-webkit-slider-thumb]:border
+                                [&::-webkit-slider-thumb]:border-[#636366]
+                                [&::-webkit-slider-thumb]:cursor-pointer
+                                [&::-webkit-slider-thumb]:shadow-lg"
+                              style={{
+                                background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})`,
+                              }}
+                            />
+                            <div className="flex justify-between mt-2">
+                              {[cctMin, Math.round((cctMin + cctMax) / 2), cctMax].map((val) => (
+                                <button
+                                  key={val}
+                                  onClick={() => sendGroupCctControl(group.id, val)}
+                                  className="px-3 py-1 text-xs font-medium rounded bg-[#2a2a2f] text-[#a1a1a6] hover:bg-[#3a3a3f] hover:text-white transition-colors"
+                                >
+                                  {val}K
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Expanded Fixtures */}
