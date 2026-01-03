@@ -82,7 +82,7 @@ class FixtureStateData:
 class GroupStateData:
     """Runtime state for a group"""
     group_id: int
-    brightness: float = 0.0
+    brightness: float = 1.0  # Multiplier: 1.0 = pass-through, 0.0 = off
     color_temp: Optional[int] = None
     hue: Optional[int] = None
     saturation: Optional[int] = None
