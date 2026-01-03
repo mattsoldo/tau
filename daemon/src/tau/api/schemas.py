@@ -186,22 +186,40 @@ class SceneRecallRequest(BaseModel):
 class FixtureControlRequest(BaseModel):
     brightness: Optional[float] = Field(None, ge=0.0, le=1.0)
     color_temp: Optional[int] = Field(None, ge=1000, le=10000)
-    transition_duration: float = Field(
-        default=0.0,
+    transition_duration: Optional[float] = Field(
+        default=None,
         ge=0.0,
         le=60.0,
-        description="Transition time in seconds (0 = instant)"
+        description="Transition time in seconds. If None, uses proportional time based on change amount. If 0, instant change."
+    )
+    easing: Optional[str] = Field(
+        default=None,
+        pattern="^(linear|ease_in|ease_out|ease_in_out|ease_in_cubic|ease_out_cubic|ease_in_out_cubic)$",
+        description="Easing function for transition. Defaults to ease_in_out."
+    )
+    use_proportional_time: bool = Field(
+        default=True,
+        description="If True and transition_duration is None, calculate duration based on amount of change"
     )
 
 
 class GroupControlRequest(BaseModel):
     brightness: Optional[float] = Field(None, ge=0.0, le=1.0)
     color_temp: Optional[int] = Field(None, ge=1000, le=10000)
-    transition_duration: float = Field(
-        default=0.0,
+    transition_duration: Optional[float] = Field(
+        default=None,
         ge=0.0,
         le=60.0,
-        description="Transition time in seconds (0 = instant)"
+        description="Transition time in seconds. If None, uses proportional time based on change amount. If 0, instant change."
+    )
+    easing: Optional[str] = Field(
+        default=None,
+        pattern="^(linear|ease_in|ease_out|ease_in_out|ease_in_cubic|ease_out_cubic|ease_in_out_cubic)$",
+        description="Easing function for transition. Defaults to ease_in_out."
+    )
+    use_proportional_time: bool = Field(
+        default=True,
+        description="If True and transition_duration is None, calculate duration based on amount of change"
     )
 
 

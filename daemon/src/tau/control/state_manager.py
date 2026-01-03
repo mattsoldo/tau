@@ -7,11 +7,25 @@ periodically persisted to the database.
 
 Supports gradual transitions: API calls set "goal" state, and the control
 loop interpolates "current" state toward the goal over a configurable duration.
+
+Transitions support:
+- Independent brightness and CCT transition timing
+- Easing functions (LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT, etc.)
+- Proportional duration based on amount of change within the full range
 """
 from typing import Dict, Optional, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 import structlog
+
+from tau.logic.transitions import (
+    EasingFunction,
+    DEFAULT_EASING,
+    apply_easing,
+    get_transition_config,
+    calculate_brightness_transition_time,
+    calculate_cct_transition_time,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -20,8 +34,12 @@ logger = structlog.get_logger(__name__)
 class FixtureStateData:
     """Runtime state for a single fixture.
 
-    Supports gradual transitions between states. The control loop interpolates
-    from start_* values toward goal_* values over transition_duration seconds.
+    Supports gradual transitions between states with independent timing for
+    brightness and CCT. The control loop interpolates from start_* values
+    toward goal_* values using configurable easing functions.
+
+    Transition times are proportional to the amount of change within the
+    full range (0-100% for brightness, fixture CCT range for color temp).
 
     Attributes:
         goal_brightness: Target brightness (what user/scene requested)
@@ -30,8 +48,12 @@ class FixtureStateData:
         current_color_temp: Actual CCT (interpolating toward goal)
         start_brightness: Brightness when transition began
         start_color_temp: CCT when transition began
-        transition_start: Unix timestamp when transition began
-        transition_duration: Seconds to complete transition (0 = instant)
+        brightness_transition_start: Unix timestamp when brightness transition began
+        brightness_transition_duration: Seconds to complete brightness transition
+        brightness_easing: Easing function for brightness transition
+        cct_transition_start: Unix timestamp when CCT transition began
+        cct_transition_duration: Seconds to complete CCT transition
+        cct_easing: Easing function for CCT transition
     """
     fixture_id: int
     # Goal state (user intent)
@@ -43,9 +65,17 @@ class FixtureStateData:
     # Transition start values (where we're interpolating from)
     start_brightness: float = 0.0
     start_color_temp: Optional[int] = None
-    # Transition timing
-    transition_start: Optional[float] = None  # Unix timestamp
-    transition_duration: float = 0.0  # Seconds (0 = instant)
+    # Brightness transition timing (independent)
+    brightness_transition_start: Optional[float] = None  # Unix timestamp
+    brightness_transition_duration: float = 0.0  # Seconds (0 = instant)
+    brightness_easing: EasingFunction = field(default=DEFAULT_EASING)
+    # CCT transition timing (independent)
+    cct_transition_start: Optional[float] = None  # Unix timestamp
+    cct_transition_duration: float = 0.0  # Seconds (0 = instant)
+    cct_easing: EasingFunction = field(default=DEFAULT_EASING)
+    # Legacy fields - kept for backwards compatibility
+    transition_start: Optional[float] = None  # Deprecated: use brightness_transition_start
+    transition_duration: float = 0.0  # Deprecated: use brightness_transition_duration
     # Legacy fields for compatibility
     hue: Optional[int] = None
     saturation: Optional[int] = None
@@ -76,6 +106,22 @@ class FixtureStateData:
     def color_temp(self) -> Optional[int]:
         """Alias for current_color_temp (backwards compatibility)"""
         return self.current_color_temp
+
+    @property
+    def is_brightness_transitioning(self) -> bool:
+        """Check if brightness is currently transitioning."""
+        return (
+            self.brightness_transition_start is not None
+            and self.brightness_transition_duration > 0
+        )
+
+    @property
+    def is_cct_transitioning(self) -> bool:
+        """Check if CCT is currently transitioning."""
+        return (
+            self.cct_transition_start is not None
+            and self.cct_transition_duration > 0
+        )
 
 
 @dataclass
@@ -182,7 +228,9 @@ class StateManager:
         self,
         fixture_id: int,
         brightness: float,
-        transition_duration: float = 0.0,
+        transition_duration: Optional[float] = None,
+        easing: Optional[EasingFunction] = None,
+        use_proportional_time: bool = True,
         timestamp: Optional[float] = None
     ) -> bool:
         """
@@ -191,7 +239,11 @@ class StateManager:
         Args:
             fixture_id: Fixture ID
             brightness: Target brightness value (0.0 to 1.0)
-            transition_duration: Seconds to transition (0 = instant)
+            transition_duration: Seconds to transition. If None and use_proportional_time
+                is True, calculates based on change amount. If 0, instant change.
+            easing: Easing function to use (defaults to EASE_IN_OUT)
+            use_proportional_time: If True and transition_duration is None, calculate
+                duration proportionally based on amount of brightness change
             timestamp: Optional timestamp (defaults to current time)
 
         Returns:
@@ -206,18 +258,39 @@ class StateManager:
         now = timestamp or time.time()
 
         fixture = self.fixtures[fixture_id]
+
+        # Calculate transition duration if not specified
+        if transition_duration is None:
+            if use_proportional_time:
+                transition_duration = calculate_brightness_transition_time(
+                    fixture.current_brightness, brightness
+                )
+            else:
+                transition_duration = 0.0
+
+        # Use default easing if not specified
+        if easing is None:
+            easing = get_transition_config().default_easing
+
         fixture.goal_brightness = brightness
         fixture.last_updated = now
 
         if transition_duration > 0:
             # Start a transition from current to goal
             fixture.start_brightness = fixture.current_brightness
+            fixture.brightness_transition_start = now
+            fixture.brightness_transition_duration = transition_duration
+            fixture.brightness_easing = easing
+            # Legacy field support
             fixture.transition_start = now
             fixture.transition_duration = transition_duration
         else:
             # Instant change - set current to goal immediately
             fixture.current_brightness = brightness
             fixture.start_brightness = brightness
+            fixture.brightness_transition_start = None
+            fixture.brightness_transition_duration = 0.0
+            # Legacy field support
             fixture.transition_start = None
             fixture.transition_duration = 0.0
 
@@ -228,6 +301,7 @@ class StateManager:
             fixture_id=fixture_id,
             goal_brightness=brightness,
             transition_duration=transition_duration,
+            easing=easing.value if easing else None,
         )
         return True
 
@@ -235,7 +309,9 @@ class StateManager:
         self,
         fixture_id: int,
         color_temp: int,
-        transition_duration: float = 0.0,
+        transition_duration: Optional[float] = None,
+        easing: Optional[EasingFunction] = None,
+        use_proportional_time: bool = True,
         timestamp: Optional[float] = None
     ) -> bool:
         """
@@ -244,7 +320,12 @@ class StateManager:
         Args:
             fixture_id: Fixture ID
             color_temp: Target color temperature in Kelvin (2000-6500)
-            transition_duration: Seconds to transition (0 = instant)
+            transition_duration: Seconds to transition. If None and use_proportional_time
+                is True, calculates based on change amount relative to fixture's CCT range.
+                If 0, instant change.
+            easing: Easing function to use (defaults to EASE_IN_OUT)
+            use_proportional_time: If True and transition_duration is None, calculate
+                duration proportionally based on amount of CCT change
             timestamp: Optional timestamp (defaults to current time)
 
         Returns:
@@ -259,20 +340,42 @@ class StateManager:
         now = timestamp or time.time()
 
         fixture = self.fixtures[fixture_id]
+
+        # Calculate transition duration if not specified
+        if transition_duration is None:
+            if use_proportional_time and fixture.current_color_temp is not None:
+                # Use fixture's CCT range for proportional calculation
+                cct_min = fixture.cct_min or 2000
+                cct_max = fixture.cct_max or 6500
+                transition_duration = calculate_cct_transition_time(
+                    fixture.current_color_temp, color_temp, cct_min, cct_max
+                )
+            else:
+                transition_duration = 0.0
+
+        # Use default easing if not specified
+        if easing is None:
+            easing = get_transition_config().default_easing
+
         fixture.goal_color_temp = color_temp
         fixture.last_updated = now
 
         if transition_duration > 0:
             # Start a transition from current to goal
             fixture.start_color_temp = fixture.current_color_temp
-            fixture.transition_start = now
-            fixture.transition_duration = transition_duration
+            fixture.cct_transition_start = now
+            fixture.cct_transition_duration = transition_duration
+            fixture.cct_easing = easing
+            # Legacy field support (use CCT timing if no brightness transition active)
+            if not fixture.is_brightness_transitioning:
+                fixture.transition_start = now
+                fixture.transition_duration = transition_duration
         else:
             # Instant change - set current to goal immediately
             fixture.current_color_temp = color_temp
             fixture.start_color_temp = color_temp
-            fixture.transition_start = None
-            fixture.transition_duration = 0.0
+            fixture.cct_transition_start = None
+            fixture.cct_transition_duration = 0.0
 
         self.dirty = True
 
@@ -281,6 +384,7 @@ class StateManager:
             fixture_id=fixture_id,
             goal_color_temp=color_temp,
             transition_duration=transition_duration,
+            easing=easing.value if easing else None,
         )
         return True
 
@@ -290,6 +394,8 @@ class StateManager:
 
         Called each control loop iteration (30 Hz) to interpolate current
         values toward goal values for fixtures with active transitions.
+        Brightness and CCT transitions are handled independently with their
+        own timing and easing functions.
 
         Args:
             timestamp: Current time (defaults to time.time())
@@ -301,46 +407,84 @@ class StateManager:
         transitioning_count = 0
 
         for fixture in self.fixtures.values():
-            if fixture.transition_start is None or fixture.transition_duration <= 0:
-                # No active transition - ensure current matches goal
+            fixture_transitioning = False
+
+            # Update brightness transition
+            if fixture.brightness_transition_start is not None and fixture.brightness_transition_duration > 0:
+                elapsed = now - fixture.brightness_transition_start
+                linear_progress = min(1.0, elapsed / fixture.brightness_transition_duration)
+
+                # Apply easing function
+                eased_progress = apply_easing(linear_progress, fixture.brightness_easing)
+
+                # Interpolate brightness with easing
+                fixture.current_brightness = self._lerp(
+                    fixture.start_brightness, fixture.goal_brightness, eased_progress
+                )
+
+                if linear_progress >= 1.0:
+                    # Transition complete
+                    fixture.current_brightness = fixture.goal_brightness
+                    fixture.brightness_transition_start = None
+                    fixture.brightness_transition_duration = 0.0
+                    self.dirty = True
+                else:
+                    fixture_transitioning = True
+            else:
+                # No active brightness transition - ensure current matches goal
                 if fixture.current_brightness != fixture.goal_brightness:
                     fixture.current_brightness = fixture.goal_brightness
+
+            # Update CCT transition (independent of brightness)
+            if fixture.cct_transition_start is not None and fixture.cct_transition_duration > 0:
+                elapsed = now - fixture.cct_transition_start
+                linear_progress = min(1.0, elapsed / fixture.cct_transition_duration)
+
+                # Apply easing function
+                eased_progress = apply_easing(linear_progress, fixture.cct_easing)
+
+                # Interpolate CCT with easing
+                if fixture.goal_color_temp is not None and fixture.start_color_temp is not None:
+                    fixture.current_color_temp = round(self._lerp(
+                        float(fixture.start_color_temp),
+                        float(fixture.goal_color_temp),
+                        eased_progress
+                    ))
+
+                if linear_progress >= 1.0:
+                    # Transition complete
+                    fixture.current_color_temp = fixture.goal_color_temp
+                    fixture.cct_transition_start = None
+                    fixture.cct_transition_duration = 0.0
+                    self.dirty = True
+                else:
+                    fixture_transitioning = True
+            else:
+                # No active CCT transition - ensure current matches goal
                 if fixture.current_color_temp != fixture.goal_color_temp:
                     fixture.current_color_temp = fixture.goal_color_temp
-                continue
 
-            # Calculate transition progress (0.0 to 1.0)
-            elapsed = now - fixture.transition_start
-            progress = min(1.0, elapsed / fixture.transition_duration)
-
-            # Interpolate brightness from start to goal
-            fixture.current_brightness = self._lerp(
-                fixture.start_brightness, fixture.goal_brightness, progress
-            )
-
-            # Interpolate color temp from start to goal
-            if fixture.goal_color_temp is not None and fixture.start_color_temp is not None:
-                fixture.current_color_temp = round(self._lerp(
-                    float(fixture.start_color_temp),
-                    float(fixture.goal_color_temp),
-                    progress
-                ))
-
-            # Check if transition complete
-            if progress >= 1.0:
-                fixture.current_brightness = fixture.goal_brightness
-                fixture.current_color_temp = fixture.goal_color_temp
+            # Update legacy fields
+            if fixture_transitioning:
+                transitioning_count += 1
+            else:
                 fixture.transition_start = None
                 fixture.transition_duration = 0.0
-                self.dirty = True
-            else:
-                transitioning_count += 1
 
         return transitioning_count
 
     @staticmethod
     def _lerp(start: float, end: float, t: float) -> float:
-        """Linear interpolation between start and end."""
+        """Linear interpolation between start and end.
+
+        Args:
+            start: Starting value
+            end: Ending value
+            t: Progress from 0.0 to 1.0 (already eased if using easing)
+
+        Returns:
+            Interpolated value
+        """
         return start + (end - start) * t
 
     def set_group_brightness(
