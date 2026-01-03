@@ -25,6 +25,66 @@ The Circadian Engine runs continuously. User manual interaction triggers a "Susp
 | Suspended | User clicks "Resume" (UI) | Active (Auto) | Light fades immediately to the calculated brightness/CCT for the current time of day. |
 | Suspended | System Reboot | Suspended | State persists. User's manual override is honored even after power loss. |
 
+## Fixture Override System
+
+The Override System provides per-fixture control that bypasses group and circadian automation. This enables users to manually set individual fixtures without affecting the automation state of other fixtures in the same group.
+
+### Override Behavior Truth Table
+
+| Control Action | Override Effect | Circadian | Group Multiplier | Duration |
+| :--- | :--- | :--- | :--- | :--- |
+| Individual fixture brightness/CCT set | Override activated | Bypassed | Bypassed | 8 hours |
+| Group brightness/CCT set | All member fixture overrides cleared | Resumes | Applied | Immediate |
+| Override expires (8h) | Override deactivated | Resumes | Applied | Automatic |
+| Manual "Remove Override" | Override deactivated | Resumes | Applied | Immediate |
+
+### Priority Order (Highest to Lowest)
+
+1. **Individual Fixture Override** - When `override_active=true`, the fixture's state is used directly without any multipliers
+2. **Group Control** - When a group is controlled, it clears all individual overrides for fixtures in that group
+3. **Circadian Automation** - Applied to fixtures without active overrides, modified by group multipliers
+
+### Override State Schema
+
+Each fixture maintains override tracking:
+
+```python
+# In FixtureStateData
+override_active: bool = False           # Whether override is currently active
+override_expires_at: Optional[float]    # Unix timestamp for auto-expiry
+override_source: Optional[str]          # 'fixture' (individual) or 'group'
+```
+
+### Effective State Calculation
+
+The `get_effective_fixture_state()` function implements this priority:
+
+```python
+# Pseudocode
+if fixture.override_active:
+    if current_time >= fixture.override_expires_at:
+        clear_override(fixture)  # Expired, fall through to normal logic
+    else:
+        return fixture.current_state  # No multipliers applied
+
+# Normal path: apply circadian + group multipliers
+effective_brightness = fixture.brightness * group.brightness * circadian.brightness
+```
+
+### Override Expiry
+
+- **Automatic expiry**: Overrides expire after 8 hours to prevent "forgotten" fixtures from being stuck in manual mode
+- **Expiry check frequency**: Every 30 seconds (900 iterations at 30 Hz control loop)
+- **Expiry behavior**: When expired, the fixture silently returns to circadian/group control
+
+### "All Fixtures" System Group
+
+A special system group (`is_system=true`) that:
+- Contains all fixtures automatically (membership populated on daemon startup)
+- Cannot be deleted or renamed
+- Appears first in UI group lists
+- Controlling this group clears all individual overrides system-wide
+
 ## Tunable White Mixing Algorithm
 
 How the backend translates Target Brightness (B) and Target Kelvin (K) into DMX channels Warm (W) and Cool (C).

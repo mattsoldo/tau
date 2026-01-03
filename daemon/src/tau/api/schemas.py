@@ -120,6 +120,7 @@ class GroupUpdate(BaseModel):
 
 class GroupResponse(GroupBase):
     id: int
+    is_system: Optional[bool] = False
     created_at: datetime
 
     class Config:

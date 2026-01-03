@@ -56,6 +56,20 @@ export default function HomePage() {
             </div>
           </a>
 
+          {/* Test Lighting */}
+          <Link href="/test" className="block bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-lg shadow-lg p-6 text-white hover:from-emerald-500 hover:to-emerald-600 transition-all hover:shadow-xl hover:-translate-y-0.5">
+            <h2 className="text-2xl font-semibold mb-2">Test Lighting</h2>
+            <p className="text-emerald-200">
+              Test and control individual fixtures and groups with real-time updates
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+              <span>Open Test Page</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-2xl font-semibold mb-4">Welcome to Tau</h2>
             <p className="text-gray-700 mb-4">
