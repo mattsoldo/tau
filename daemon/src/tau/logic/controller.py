@@ -5,10 +5,12 @@ Main coordination logic for the lighting control system. Orchestrates
 circadian calculations, scene management, switch processing, and hardware
 output on each control loop iteration.
 """
-from typing import Optional, Dict, Set
+from typing import Optional, Dict, Set, TYPE_CHECKING
 import structlog
 
-from tau.control.state_manager import StateManager
+if TYPE_CHECKING:
+    from tau.control.state_manager import StateManager
+
 from tau.hardware import HardwareManager
 from tau.logic.circadian import CircadianEngine
 from tau.logic.scenes import SceneEngine
@@ -38,7 +40,7 @@ class LightingController:
 
     def __init__(
         self,
-        state_manager: StateManager,
+        state_manager: "StateManager",
         hardware_manager: HardwareManager
     ):
         """
