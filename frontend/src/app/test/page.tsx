@@ -445,6 +445,21 @@ export default function LightTestPage() {
     return Math.round(total / tunableFixtures.length);
   };
 
+  // Get group's average CURRENT brightness (transitioning state)
+  const getGroupCurrentBrightness = (group: GroupWithFixtures): number => {
+    if (group.fixtures.length === 0) return 0;
+    const total = group.fixtures.reduce((sum, f) => sum + ((f.state?.current_brightness ?? 0) / 10), 0);
+    return total / group.fixtures.length;
+  };
+
+  // Get group's average CURRENT CCT (transitioning state)
+  const getGroupCurrentCct = (group: GroupWithFixtures): number | null => {
+    const tunableFixtures = group.fixtures.filter(f => f.model?.type === 'tunable_white');
+    if (tunableFixtures.length === 0) return null;
+    const total = tunableFixtures.reduce((sum, f) => sum + (f.state?.current_cct ?? 2700), 0);
+    return Math.round(total / tunableFixtures.length);
+  };
+
   // Check if group has any tunable white fixtures
   const groupHasTunableFixtures = (group: GroupWithFixtures): boolean => {
     return group.fixtures.some(f => f.model?.type === 'tunable_white');
@@ -657,28 +672,46 @@ export default function LightTestPage() {
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <label className="text-sm text-[#a1a1a6]">Group Brightness</label>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium tabular-nums text-amber-400" title="Your setting (goal)">
+                              Goal: {Math.round(avgBrightness)}%
+                            </span>
+                            <span className="text-sm text-[#636366]">→</span>
+                            <span className="text-sm font-medium tabular-nums text-green-400" title="Average current level">
+                              Now: {Math.round(getGroupCurrentBrightness(group))}%
+                            </span>
+                          </div>
                         </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          value={avgBrightness}
-                          onChange={(e) => {
-                            const value = parseInt(e.target.value) / 100;
-                            sendGroupControl(group.id, value);
-                          }}
-                          className="w-full h-2 bg-[#2a2a2f] rounded-full appearance-none cursor-pointer
-                            [&::-webkit-slider-thumb]:appearance-none
-                            [&::-webkit-slider-thumb]:w-5
-                            [&::-webkit-slider-thumb]:h-5
-                            [&::-webkit-slider-thumb]:rounded-full
-                            [&::-webkit-slider-thumb]:bg-amber-500
-                            [&::-webkit-slider-thumb]:cursor-pointer
-                            [&::-webkit-slider-thumb]:shadow-lg"
-                          style={{
-                            background: `linear-gradient(to right, #f59e0b ${avgBrightness}%, #2a2a2f ${avgBrightness}%)`,
-                          }}
-                        />
+                        <div className="relative">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={avgBrightness}
+                            onChange={(e) => {
+                              const value = parseInt(e.target.value) / 100;
+                              sendGroupControl(group.id, value);
+                            }}
+                            className="relative z-10 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
+                              [&::-webkit-slider-thumb]:appearance-none
+                              [&::-webkit-slider-thumb]:w-5
+                              [&::-webkit-slider-thumb]:h-5
+                              [&::-webkit-slider-thumb]:rounded-full
+                              [&::-webkit-slider-thumb]:bg-amber-500
+                              [&::-webkit-slider-thumb]:cursor-pointer
+                              [&::-webkit-slider-thumb]:shadow-lg
+                              [&::-webkit-slider-thumb]:ring-2
+                              [&::-webkit-slider-thumb]:ring-amber-400/50"
+                          />
+                          {/* Background showing current and goal */}
+                          <div className="absolute top-0 left-0 right-0 h-2 bg-[#2a2a2f] rounded-full pointer-events-none -z-0">
+                            <div
+                              className="h-full bg-green-500/40 rounded-full transition-all duration-100"
+                              style={{ width: `${getGroupCurrentBrightness(group)}%` }}
+                              title={`Average current: ${Math.round(getGroupCurrentBrightness(group))}%`}
+                            />
+                          </div>
+                        </div>
                         <div className="flex justify-between mt-2">
                           {[0, 25, 50, 75, 100].map((val) => (
                             <button
@@ -695,36 +728,60 @@ export default function LightTestPage() {
                       {/* Group CCT Slider - only shown if group has tunable white fixtures */}
                       {groupHasTunableFixtures(group) && (() => {
                         const groupCct = getGroupCct(group) ?? 3500;
+                        const groupCurrentCct = getGroupCurrentCct(group) ?? 3500;
                         const { min: cctMin, max: cctMax } = getGroupCctRange(group);
                         return (
                           <div className="mt-4">
                             <div className="flex items-center justify-between mb-2">
                               <label className="text-sm text-[#a1a1a6]">Group Color Temperature</label>
-                              <span className="text-sm font-medium tabular-nums">{groupCct}K</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium tabular-nums text-amber-400" title="Your setting (goal)">
+                                  Goal: {groupCct}K
+                                </span>
+                                <span className="text-sm text-[#636366]">→</span>
+                                <span className="text-sm font-medium tabular-nums text-green-400" title="Average current level">
+                                  Now: {groupCurrentCct}K
+                                </span>
+                              </div>
                             </div>
-                            <input
-                              type="range"
-                              min={cctMin}
-                              max={cctMax}
-                              value={groupCct}
-                              onChange={(e) => {
-                                const value = parseInt(e.target.value);
-                                sendGroupCctControl(group.id, value);
-                              }}
-                              className="w-full h-2 rounded-full appearance-none cursor-pointer
-                                [&::-webkit-slider-thumb]:appearance-none
-                                [&::-webkit-slider-thumb]:w-5
-                                [&::-webkit-slider-thumb]:h-5
-                                [&::-webkit-slider-thumb]:rounded-full
-                                [&::-webkit-slider-thumb]:bg-white
-                                [&::-webkit-slider-thumb]:border
-                                [&::-webkit-slider-thumb]:border-[#636366]
-                                [&::-webkit-slider-thumb]:cursor-pointer
-                                [&::-webkit-slider-thumb]:shadow-lg"
-                              style={{
-                                background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})`,
-                              }}
-                            />
+                            <div className="relative">
+                              <input
+                                type="range"
+                                min={cctMin}
+                                max={cctMax}
+                                value={groupCct}
+                                onChange={(e) => {
+                                  const value = parseInt(e.target.value);
+                                  sendGroupCctControl(group.id, value);
+                                }}
+                                className="relative z-10 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
+                                  [&::-webkit-slider-thumb]:appearance-none
+                                  [&::-webkit-slider-thumb]:w-5
+                                  [&::-webkit-slider-thumb]:h-5
+                                  [&::-webkit-slider-thumb]:rounded-full
+                                  [&::-webkit-slider-thumb]:bg-white
+                                  [&::-webkit-slider-thumb]:border
+                                  [&::-webkit-slider-thumb]:border-[#636366]
+                                  [&::-webkit-slider-thumb]:cursor-pointer
+                                  [&::-webkit-slider-thumb]:shadow-lg"
+                              />
+                              {/* Background gradient with current position indicator */}
+                              <div
+                                className="absolute top-0 left-0 right-0 h-2 rounded-full pointer-events-none -z-0"
+                                style={{
+                                  background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})`,
+                                }}
+                              >
+                                {/* Current CCT indicator */}
+                                <div
+                                  className="absolute top-1/2 -translate-y-1/2 w-1.5 h-4 bg-green-400 rounded-full shadow-lg transition-all duration-100"
+                                  style={{
+                                    left: `${((groupCurrentCct - cctMin) / (cctMax - cctMin)) * 100}%`,
+                                  }}
+                                  title={`Average current: ${groupCurrentCct}K`}
+                                />
+                              </div>
+                            </div>
                             <div className="flex justify-between mt-2">
                               {[cctMin, Math.round((cctMin + cctMax) / 2), cctMax].map((val) => (
                                 <button
@@ -828,25 +885,43 @@ export default function LightTestPage() {
                                     <div>
                                       <div className="flex items-center justify-between mb-1">
                                         <label className="text-xs text-[#a1a1a6]">Brightness</label>
-                                        <span className="text-xs font-medium tabular-nums">{Math.round(brightness)}%</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs font-medium tabular-nums text-amber-400" title="Your setting (goal)">
+                                            Goal: {Math.round(brightness)}%
+                                          </span>
+                                          <span className="text-xs text-[#636366]">→</span>
+                                          <span className="text-xs font-medium tabular-nums text-green-400" title="Actual current level">
+                                            Now: {Math.round(currentBrightness)}%
+                                          </span>
+                                        </div>
                                       </div>
-                                      <input
-                                        type="range"
-                                        min="0"
-                                        max="100"
-                                        value={brightness}
-                                        onChange={(e) => handleFixtureBrightnessChange(fixture, parseInt(e.target.value))}
-                                        className="w-full h-1.5 bg-[#2a2a2f] rounded-full appearance-none cursor-pointer
-                                          [&::-webkit-slider-thumb]:appearance-none
-                                          [&::-webkit-slider-thumb]:w-4
-                                          [&::-webkit-slider-thumb]:h-4
-                                          [&::-webkit-slider-thumb]:rounded-full
-                                          [&::-webkit-slider-thumb]:bg-amber-500
-                                          [&::-webkit-slider-thumb]:cursor-pointer"
-                                        style={{
-                                          background: `linear-gradient(to right, #f59e0b ${brightness}%, #2a2a2f ${brightness}%)`,
-                                        }}
-                                      />
+                                      <div className="relative">
+                                        <input
+                                          type="range"
+                                          min="0"
+                                          max="100"
+                                          value={brightness}
+                                          onChange={(e) => handleFixtureBrightnessChange(fixture, parseInt(e.target.value))}
+                                          className="relative z-10 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
+                                            [&::-webkit-slider-thumb]:appearance-none
+                                            [&::-webkit-slider-thumb]:w-4
+                                            [&::-webkit-slider-thumb]:h-4
+                                            [&::-webkit-slider-thumb]:rounded-full
+                                            [&::-webkit-slider-thumb]:bg-amber-500
+                                            [&::-webkit-slider-thumb]:cursor-pointer
+                                            [&::-webkit-slider-thumb]:shadow-lg
+                                            [&::-webkit-slider-thumb]:ring-2
+                                            [&::-webkit-slider-thumb]:ring-amber-400/50"
+                                        />
+                                        {/* Background showing current and goal */}
+                                        <div className="absolute top-0 left-0 right-0 h-1.5 bg-[#2a2a2f] rounded-full pointer-events-none -z-0">
+                                          <div
+                                            className="h-full bg-green-500/40 rounded-full transition-all duration-100"
+                                            style={{ width: `${currentBrightness}%` }}
+                                            title={`Current: ${Math.round(currentBrightness)}%`}
+                                          />
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
 
@@ -854,27 +929,51 @@ export default function LightTestPage() {
                                     <div>
                                       <div className="flex items-center justify-between mb-1">
                                         <label className="text-xs text-[#a1a1a6]">Color Temperature</label>
-                                        <span className="text-xs font-medium tabular-nums">{cct}K</span>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs font-medium tabular-nums text-amber-400" title="Your setting (goal)">
+                                            Goal: {cct}K
+                                          </span>
+                                          <span className="text-xs text-[#636366]">→</span>
+                                          <span className="text-xs font-medium tabular-nums text-green-400" title="Actual current level">
+                                            Now: {currentCct}K
+                                          </span>
+                                        </div>
                                       </div>
-                                      <input
-                                        type="range"
-                                        min={cctMin}
-                                        max={cctMax}
-                                        value={cct}
-                                        onChange={(e) => handleFixtureCctChange(fixture, parseInt(e.target.value))}
-                                        className="w-full h-1.5 rounded-full appearance-none cursor-pointer
-                                          [&::-webkit-slider-thumb]:appearance-none
-                                          [&::-webkit-slider-thumb]:w-4
-                                          [&::-webkit-slider-thumb]:h-4
-                                          [&::-webkit-slider-thumb]:rounded-full
-                                          [&::-webkit-slider-thumb]:bg-white
-                                          [&::-webkit-slider-thumb]:border
-                                          [&::-webkit-slider-thumb]:border-[#636366]
-                                          [&::-webkit-slider-thumb]:cursor-pointer"
-                                        style={{
-                                          background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})`,
-                                        }}
-                                      />
+                                      <div className="relative">
+                                        <input
+                                          type="range"
+                                          min={cctMin}
+                                          max={cctMax}
+                                          value={cct}
+                                          onChange={(e) => handleFixtureCctChange(fixture, parseInt(e.target.value))}
+                                          className="relative z-10 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
+                                            [&::-webkit-slider-thumb]:appearance-none
+                                            [&::-webkit-slider-thumb]:w-4
+                                            [&::-webkit-slider-thumb]:h-4
+                                            [&::-webkit-slider-thumb]:rounded-full
+                                            [&::-webkit-slider-thumb]:bg-white
+                                            [&::-webkit-slider-thumb]:border
+                                            [&::-webkit-slider-thumb]:border-[#636366]
+                                            [&::-webkit-slider-thumb]:cursor-pointer
+                                            [&::-webkit-slider-thumb]:shadow-lg"
+                                        />
+                                        {/* Background gradient with current position indicator */}
+                                        <div
+                                          className="absolute top-0 left-0 right-0 h-1.5 rounded-full pointer-events-none -z-0"
+                                          style={{
+                                            background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})`,
+                                          }}
+                                        >
+                                          {/* Current CCT indicator */}
+                                          <div
+                                            className="absolute top-1/2 -translate-y-1/2 w-1 h-3 bg-green-400 rounded-full shadow-lg transition-all duration-100"
+                                            style={{
+                                              left: `${((currentCct - cctMin) / (cctMax - cctMin)) * 100}%`,
+                                            }}
+                                            title={`Current: ${currentCct}K`}
+                                          />
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
