@@ -713,12 +713,20 @@ export default function LightTestPage() {
                               [&::-webkit-slider-thumb]:appearance-none
                               [&::-webkit-slider-thumb]:w-5
                               [&::-webkit-slider-thumb]:h-5
+                              [&::-webkit-slider-thumb]:mt-[-6px]
                               [&::-webkit-slider-thumb]:rounded-full
                               [&::-webkit-slider-thumb]:bg-amber-500
                               [&::-webkit-slider-thumb]:cursor-pointer
                               [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
                               [&::-webkit-slider-thumb]:border-2
-                              [&::-webkit-slider-thumb]:border-amber-400"
+                              [&::-webkit-slider-thumb]:border-amber-400
+                              [&::-moz-range-thumb]:w-5
+                              [&::-moz-range-thumb]:h-5
+                              [&::-moz-range-thumb]:rounded-full
+                              [&::-moz-range-thumb]:bg-amber-500
+                              [&::-moz-range-thumb]:border-2
+                              [&::-moz-range-thumb]:border-amber-400
+                              [&::-moz-range-thumb]:cursor-pointer"
                           />
                         </div>
                         <div className="flex justify-between mt-2">
@@ -786,12 +794,20 @@ export default function LightTestPage() {
                                   [&::-webkit-slider-thumb]:appearance-none
                                   [&::-webkit-slider-thumb]:w-5
                                   [&::-webkit-slider-thumb]:h-5
+                                  [&::-webkit-slider-thumb]:mt-[-6px]
                                   [&::-webkit-slider-thumb]:rounded-full
                                   [&::-webkit-slider-thumb]:bg-white
                                   [&::-webkit-slider-thumb]:border-2
                                   [&::-webkit-slider-thumb]:border-gray-600
                                   [&::-webkit-slider-thumb]:cursor-pointer
-                                  [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+                                  [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+                                  [&::-moz-range-thumb]:w-5
+                                  [&::-moz-range-thumb]:h-5
+                                  [&::-moz-range-thumb]:rounded-full
+                                  [&::-moz-range-thumb]:bg-white
+                                  [&::-moz-range-thumb]:border-2
+                                  [&::-moz-range-thumb]:border-gray-600
+                                  [&::-moz-range-thumb]:cursor-pointer"
                               />
                             </div>
                             <div className="flex justify-between mt-2">
@@ -929,12 +945,20 @@ export default function LightTestPage() {
                                             [&::-webkit-slider-thumb]:appearance-none
                                             [&::-webkit-slider-thumb]:w-4
                                             [&::-webkit-slider-thumb]:h-4
+                                            [&::-webkit-slider-thumb]:mt-[-5px]
                                             [&::-webkit-slider-thumb]:rounded-full
                                             [&::-webkit-slider-thumb]:bg-amber-500
                                             [&::-webkit-slider-thumb]:cursor-pointer
                                             [&::-webkit-slider-thumb]:shadow-[0_2px_6px_rgba(0,0,0,0.3)]
                                             [&::-webkit-slider-thumb]:border-2
-                                            [&::-webkit-slider-thumb]:border-amber-400"
+                                            [&::-webkit-slider-thumb]:border-amber-400
+                                            [&::-moz-range-thumb]:w-4
+                                            [&::-moz-range-thumb]:h-4
+                                            [&::-moz-range-thumb]:rounded-full
+                                            [&::-moz-range-thumb]:bg-amber-500
+                                            [&::-moz-range-thumb]:border-2
+                                            [&::-moz-range-thumb]:border-amber-400
+                                            [&::-moz-range-thumb]:cursor-pointer"
                                         />
                                       </div>
                                     </div>
@@ -984,12 +1008,20 @@ export default function LightTestPage() {
                                             [&::-webkit-slider-thumb]:appearance-none
                                             [&::-webkit-slider-thumb]:w-4
                                             [&::-webkit-slider-thumb]:h-4
+                                            [&::-webkit-slider-thumb]:mt-[-5px]
                                             [&::-webkit-slider-thumb]:rounded-full
                                             [&::-webkit-slider-thumb]:bg-white
                                             [&::-webkit-slider-thumb]:border-2
                                             [&::-webkit-slider-thumb]:border-gray-600
                                             [&::-webkit-slider-thumb]:cursor-pointer
-                                            [&::-webkit-slider-thumb]:shadow-[0_2px_6px_rgba(0,0,0,0.3)]"
+                                            [&::-webkit-slider-thumb]:shadow-[0_2px_6px_rgba(0,0,0,0.3)]
+                                            [&::-moz-range-thumb]:w-4
+                                            [&::-moz-range-thumb]:h-4
+                                            [&::-moz-range-thumb]:rounded-full
+                                            [&::-moz-range-thumb]:bg-white
+                                            [&::-moz-range-thumb]:border-2
+                                            [&::-moz-range-thumb]:border-gray-600
+                                            [&::-moz-range-thumb]:cursor-pointer"
                                         />
                                       </div>
                                     </div>
