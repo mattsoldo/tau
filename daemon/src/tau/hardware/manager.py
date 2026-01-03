@@ -1,8 +1,13 @@
 """
-Hardware Manager - Coordinates LabJack and OLA drivers
+Hardware Manager - Coordinates LabJack, GPIO, and OLA drivers
 
 Manages hardware initialization, health monitoring, and provides
 a unified interface for the control loop to interact with hardware.
+
+Supports:
+- LabJack U3 for switch inputs and PWM outputs
+- Raspberry Pi GPIO for switch inputs and PWM outputs
+- OLA (Open Lighting Architecture) for DMX512 control
 """
 import asyncio
 from typing import Dict, Optional
@@ -15,12 +20,40 @@ from tau.hardware.ola_mock import OLAMock
 logger = structlog.get_logger(__name__)
 
 
+def parse_pin_mapping(mapping_str: Optional[str]) -> Optional[Dict[int, int]]:
+    """
+    Parse a pin mapping string into a dictionary
+
+    Args:
+        mapping_str: Format "channel:pin,channel:pin" (e.g., "0:17,1:27,2:22")
+
+    Returns:
+        Dictionary mapping channel numbers to GPIO pin numbers, or None
+    """
+    if not mapping_str:
+        return None
+
+    result = {}
+    for pair in mapping_str.split(','):
+        pair = pair.strip()
+        if ':' in pair:
+            try:
+                channel, pin = pair.split(':')
+                result[int(channel.strip())] = int(pin.strip())
+            except ValueError:
+                logger.warning("invalid_pin_mapping", pair=pair)
+    return result if result else None
+
+
 class HardwareManager:
     """
     Central hardware manager
 
-    Coordinates LabJack and OLA drivers, handles initialization,
+    Coordinates LabJack/GPIO and OLA drivers, handles initialization,
     health monitoring, and provides unified hardware interface.
+
+    On Raspberry Pi, GPIO can be used instead of LabJack for switch
+    inputs and PWM outputs.
     """
 
     def __init__(
@@ -30,6 +63,12 @@ class HardwareManager:
         labjack_mock: bool = True,
         ola_mock: bool = True,
         use_mock: Optional[bool] = None,  # Deprecated, kept for backward compatibility
+        # Raspberry Pi GPIO options
+        use_gpio: bool = False,
+        gpio_use_pigpio: bool = True,
+        gpio_pull_up: bool = True,
+        gpio_input_pins: Optional[str] = None,
+        gpio_pwm_pins: Optional[str] = None,
     ):
         """
         Initialize hardware manager
@@ -40,6 +79,11 @@ class HardwareManager:
             labjack_mock: If True, use mock LabJack driver
             ola_mock: If True, use mock OLA driver
             use_mock: Deprecated - use labjack_mock and ola_mock instead
+            use_gpio: If True, use Raspberry Pi GPIO instead of LabJack
+            gpio_use_pigpio: Use pigpio for hardware PWM on Raspberry Pi
+            gpio_pull_up: Enable internal pull-up resistors on GPIO inputs
+            gpio_input_pins: Custom GPIO input pin mapping string
+            gpio_pwm_pins: Custom GPIO PWM pin mapping string
         """
         # Handle deprecated use_mock parameter
         if use_mock is not None:
@@ -47,10 +91,29 @@ class HardwareManager:
             ola_mock = use_mock
 
         self.use_mock = labjack_mock  # Keep for backward compatibility
+        self.use_gpio = use_gpio
 
         # Create drivers if not provided
         if labjack_driver is None:
-            if labjack_mock:
+            if use_gpio:
+                # Use Raspberry Pi GPIO driver
+                from tau.hardware.gpio_driver import GPIODriver
+
+                input_pins = parse_pin_mapping(gpio_input_pins)
+                pwm_pins = parse_pin_mapping(gpio_pwm_pins)
+
+                self.labjack = GPIODriver(
+                    input_pins=input_pins,
+                    pwm_pins=pwm_pins,
+                    use_pigpio=gpio_use_pigpio,
+                    pull_up=gpio_pull_up,
+                )
+                logger.info(
+                    "using_gpio_driver",
+                    use_pigpio=gpio_use_pigpio,
+                    pull_up=gpio_pull_up,
+                )
+            elif labjack_mock:
                 self.labjack = LabJackMock()
             else:
                 # Import real driver only if needed
@@ -81,8 +144,9 @@ class HardwareManager:
 
         logger.info(
             "hardware_manager_initialized",
-            labjack_mock=labjack_mock,
+            labjack_mock=labjack_mock if not use_gpio else False,
             ola_mock=ola_mock,
+            use_gpio=use_gpio,
             labjack=self.labjack.name,
             ola=self.ola.name,
         )

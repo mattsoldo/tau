@@ -2,7 +2,7 @@
 Tau Daemon Configuration Management
 """
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import Field, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,6 +25,10 @@ class Settings(BaseSettings):
 
     # Daemon Configuration
     daemon_port: int = Field(default=8000, description="HTTP API port")
+    daemon_host: str = Field(
+        default="0.0.0.0",
+        description="Host to bind the API server (0.0.0.0 for network access)"
+    )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO", description="Logging level"
     )
@@ -34,6 +38,29 @@ class Settings(BaseSettings):
         default=True, description="Use mock LabJack interface (no real hardware)"
     )
     ola_mock: bool = Field(default=True, description="Use mock OLA interface (no real hardware)")
+
+    # Raspberry Pi GPIO Configuration
+    use_gpio: bool = Field(
+        default=False,
+        description="Use Raspberry Pi GPIO instead of LabJack for switch inputs"
+    )
+    gpio_use_pigpio: bool = Field(
+        default=True,
+        description="Use pigpio for hardware PWM (requires pigpiod running)"
+    )
+    gpio_pull_up: bool = Field(
+        default=True,
+        description="Enable internal pull-up resistors on GPIO inputs"
+    )
+    # GPIO pin mappings (comma-separated channel:pin pairs, e.g., "0:17,1:27,2:22")
+    gpio_input_pins: Optional[str] = Field(
+        default=None,
+        description="Custom GPIO input pin mapping (format: channel:pin,channel:pin)"
+    )
+    gpio_pwm_pins: Optional[str] = Field(
+        default=None,
+        description="Custom GPIO PWM pin mapping (format: channel:pin,channel:pin)"
+    )
 
     # Control Loop Configuration
     control_loop_hz: int = Field(default=30, description="Control loop frequency in Hz")
@@ -82,6 +109,22 @@ class Settings(BaseSettings):
         default=["http://localhost:3000", "http://localhost:8000"],
         description="Allowed CORS origins (use ['*'] for development only)"
     )
+    cors_allow_all: bool = Field(
+        default=False,
+        description="Allow CORS from any origin (useful for Raspberry Pi on local network)"
+    )
+
+
+def get_effective_cors_origins(settings: "Settings") -> list[str]:
+    """
+    Get the effective CORS origins based on settings.
+
+    If cors_allow_all is True, returns ['*'] to allow any origin.
+    Otherwise returns the configured cors_origins list.
+    """
+    if settings.cors_allow_all:
+        return ["*"]
+    return settings.cors_origins
 
 
 @lru_cache()
