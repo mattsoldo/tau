@@ -53,6 +53,25 @@ class Settings(BaseSettings):
     switch_poll_hz: int = Field(default=100, description="Switch input polling frequency in Hz")
     switch_debounce_ms: int = Field(default=50, description="Default switch debounce time in ms")
 
+    # Transition Configuration
+    # Times are for the full range - actual time scales proportionally to change amount
+    transition_brightness_seconds: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=60.0,
+        description="Time in seconds for full brightness transition (0% to 100%)"
+    )
+    transition_cct_seconds: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=60.0,
+        description="Time in seconds for full CCT range transition"
+    )
+    transition_default_easing: str = Field(
+        default="ease_in_out",
+        description="Default easing function (linear, ease_in, ease_out, ease_in_out, ease_in_cubic, ease_out_cubic, ease_in_out_cubic)"
+    )
+
     # API Configuration
     api_title: str = Field(default="Tau Lighting Control API", description="API title")
     api_version: str = Field(default="0.1.0", description="API version")

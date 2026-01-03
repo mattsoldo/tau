@@ -1,6 +1,7 @@
 """
 Control API Routes - Direct fixture and group control
 """
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from tau.api.schemas import (
     FixtureControlRequest,
@@ -13,8 +14,19 @@ from tau.api.websocket import (
     broadcast_group_state_change,
     broadcast_circadian_change,
 )
+from tau.logic.transitions import EasingFunction
 
 router = APIRouter()
+
+
+def parse_easing(easing_str: Optional[str]) -> Optional[EasingFunction]:
+    """Parse easing string to EasingFunction enum."""
+    if easing_str is None:
+        return None
+    try:
+        return EasingFunction(easing_str)
+    except ValueError:
+        return None
 
 
 @router.post("/fixtures/{fixture_id}")
@@ -22,7 +34,15 @@ async def control_fixture(
     fixture_id: int,
     control_data: FixtureControlRequest
 ):
-    """Control a specific fixture"""
+    """Control a specific fixture with optional transition and easing.
+
+    Transition duration can be:
+    - Explicit value in seconds (0 = instant)
+    - None with use_proportional_time=True: calculates duration based on change amount
+    - None with use_proportional_time=False: instant change
+
+    Easing defaults to ease_in_out for smooth transitions.
+    """
     daemon = get_daemon_instance()
     if not daemon or not daemon.state_manager:
         raise HTTPException(
@@ -35,15 +55,19 @@ async def control_fixture(
     if not state:
         raise HTTPException(status_code=404, detail="Fixture not found")
 
-    # Apply controls with optional transition
+    # Parse easing function
+    easing = parse_easing(control_data.easing)
+
+    # Apply controls with optional transition and easing
     updated = False
-    transition = control_data.transition_duration
 
     if control_data.brightness is not None:
         success = daemon.state_manager.set_fixture_brightness(
             fixture_id,
             control_data.brightness,
-            transition_duration=transition
+            transition_duration=control_data.transition_duration,
+            easing=easing,
+            use_proportional_time=control_data.use_proportional_time
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to set brightness")
@@ -53,7 +77,9 @@ async def control_fixture(
         success = daemon.state_manager.set_fixture_color_temp(
             fixture_id,
             control_data.color_temp,
-            transition_duration=transition
+            transition_duration=control_data.transition_duration,
+            easing=easing,
+            use_proportional_time=control_data.use_proportional_time
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to set color temperature")
@@ -86,7 +112,9 @@ async def control_fixture(
         "goal_color_temp": state.goal_color_temp,
         "current_brightness": state.current_brightness,
         "current_color_temp": state.current_color_temp,
-        "transitioning": state.transition_start is not None,
+        "transitioning": state.is_brightness_transitioning or state.is_cct_transitioning,
+        "brightness_transitioning": state.is_brightness_transitioning,
+        "cct_transitioning": state.is_cct_transitioning,
         "override_active": state.override_active,
         "override_expires_at": state.override_expires_at,
     }
