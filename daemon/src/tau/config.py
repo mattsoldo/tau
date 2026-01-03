@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     api_version: str = Field(default="0.1.0", description="API version")
     api_docs_enabled: bool = Field(default=True, description="Enable API documentation")
 
+    # CORS Configuration
+    cors_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:8000"],
+        description="Allowed CORS origins (use ['*'] for development only)"
+    )
+
 
 @lru_cache()
 def get_settings() -> Settings:

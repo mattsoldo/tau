@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from tau.config import get_settings
-from tau.database import init_database
+from tau.database import init_database, close_database
 from tau.api import create_app, set_daemon_instance
 from tau.logging_config import setup_logging
 from tau.control import (
@@ -126,7 +126,7 @@ class TauDaemon:
             await self.hardware_manager.shutdown()
 
         # Close database connections
-        # TODO: Close database connections properly
+        await close_database()
 
         logger.info("tau_daemon_stopped")
 
