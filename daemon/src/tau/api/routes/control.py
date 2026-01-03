@@ -35,13 +35,15 @@ async def control_fixture(
     if not state:
         raise HTTPException(status_code=404, detail="Fixture not found")
 
-    # Apply controls
+    # Apply controls with optional transition
     updated = False
+    transition = control_data.transition_duration
 
     if control_data.brightness is not None:
         success = daemon.state_manager.set_fixture_brightness(
             fixture_id,
-            control_data.brightness
+            control_data.brightness,
+            transition_duration=transition
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to set brightness")
@@ -50,7 +52,8 @@ async def control_fixture(
     if control_data.color_temp is not None:
         success = daemon.state_manager.set_fixture_color_temp(
             fixture_id,
-            control_data.color_temp
+            control_data.color_temp,
+            transition_duration=transition
         )
         if not success:
             raise HTTPException(status_code=500, detail="Failed to set color temperature")
@@ -59,15 +62,25 @@ async def control_fixture(
     if not updated:
         raise HTTPException(status_code=400, detail="No control values provided")
 
-    # Broadcast state change via WebSocket
+    # Get updated state
     state = daemon.state_manager.get_fixture_state(fixture_id)
+
+    # Broadcast state change via WebSocket (goal values for UI)
     await broadcast_fixture_state_change(
         fixture_id=fixture_id,
-        brightness=state.brightness,
-        color_temp=state.color_temp
+        brightness=state.goal_brightness,
+        color_temp=state.goal_color_temp
     )
 
-    return {"message": "Fixture control applied successfully"}
+    # Return both goal and current state
+    return {
+        "message": "Fixture control applied successfully",
+        "goal_brightness": state.goal_brightness,
+        "goal_color_temp": state.goal_color_temp,
+        "current_brightness": state.current_brightness,
+        "current_color_temp": state.current_color_temp,
+        "transitioning": state.transition_start is not None,
+    }
 
 
 @router.post("/groups/{group_id}")

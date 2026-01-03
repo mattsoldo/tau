@@ -15,7 +15,14 @@ class FixtureModelBase(BaseModel):
     dmx_footprint: int = Field(default=1, ge=1, le=512)
     cct_min_kelvin: Optional[int] = Field(default=1800, ge=1000, le=10000)
     cct_max_kelvin: Optional[int] = Field(default=4000, ge=1000, le=10000)
-    mixing_type: str = Field(default="linear", pattern="^(linear|perceptual|logarithmic|custom)$")
+    # Planckian Locus Color Mixing Parameters (for tunable_white)
+    warm_xy_x: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    warm_xy_y: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    cool_xy_x: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    cool_xy_y: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    warm_lumens: Optional[int] = Field(default=None, ge=1, le=100000)
+    cool_lumens: Optional[int] = Field(default=None, ge=1, le=100000)
+    gamma: Optional[float] = Field(default=2.2, ge=1.0, le=4.0)
 
 
 class FixtureModelCreate(FixtureModelBase):
@@ -30,7 +37,14 @@ class FixtureModelUpdate(BaseModel):
     dmx_footprint: Optional[int] = Field(None, ge=1, le=512)
     cct_min_kelvin: Optional[int] = Field(None, ge=1000, le=10000)
     cct_max_kelvin: Optional[int] = Field(None, ge=1000, le=10000)
-    mixing_type: Optional[str] = Field(None, pattern="^(linear|perceptual|logarithmic|custom)$")
+    # Planckian Locus Color Mixing Parameters (for tunable_white)
+    warm_xy_x: Optional[float] = Field(None, ge=0.0, le=1.0)
+    warm_xy_y: Optional[float] = Field(None, ge=0.0, le=1.0)
+    cool_xy_x: Optional[float] = Field(None, ge=0.0, le=1.0)
+    cool_xy_y: Optional[float] = Field(None, ge=0.0, le=1.0)
+    warm_lumens: Optional[int] = Field(None, ge=1, le=100000)
+    cool_lumens: Optional[int] = Field(None, ge=1, le=100000)
+    gamma: Optional[float] = Field(None, ge=1.0, le=4.0)
 
 
 class FixtureModelResponse(FixtureModelBase):
@@ -172,11 +186,23 @@ class SceneRecallRequest(BaseModel):
 class FixtureControlRequest(BaseModel):
     brightness: Optional[float] = Field(None, ge=0.0, le=1.0)
     color_temp: Optional[int] = Field(None, ge=1000, le=10000)
+    transition_duration: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=60.0,
+        description="Transition time in seconds (0 = instant)"
+    )
 
 
 class GroupControlRequest(BaseModel):
     brightness: Optional[float] = Field(None, ge=0.0, le=1.0)
     color_temp: Optional[int] = Field(None, ge=1000, le=10000)
+    transition_duration: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=60.0,
+        description="Transition time in seconds (0 = instant)"
+    )
 
 
 class CircadianControlRequest(BaseModel):

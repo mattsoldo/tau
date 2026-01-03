@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tau.database import get_session
 from tau.models.fixtures import Fixture, FixtureModel
 from tau.models.state import FixtureState
+from tau.models.switches import Switch
 from tau.api.schemas import (
     FixtureModelCreate,
     FixtureModelUpdate,
@@ -217,25 +218,72 @@ async def delete_fixture(
     fixture_id: int,
     session: AsyncSession = Depends(get_session)
 ):
-    """Delete a fixture"""
+    """Delete a fixture and all related records"""
     fixture = await session.get(Fixture, fixture_id)
     if not fixture:
         raise HTTPException(status_code=404, detail="Fixture not found")
+
+    # Delete fixture state first (required due to SQLAlchemy session sync)
+    state = await session.get(FixtureState, fixture_id)
+    if state:
+        await session.delete(state)
+
+    # Delete switches that target this fixture (can't SET NULL due to one_target_only constraint)
+    result = await session.execute(
+        select(Switch).where(Switch.target_fixture_id == fixture_id)
+    )
+    switches = result.scalars().all()
+    for switch in switches:
+        await session.delete(switch)
 
     await session.delete(fixture)
     await session.commit()
 
 
-@router.get("/{fixture_id}/state", response_model=FixtureStateResponse)
+@router.get("/{fixture_id}/state")
 async def get_fixture_state(
     fixture_id: int,
     session: AsyncSession = Depends(get_session)
 ):
-    """Get fixture current state"""
+    """
+    Get fixture current state.
+
+    Returns in-memory state (with goal/current values) when daemon is running,
+    otherwise falls back to database state.
+    """
+    from tau.api import get_daemon_instance
+
+    daemon = get_daemon_instance()
+
+    # Try to get in-memory state from StateManager (has goal/current split)
+    if daemon and daemon.state_manager:
+        mem_state = daemon.state_manager.get_fixture_state(fixture_id)
+        if mem_state:
+            return {
+                "fixture_id": fixture_id,
+                "goal_brightness": int(mem_state.goal_brightness * 1000),
+                "goal_cct": mem_state.goal_color_temp,
+                "current_brightness": int(mem_state.current_brightness * 1000),
+                "current_cct": mem_state.current_color_temp,
+                "is_on": mem_state.current_brightness > 0,
+                "transitioning": mem_state.transition_start is not None,
+            }
+
+    # Fall back to database state
     state = await session.get(FixtureState, fixture_id)
     if not state:
         raise HTTPException(status_code=404, detail="Fixture state not found")
-    return state
+
+    # Return database state (no goal values, only current)
+    return {
+        "fixture_id": fixture_id,
+        "goal_brightness": state.current_brightness,
+        "goal_cct": state.current_cct,
+        "current_brightness": state.current_brightness,
+        "current_cct": state.current_cct,
+        "is_on": state.is_on,
+        "transitioning": False,
+    }
 
 
 @router.post("/merge", response_model=FixtureResponse)

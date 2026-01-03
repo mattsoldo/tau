@@ -12,6 +12,7 @@ from tau.control.state_manager import StateManager
 from tau.database import get_db_session
 from tau.models import (
     Fixture,
+    FixtureModel,
     Group,
     GroupFixture,
     FixtureState,
@@ -86,8 +87,10 @@ class ConfigLoader:
         Returns:
             Number of fixtures loaded
         """
-        # Query all fixtures
-        result = await session.execute(select(Fixture))
+        # Query all fixtures with their fixture models eagerly loaded
+        result = await session.execute(
+            select(Fixture).options(selectinload(Fixture.fixture_model))
+        )
         fixtures = result.scalars().all()
 
         count = 0
@@ -95,20 +98,53 @@ class ConfigLoader:
             # Register fixture
             self.state_manager.register_fixture(fixture.id)
 
+            # Get the fixture state object
+            fixture_state = self.state_manager.fixtures[fixture.id]
+
+            # Load DMX configuration from fixture record
+            fixture_state.dmx_channel_start = fixture.dmx_channel_start or 1
+            fixture_state.secondary_dmx_channel = fixture.secondary_dmx_channel
+            fixture_state.fixture_model_id = fixture.fixture_model_id
+            # Universe defaults to 0 (TODO: add dmx_universe column to fixtures table)
+            fixture_state.dmx_universe = getattr(fixture, 'dmx_universe', 0) or 0
+
+            # Load color mixing parameters from fixture model
+            model = fixture.fixture_model
+            if model:
+                fixture_state.cct_min = model.cct_min_kelvin
+                fixture_state.cct_max = model.cct_max_kelvin
+                fixture_state.warm_xy_x = model.warm_xy_x
+                fixture_state.warm_xy_y = model.warm_xy_y
+                fixture_state.cool_xy_x = model.cool_xy_x
+                fixture_state.cool_xy_y = model.cool_xy_y
+                fixture_state.warm_lumens = model.warm_lumens
+                fixture_state.cool_lumens = model.cool_lumens
+                fixture_state.gamma = model.gamma
+
             # Load saved state if it exists
             state = await session.get(FixtureState, fixture.id)
             if state:
-                fixture_state = self.state_manager.fixtures[fixture.id]
                 # Convert int (0-1000) to float (0-1)
-                fixture_state.brightness = (state.current_brightness or 0) / 1000.0
-                fixture_state.color_temp = state.current_cct
+                brightness = (state.current_brightness or 0) / 1000.0
+                color_temp = state.current_cct
+
+                # Set both goal and current to the persisted value
+                # (no transition - they should match on startup)
+                fixture_state.goal_brightness = brightness
+                fixture_state.current_brightness = brightness
+                fixture_state.start_brightness = brightness
+                fixture_state.goal_color_temp = color_temp
+                fixture_state.current_color_temp = color_temp
+                fixture_state.start_color_temp = color_temp
+
                 if state.last_updated:
                     fixture_state.last_updated = state.last_updated.timestamp()
 
                 logger.debug(
                     "fixture_state_loaded",
                     fixture_id=fixture.id,
-                    brightness=fixture_state.brightness,
+                    brightness=brightness,
+                    dmx_channel=fixture_state.dmx_channel_start,
                 )
 
             count += 1

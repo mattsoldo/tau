@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Float,
     CheckConstraint,
     ForeignKey,
     UniqueConstraint,
@@ -56,12 +57,18 @@ class FixtureModel(Base):
         Integer, nullable=True, server_default="4000"
     )
 
-    # Mixing Algorithm
-    mixing_type: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        server_default="linear",
-    )
+    # Planckian Locus Color Mixing Parameters (for tunable_white fixtures)
+    # CIE 1931 xy chromaticity coordinates for warm LED
+    warm_xy_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    warm_xy_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # CIE 1931 xy chromaticity coordinates for cool LED
+    cool_xy_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cool_xy_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Luminous flux at 100% for each channel
+    warm_lumens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cool_lumens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # PWM-to-light gamma correction (default 2.2)
+    gamma: Mapped[Optional[float]] = mapped_column(Float, nullable=True, server_default="2.2")
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -82,10 +89,6 @@ class FixtureModel(Base):
         CheckConstraint(
             "type IN ('simple_dimmable', 'tunable_white', 'dim_to_warm', 'non_dimmable', 'other')",
             name="fixture_models_type_check",
-        ),
-        CheckConstraint(
-            "mixing_type IN ('linear', 'perceptual', 'logarithmic', 'custom')",
-            name="fixture_models_mixing_type_check",
         ),
         UniqueConstraint("manufacturer", "model", name="fixture_models_manufacturer_model_key"),
     )

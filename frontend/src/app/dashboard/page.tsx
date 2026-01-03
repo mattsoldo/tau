@@ -618,6 +618,8 @@ export default function DashboardPage() {
       <footer className="relative z-5 px-10 py-5 border-t border-[#1f1f24] flex justify-between items-center mt-5">
         <div className="flex gap-6">
           <Link href="/" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">Home</Link>
+          <Link href="/test" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">Light Test</Link>
+          <Link href="/config" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">Config</Link>
           <a href="http://localhost:8000/docs" target="_blank" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">API Docs</a>
         </div>
         <div className="font-mono text-[12px] text-[#636366]">

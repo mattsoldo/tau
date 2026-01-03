@@ -13,6 +13,13 @@ from tau.hardware import HardwareManager
 from tau.logic.circadian import CircadianEngine
 from tau.logic.scenes import SceneEngine
 from tau.logic.switches import SwitchHandler
+from tau.logic.color_mixing import (
+    calculate_led_mix,
+    calculate_led_mix_simple,
+    calculate_led_mix_lumens_only,
+    ColorMixParams,
+    get_default_chromaticity,
+)
 from tau.database import get_db_session
 
 logger = structlog.get_logger(__name__)
@@ -133,8 +140,9 @@ class LightingController:
 
         1. Process switch inputs
         2. Apply circadian calculations
-        3. Calculate final fixture states
-        4. Update hardware outputs
+        3. Update fixture transitions (interpolate current toward goal)
+        4. Calculate final fixture states
+        5. Update hardware outputs
         """
         self.loop_iterations += 1
 
@@ -144,7 +152,10 @@ class LightingController:
         # Step 2: Apply circadian rhythms to enabled groups
         await self._apply_circadian()
 
-        # Step 3: Calculate final fixture states and update hardware
+        # Step 3: Update fixture transitions (interpolate current toward goal)
+        self.state_manager.update_fixture_transitions()
+
+        # Step 4: Calculate final fixture states and update hardware
         await self._update_hardware()
 
     async def _apply_circadian(self) -> None:
@@ -174,34 +185,108 @@ class LightingController:
 
         This is where we merge fixture state + group state + circadian
         and output to physical hardware.
+
+        Uses the Planckian locus color mixing algorithm for tunable white
+        fixtures when chromaticity parameters are available. Falls back to
+        simple linear mixing otherwise.
         """
         # For each registered fixture, calculate effective state and output
-        for fixture_id in self.state_manager.fixtures.keys():
+        for fixture_id, fixture_state in self.state_manager.fixtures.items():
             # Get effective state (includes group and circadian modifiers)
             effective_state = self.state_manager.get_effective_fixture_state(fixture_id)
 
             if effective_state is None:
                 continue
 
-            # TODO: Get fixture model to determine DMX channel mapping
-            # For now, assume simple 2-channel tunable white:
-            # - Channel 1: Master brightness
-            # - Channel 2: CCT (warm/cool balance)
+            # Get DMX configuration from fixture state
+            universe = fixture_state.dmx_universe
+            start_channel = fixture_state.dmx_channel_start
+            secondary_channel = fixture_state.secondary_dmx_channel
 
-            # Convert brightness (0.0-1.0) to DMX (0-255)
-            dmx_brightness = int(effective_state.brightness * 255)
+            # For tunable white fixtures, calculate warm/cool channel values
+            if secondary_channel is not None and effective_state.color_temp is not None:
+                cct = effective_state.color_temp
+                brightness = effective_state.brightness
 
-            # TODO: Convert CCT to DMX channel values based on fixture model
-            # For now, use a simple mapping for tunable white fixtures
-            dmx_values = [dmx_brightness, dmx_brightness]  # Placeholder
+                # Get CCT range from fixture model (with defaults)
+                cct_min = fixture_state.cct_min or 2700
+                cct_max = fixture_state.cct_max or 6500
+                gamma = fixture_state.gamma or 2.2
+
+                # Check calibration level:
+                # 1. Full chromaticity (xy + lumens) = best accuracy
+                # 2. Lumens only (no xy) = derived xy from CCT, good accuracy
+                # 3. Nothing = basic linear mixing
+                has_full_chromaticity = (
+                    fixture_state.warm_xy_x is not None and
+                    fixture_state.warm_xy_y is not None and
+                    fixture_state.cool_xy_x is not None and
+                    fixture_state.cool_xy_y is not None and
+                    fixture_state.warm_lumens is not None and
+                    fixture_state.cool_lumens is not None
+                )
+                has_lumens_only = (
+                    not has_full_chromaticity and
+                    fixture_state.warm_lumens is not None and
+                    fixture_state.cool_lumens is not None
+                )
+
+                if has_full_chromaticity:
+                    # Use full Planckian locus algorithm with measured chromaticity
+                    params = ColorMixParams(
+                        warm_cct=cct_min,
+                        cool_cct=cct_max,
+                        warm_xy=(fixture_state.warm_xy_x, fixture_state.warm_xy_y),
+                        cool_xy=(fixture_state.cool_xy_x, fixture_state.cool_xy_y),
+                        warm_lumens=fixture_state.warm_lumens,
+                        cool_lumens=fixture_state.cool_lumens,
+                        pwm_resolution=255,
+                        min_duty=0,
+                        gamma=gamma,
+                    )
+                    result = calculate_led_mix(cct, brightness, params)
+                    warm_level = result.warm_duty
+                    cool_level = result.cool_duty
+                elif has_lumens_only:
+                    # Use Planckian locus with derived xy from CCT
+                    # Less accurate but still has flux compensation
+                    result = calculate_led_mix_lumens_only(
+                        target_cct=cct,
+                        target_brightness=brightness,
+                        warm_cct=cct_min,
+                        cool_cct=cct_max,
+                        warm_lumens=fixture_state.warm_lumens,
+                        cool_lumens=fixture_state.cool_lumens,
+                        pwm_resolution=255,
+                        min_duty=0,
+                        gamma=gamma,
+                    )
+                    warm_level = result.warm_duty
+                    cool_level = result.cool_duty
+                else:
+                    # Fallback to simple mixing with gamma correction
+                    warm_level, cool_level = calculate_led_mix_simple(
+                        target_cct=cct,
+                        target_brightness=brightness,
+                        cct_min=cct_min,
+                        cct_max=cct_max,
+                        pwm_resolution=255,
+                        gamma=gamma,
+                    )
+
+                dmx_values = [warm_level, cool_level]
+            else:
+                # Single channel fixture or no CCT info - just use brightness
+                dmx_brightness = int(effective_state.brightness * 255)
+                dmx_values = [dmx_brightness]
+                if secondary_channel is not None:
+                    dmx_values.append(dmx_brightness)
 
             # Send to hardware
-            # TODO: Get fixture's DMX universe and start channel from database
-            # For now, assume universe 0, and fixture_id determines channel
             try:
                 await self.hardware_manager.set_fixture_dmx(
-                    universe=0,
-                    start_channel=fixture_id,  # TODO: Use actual DMX channel
+                    universe=universe,
+                    start_channel=start_channel,
                     values=dmx_values
                 )
                 self.hardware_updates += 1

@@ -5,7 +5,6 @@ import { useState, useEffect, useCallback } from 'react';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 type FixtureType = 'simple_dimmable' | 'tunable_white' | 'dim_to_warm' | 'non_dimmable' | 'other';
-type MixingType = 'linear' | 'perceptual' | 'logarithmic' | 'custom';
 
 interface FixtureModel {
   id: number;
@@ -16,7 +15,14 @@ interface FixtureModel {
   dmx_footprint: number;
   cct_min_kelvin: number;
   cct_max_kelvin: number;
-  mixing_type: MixingType;
+  // Planckian locus color mixing parameters
+  warm_xy_x: number | null;
+  warm_xy_y: number | null;
+  cool_xy_x: number | null;
+  cool_xy_y: number | null;
+  warm_lumens: number | null;
+  cool_lumens: number | null;
+  gamma: number | null;
   created_at: string;
 }
 
@@ -37,14 +43,7 @@ const dmxFootprintByType: Record<FixtureType, number> = {
   other: 1,
 };
 
-const mixingLabels: Record<MixingType, string> = {
-  linear: 'Linear',
-  perceptual: 'Perceptual',
-  logarithmic: 'Logarithmic',
-  custom: 'Custom',
-};
-
-// Form data uses strings for CCT to allow empty input
+// Form data uses strings for numeric inputs to allow empty input
 interface FormData {
   manufacturer: string;
   model: string;
@@ -53,7 +52,14 @@ interface FormData {
   cct_kelvin: string;       // Single CCT for simple_dimmable, dim_to_warm
   cct_min_kelvin: string;   // Range min for tunable_white
   cct_max_kelvin: string;   // Range max for tunable_white
-  mixing_type: MixingType;
+  // Planckian locus color mixing parameters (for tunable_white)
+  warm_xy_x: string;
+  warm_xy_y: string;
+  cool_xy_x: string;
+  cool_xy_y: string;
+  warm_lumens: string;
+  cool_lumens: string;
+  gamma: string;
 }
 
 // Helper to determine if type uses single CCT or range
@@ -69,7 +75,13 @@ const emptyFormData: FormData = {
   cct_kelvin: '',
   cct_min_kelvin: '',
   cct_max_kelvin: '',
-  mixing_type: 'linear',
+  warm_xy_x: '',
+  warm_xy_y: '',
+  cool_xy_x: '',
+  cool_xy_y: '',
+  warm_lumens: '',
+  cool_lumens: '',
+  gamma: '2.2',
 };
 
 export default function FixtureModelsPage() {
@@ -121,7 +133,13 @@ export default function FixtureModelsPage() {
       cct_kelvin: singleCct,
       cct_min_kelvin: model.cct_min_kelvin?.toString() || '',
       cct_max_kelvin: model.cct_max_kelvin?.toString() || '',
-      mixing_type: model.mixing_type,
+      warm_xy_x: model.warm_xy_x?.toString() || '',
+      warm_xy_y: model.warm_xy_y?.toString() || '',
+      cool_xy_x: model.cool_xy_x?.toString() || '',
+      cool_xy_y: model.cool_xy_y?.toString() || '',
+      warm_lumens: model.warm_lumens?.toString() || '',
+      cool_lumens: model.cool_lumens?.toString() || '',
+      gamma: model.gamma?.toString() || '2.2',
     });
     setIsModalOpen(true);
   };
@@ -148,7 +166,7 @@ export default function FixtureModelsPage() {
       // non_dimmable and other: leave as null
 
       // Build the payload
-      const payload = {
+      const payload: Record<string, unknown> = {
         manufacturer: formData.manufacturer,
         model: formData.model,
         description: formData.description || null,
@@ -156,8 +174,26 @@ export default function FixtureModelsPage() {
         dmx_footprint: dmxFootprintByType[formData.type],
         cct_min_kelvin: cctMin,
         cct_max_kelvin: cctMax,
-        mixing_type: formData.mixing_type,
       };
+
+      // Add Planckian locus parameters for tunable_white
+      if (formData.type === 'tunable_white') {
+        const warmXY_x = parseFloat(formData.warm_xy_x);
+        const warmXY_y = parseFloat(formData.warm_xy_y);
+        const coolXY_x = parseFloat(formData.cool_xy_x);
+        const coolXY_y = parseFloat(formData.cool_xy_y);
+        const warmLumens = parseInt(formData.warm_lumens);
+        const coolLumens = parseInt(formData.cool_lumens);
+        const gamma = parseFloat(formData.gamma);
+
+        if (!isNaN(warmXY_x)) payload.warm_xy_x = warmXY_x;
+        if (!isNaN(warmXY_y)) payload.warm_xy_y = warmXY_y;
+        if (!isNaN(coolXY_x)) payload.cool_xy_x = coolXY_x;
+        if (!isNaN(coolXY_y)) payload.cool_xy_y = coolXY_y;
+        if (!isNaN(warmLumens)) payload.warm_lumens = warmLumens;
+        if (!isNaN(coolLumens)) payload.cool_lumens = coolLumens;
+        if (!isNaN(gamma)) payload.gamma = gamma;
+      }
 
       let response: Response;
 
@@ -286,7 +322,7 @@ export default function FixtureModelsPage() {
                 <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">Type</th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">DMX</th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">CCT</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">Mixing</th>
+                <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">Calibration</th>
                 <th className="px-6 py-4 text-right text-xs font-medium text-[#636366] uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -321,7 +357,33 @@ export default function FixtureModelsPage() {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm text-[#a1a1a6]">{mixingLabels[model.mixing_type]}</span>
+                    {model.type === 'tunable_white' ? (
+                      // Full calibration: xy + lumens
+                      model.warm_xy_x && model.cool_xy_x && model.warm_lumens && model.cool_lumens ? (
+                        <span className="inline-flex items-center gap-1.5 text-sm text-green-400">
+                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                          </svg>
+                          Calibrated
+                        </span>
+                      // Approximate calibration: lumens only (xy derived from CCT)
+                      ) : model.warm_lumens && model.cool_lumens ? (
+                        <span className="inline-flex items-center gap-1.5 text-sm text-amber-400">
+                          <span className="text-base font-medium">~</span>
+                          Calibrated
+                        </span>
+                      // Basic: no calibration data
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-sm text-[#636366]">
+                          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                          </svg>
+                          Basic
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-[#636366]">—</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -506,21 +568,121 @@ export default function FixtureModelsPage() {
                 </div>
               )}
 
-              {/* Mixing Type */}
+              {/* Color Mixing Parameters (Planckian Locus) */}
               {formData.type === 'tunable_white' && (
-                <div>
-                  <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Mixing Type</label>
-                  <select
-                    value={formData.mixing_type}
-                    onChange={(e) => setFormData({ ...formData, mixing_type: e.target.value as MixingType })}
-                    className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                  >
-                    <option value="linear">Linear</option>
-                    <option value="perceptual">Perceptual (recommended)</option>
-                    <option value="logarithmic">Logarithmic</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                  <p className="text-xs text-[#636366] mt-1">How warm/cool channels are mixed for CCT control</p>
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-px bg-[#2a2a2f]" />
+                    <span className="text-xs font-medium text-[#636366] uppercase tracking-wider">Color Calibration</span>
+                    <div className="flex-1 h-px bg-[#2a2a2f]" />
+                  </div>
+                  <p className="text-xs text-[#636366]">
+                    Optional: CIE 1931 xy chromaticity coordinates and luminous flux for accurate Planckian locus color mixing
+                  </p>
+
+                  {/* Warm LED Parameters */}
+                  <div>
+                    <label className="block text-sm font-medium text-amber-400/80 mb-2">Warm LED</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-[#636366] mb-1">x</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          max="1"
+                          value={formData.warm_xy_x}
+                          onChange={(e) => setFormData({ ...formData, warm_xy_x: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white text-sm placeholder-[#4a4a4f] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          placeholder="0.5268"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-[#636366] mb-1">y</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          max="1"
+                          value={formData.warm_xy_y}
+                          onChange={(e) => setFormData({ ...formData, warm_xy_y: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white text-sm placeholder-[#4a4a4f] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          placeholder="0.4133"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-[#636366] mb-1">Lumens</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formData.warm_lumens}
+                          onChange={(e) => setFormData({ ...formData, warm_lumens: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white text-sm placeholder-[#4a4a4f] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          placeholder="800"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cool LED Parameters */}
+                  <div>
+                    <label className="block text-sm font-medium text-blue-400/80 mb-2">Cool LED</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs text-[#636366] mb-1">x</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          max="1"
+                          value={formData.cool_xy_x}
+                          onChange={(e) => setFormData({ ...formData, cool_xy_x: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white text-sm placeholder-[#4a4a4f] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          placeholder="0.3135"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-[#636366] mb-1">y</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          max="1"
+                          value={formData.cool_xy_y}
+                          onChange={(e) => setFormData({ ...formData, cool_xy_y: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white text-sm placeholder-[#4a4a4f] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          placeholder="0.3237"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-[#636366] mb-1">Lumens</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={formData.cool_lumens}
+                          onChange={(e) => setFormData({ ...formData, cool_lumens: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white text-sm placeholder-[#4a4a4f] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          placeholder="900"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Gamma */}
+                  <div>
+                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Gamma Correction</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1"
+                      max="4"
+                      value={formData.gamma}
+                      onChange={(e) => setFormData({ ...formData, gamma: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white placeholder-[#4a4a4f] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                      placeholder="2.2"
+                    />
+                    <p className="text-xs text-[#636366] mt-1">PWM-to-light gamma (2.2 is typical for LEDs)</p>
+                  </div>
                 </div>
               )}
             </div>

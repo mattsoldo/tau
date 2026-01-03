@@ -553,36 +553,225 @@ export default function FixturesPage() {
   };
 
   const updateDeviceModel = (rdmUid: string, modelId: number | null) => {
-    setDiscovery(prev => ({
-      ...prev,
-      discoveredDevices: prev.discoveredDevices.map(d => {
-        if (d.rdm_uid !== rdmUid) return d;
-        let newName = d.configured_name;
-        if (modelId && !d.configured_name) {
-          const model = fixtureModels.find(m => m.id === modelId);
-          if (model) {
-            newName = `${model.manufacturer} ${model.model} ${d.dmx_address}`;
-          }
+    if (!modelId) {
+      // Clearing model - also unmerge if needed
+      setDiscovery(prev => {
+        const device = prev.discoveredDevices.find(d => d.rdm_uid === rdmUid);
+        if (!device) return prev;
+
+        return {
+          ...prev,
+          discoveredDevices: prev.discoveredDevices.map(d => {
+            if (d.rdm_uid === rdmUid) {
+              return { ...d, configured_model_id: null, merged_with: null, secondary_dmx_address: null };
+            }
+            // Unhide any secondary that was merged with this device
+            if (d.is_secondary && device.merged_with === d.rdm_uid) {
+              return { ...d, is_secondary: false };
+            }
+            return d;
+          }),
+        };
+      });
+      return;
+    }
+
+    const model = fixtureModels.find(m => m.id === modelId);
+    if (!model) return;
+
+    const footprint = model.dmx_footprint;
+
+    setDiscovery(prev => {
+      const device = prev.discoveredDevices.find(d => d.rdm_uid === rdmUid);
+      if (!device) return prev;
+
+      if (footprint === 1) {
+        // Simple case: no merging needed
+        let newName = device.configured_name;
+        if (!device.configured_name) {
+          newName = `${model.manufacturer} ${model.model} ${device.dmx_address}`;
         }
-        return { ...d, configured_model_id: modelId, configured_name: newName };
-      }),
-    }));
+        return {
+          ...prev,
+          discoveredDevices: prev.discoveredDevices.map(d => {
+            if (d.rdm_uid !== rdmUid) return d;
+            return { ...d, configured_model_id: modelId, configured_name: newName };
+          }),
+        };
+      }
+
+      // Multi-channel: find consecutive channels to merge
+      const startDmx = device.dmx_address;
+      const channelsNeeded: string[] = [rdmUid];
+
+      for (let i = 1; i < footprint; i++) {
+        const nextDmx = startDmx + i;
+        const nextDevice = prev.discoveredDevices.find(
+          d => d.dmx_address === nextDmx && !d.is_secondary && d.rdm_uid !== rdmUid
+        );
+        if (nextDevice) {
+          channelsNeeded.push(nextDevice.rdm_uid);
+        }
+      }
+
+      if (channelsNeeded.length < footprint) {
+        setError(`Cannot apply ${footprint}-channel model: need ${footprint} consecutive DMX channels starting at ${startDmx}, but only found ${channelsNeeded.length}.`);
+        return prev;
+      }
+
+      // Apply merge
+      let newName = device.configured_name;
+      if (!device.configured_name) {
+        newName = `${model.manufacturer} ${model.model} ${device.dmx_address}`;
+      }
+
+      return {
+        ...prev,
+        discoveredDevices: prev.discoveredDevices.map(d => {
+          if (d.rdm_uid === rdmUid) {
+            // Primary device
+            const secondaryDmx = prev.discoveredDevices.find(dev => dev.rdm_uid === channelsNeeded[1])?.dmx_address ?? null;
+            return {
+              ...d,
+              configured_model_id: modelId,
+              configured_name: newName,
+              merged_with: channelsNeeded[1],
+              secondary_dmx_address: secondaryDmx,
+            };
+          }
+          if (channelsNeeded.slice(1).includes(d.rdm_uid)) {
+            // Secondary device(s)
+            return {
+              ...d,
+              configured_model_id: null,
+              is_secondary: true,
+              merged_with: null,
+              secondary_dmx_address: null,
+            };
+          }
+          return d;
+        }),
+      };
+    });
   };
 
   const applyBulkModel = (modelId: number) => {
     setBulkModelId(modelId);
-    setDiscovery(prev => ({
-      ...prev,
-      discoveredDevices: prev.discoveredDevices.map(d => {
-        if (!d.selected) return d;
-        const model = fixtureModels.find(m => m.id === modelId);
-        let newName = d.configured_name;
-        if (model && !d.configured_name) {
-          newName = `${model.manufacturer} ${model.model} ${d.dmx_address}`;
+    const model = fixtureModels.find(m => m.id === modelId);
+    if (!model) return;
+
+    const footprint = model.dmx_footprint;
+
+    setDiscovery(prev => {
+      // Get selected devices that aren't already secondaries, sorted by DMX address
+      const selectedDevices = prev.discoveredDevices
+        .filter(d => d.selected && !d.is_secondary)
+        .sort((a, b) => a.dmx_address - b.dmx_address);
+
+      if (footprint === 1) {
+        // Simple case: no merging needed
+        return {
+          ...prev,
+          discoveredDevices: prev.discoveredDevices.map(d => {
+            if (!d.selected || d.is_secondary) return d;
+            let newName = d.configured_name;
+            if (!d.configured_name) {
+              newName = `${model.manufacturer} ${model.model} ${d.dmx_address}`;
+            }
+            return { ...d, configured_model_id: modelId, configured_name: newName };
+          }),
+        };
+      }
+
+      // Multi-channel footprint: auto-merge consecutive channels
+      const mergeGroups: string[][] = [];
+      let currentGroup: string[] = [];
+      let expectedNextDmx = -1;
+
+      for (const device of selectedDevices) {
+        if (expectedNextDmx === -1 || device.dmx_address === expectedNextDmx) {
+          currentGroup.push(device.rdm_uid);
+          expectedNextDmx = device.dmx_address + 1;
+
+          // Group is complete
+          if (currentGroup.length === footprint) {
+            mergeGroups.push([...currentGroup]);
+            currentGroup = [];
+            expectedNextDmx = -1;
+          }
+        } else {
+          // Non-consecutive: save incomplete group and start new one
+          if (currentGroup.length > 0) {
+            mergeGroups.push([...currentGroup]);
+          }
+          currentGroup = [device.rdm_uid];
+          expectedNextDmx = device.dmx_address + 1;
+
+          if (currentGroup.length === footprint) {
+            mergeGroups.push([...currentGroup]);
+            currentGroup = [];
+            expectedNextDmx = -1;
+          }
         }
-        return { ...d, configured_model_id: modelId, configured_name: newName };
-      }),
-    }));
+      }
+
+      // Handle any remaining incomplete group
+      if (currentGroup.length > 0) {
+        mergeGroups.push([...currentGroup]);
+      }
+
+      // Check for incomplete groups (leftovers)
+      const incompleteGroups = mergeGroups.filter(g => g.length < footprint);
+      if (incompleteGroups.length > 0) {
+        const leftoverCount = incompleteGroups.reduce((sum, g) => sum + g.length, 0);
+        setError(`${leftoverCount} channel(s) couldn't be merged (${footprint}-channel fixtures require consecutive DMX addresses). Please select a different model for these channels.`);
+      }
+
+      // Build the updated devices array
+      const updatedDevices = prev.discoveredDevices.map(d => {
+        // Find which merge group this device belongs to
+        for (const group of mergeGroups) {
+          const indexInGroup = group.indexOf(d.rdm_uid);
+          if (indexInGroup !== -1) {
+            const primaryUid = group[0];
+            const primaryDevice = prev.discoveredDevices.find(dev => dev.rdm_uid === primaryUid);
+            const isComplete = group.length === footprint;
+
+            if (indexInGroup === 0) {
+              // Primary device
+              let newName = d.configured_name;
+              if (!d.configured_name) {
+                newName = `${model.manufacturer} ${model.model} ${d.dmx_address}`;
+              }
+              // Get secondary DMX address if group is complete
+              const secondaryDmx = isComplete && group.length > 1
+                ? prev.discoveredDevices.find(dev => dev.rdm_uid === group[1])?.dmx_address ?? null
+                : null;
+              return {
+                ...d,
+                configured_model_id: isComplete ? modelId : null,
+                configured_name: isComplete ? newName : d.configured_name,
+                merged_with: isComplete && group.length > 1 ? group[1] : null,
+                secondary_dmx_address: secondaryDmx,
+                is_secondary: false,
+              };
+            } else {
+              // Secondary device
+              return {
+                ...d,
+                configured_model_id: null,
+                is_secondary: isComplete,
+                merged_with: null,
+                secondary_dmx_address: null,
+              };
+            }
+          }
+        }
+        return d;
+      });
+
+      return { ...prev, discoveredDevices: updatedDevices };
+    });
   };
 
   const applyBulkGroup = (groupId: number, add: boolean) => {
@@ -1529,11 +1718,9 @@ export default function FixturesPage() {
                           className="w-4 h-4 rounded border-[#3a3a3f] bg-[#111113] text-amber-500 focus:ring-amber-500/50"
                         />
                       </th>
-                      <th className="px-6 py-3 text-left">
-                        <span className="text-blue-400 font-medium text-sm">{selectedFixtureIds.size} selected</span>
-                      </th>
-                      <th className="px-6 py-3 text-left" colSpan={2}>
-                        <div className="flex items-center gap-3">
+                      <th className="px-6 py-3 text-left" colSpan={6}>
+                        <div className="flex items-center flex-wrap gap-3">
+                          <span className="text-blue-400 font-medium text-sm">{selectedFixtureIds.size} selected</span>
                           {/* Model dropdown */}
                           <select
                             key={bulkModelSelectKey}
@@ -1558,7 +1745,7 @@ export default function FixturesPage() {
                           {groups.length > 0 && (
                             <div className="flex items-center gap-2">
                               <span className="text-xs text-[#a1a1a6]">Groups:</span>
-                              <div className="flex gap-1">
+                              <div className="flex flex-wrap gap-1">
                                 {groups.map(group => {
                                   const selectedFixturesList = fixtures.filter(f => selectedFixtureIds.has(f.id));
                                   const allHaveGroup = selectedFixturesList.every(f => (fixtureGroups.get(f.id) || []).includes(group.id));
@@ -1584,64 +1771,63 @@ export default function FixturesPage() {
                               </div>
                             </div>
                           )}
-                        </div>
-                      </th>
-                      <th className="px-6 py-3"></th>
-                      <th className="px-6 py-3"></th>
-                      <th className="px-6 py-3 text-left">
-                        <div className="flex items-center justify-end gap-2">
-                          {/* Merge button - only show when exactly 2 unmerged fixtures selected */}
-                          {canMergeFixtures() && (
-                            <button
-                              onClick={openMergeModal}
-                              className="px-2 py-0.5 text-xs rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30 transition-colors"
-                            >
-                              Merge Channels
-                            </button>
-                          )}
-                          {/* Unmerge button - show when any selected fixture has secondary channel */}
-                          {canUnmergeFixtures() && (
-                            <button
-                              onClick={bulkUnmerge}
-                              className="px-2 py-0.5 text-xs rounded bg-orange-500/20 text-orange-400 border border-orange-500/30 hover:bg-orange-500/30 transition-colors"
-                            >
-                              Unmerge
-                            </button>
-                          )}
-                          {/* Delete button */}
-                          {bulkDeleteConfirm ? (
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-red-400">Delete {selectedFixtureIds.size}?</span>
+                          {/* Spacer to push actions to the right */}
+                          <div className="flex-1 min-w-4" />
+                          {/* Action buttons */}
+                          <div className="flex items-center flex-wrap gap-2">
+                            {/* Merge button - only show when exactly 2 unmerged fixtures selected */}
+                            {canMergeFixtures() && (
                               <button
-                                onClick={bulkDeleteFixtures}
-                                className="px-2 py-0.5 text-xs rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                                onClick={openMergeModal}
+                                className="px-2 py-0.5 text-xs rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30 transition-colors"
                               >
-                                Yes
+                                Merge Channels
                               </button>
+                            )}
+                            {/* Unmerge button - show when any selected fixture has secondary channel */}
+                            {canUnmergeFixtures() && (
                               <button
-                                onClick={() => setBulkDeleteConfirm(false)}
-                                className="px-2 py-0.5 text-xs rounded bg-[#3a3a3f] text-white hover:bg-[#4a4a4f] transition-colors"
+                                onClick={bulkUnmerge}
+                                className="px-2 py-0.5 text-xs rounded bg-orange-500/20 text-orange-400 border border-orange-500/30 hover:bg-orange-500/30 transition-colors"
                               >
-                                No
+                                Unmerge
                               </button>
-                            </div>
-                          ) : (
+                            )}
+                            {/* Delete button */}
+                            {bulkDeleteConfirm ? (
+                              <div className="flex items-center gap-1">
+                                <span className="text-xs text-red-400">Delete {selectedFixtureIds.size}?</span>
+                                <button
+                                  onClick={bulkDeleteFixtures}
+                                  className="px-2 py-0.5 text-xs rounded bg-red-500 text-white hover:bg-red-600 transition-colors"
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  onClick={() => setBulkDeleteConfirm(false)}
+                                  className="px-2 py-0.5 text-xs rounded bg-[#3a3a3f] text-white hover:bg-[#4a4a4f] transition-colors"
+                                >
+                                  No
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setBulkDeleteConfirm(true)}
+                                className="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            )}
                             <button
-                              onClick={() => setBulkDeleteConfirm(true)}
-                              className="px-2 py-0.5 text-xs rounded bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors"
+                              onClick={() => {
+                                setSelectedFixtureIds(new Set());
+                                setBulkDeleteConfirm(false);
+                              }}
+                              className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-black text-xs font-medium rounded-lg transition-colors"
                             >
-                              Delete
+                              Done
                             </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setSelectedFixtureIds(new Set());
-                              setBulkDeleteConfirm(false);
-                            }}
-                            className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-black text-xs font-medium rounded-lg transition-colors ml-2"
-                          >
-                            Done
-                          </button>
+                          </div>
                         </div>
                       </th>
                     </tr>

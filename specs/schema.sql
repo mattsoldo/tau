@@ -5,16 +5,27 @@ CREATE TABLE fixture_models (
     model VARCHAR(100) NOT NULL,
     description TEXT,
     type VARCHAR(20) NOT NULL CHECK (type IN ('simple_dimmable', 'tunable_white', 'dim_to_warm', 'non_dimmable', 'other')),
-    
+
     -- DMX Footprint (Required for collision detection)
-    dmx_footprint INT NOT NULL DEFAULT 1, 
-    
+    dmx_footprint INT NOT NULL DEFAULT 1,
+
     -- CCT Limits
     cct_min_kelvin INT DEFAULT 1800,
     cct_max_kelvin INT DEFAULT 4000,
 
-    mixing_type VARCHAR(20) NOT NULL CHECK (mixing_type IN ('linear', 'perceptual', 'logarithmic', 'custom')),
-    
+    -- Planckian Locus Color Mixing Parameters (for tunable_white fixtures)
+    -- CIE 1931 xy chromaticity coordinates for warm LED
+    warm_xy_x FLOAT,
+    warm_xy_y FLOAT,
+    -- CIE 1931 xy chromaticity coordinates for cool LED
+    cool_xy_x FLOAT,
+    cool_xy_y FLOAT,
+    -- Luminous flux at 100% for each channel
+    warm_lumens INT,
+    cool_lumens INT,
+    -- PWM-to-light gamma correction (default 2.2)
+    gamma FLOAT DEFAULT 2.2,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(manufacturer, model)
 );
