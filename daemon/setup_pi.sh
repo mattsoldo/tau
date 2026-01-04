@@ -179,7 +179,7 @@ echo "✓ Environment file created at /opt/tau-daemon/daemon/.env"
 echo ""
 echo "10. Running database migrations..."
 cd /opt/tau-daemon/daemon
-sudo -u tau bash -c "source .env && .venv/bin/alembic upgrade head"
+sudo -u tau bash -c "set -a && source .env && set +a && .venv/bin/alembic upgrade head"
 echo "✓ Database migrations complete"
 
 # 11. Load example configuration (optional)
@@ -187,7 +187,7 @@ echo ""
 read -p "Load example configuration (fixtures, groups, scenes)? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    sudo -u tau bash -c "source .env && .venv/bin/python scripts/load_example_config.py"
+    sudo -u tau bash -c "set -a && source .env && set +a && .venv/bin/python scripts/load_example_config.py"
     echo "✓ Example configuration loaded"
 fi
 
