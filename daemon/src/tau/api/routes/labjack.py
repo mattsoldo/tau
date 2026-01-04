@@ -2,7 +2,7 @@
 LabJack API Routes - Hardware monitoring and control endpoints
 """
 from typing import Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import structlog
 
@@ -31,12 +31,6 @@ class PWMSetRequest(BaseModel):
     outputs: Dict[int, float] = Field(..., description="Channel to duty cycle mapping (0.0-1.0)")
 
 
-class SimulateInputRequest(BaseModel):
-    """Request to simulate an input (mock mode only)"""
-    channel: int = Field(..., ge=0, le=15, description="Channel number (0-15)")
-    voltage: float = Field(..., ge=-10.0, le=10.0, description="Voltage to simulate")
-
-
 class ChannelConfigRequest(BaseModel):
     """Channel configuration request"""
     channel: int = Field(..., ge=0, le=15)
@@ -48,7 +42,6 @@ class LabJackStatusResponse(BaseModel):
     """LabJack status and statistics"""
     connected: bool
     model: str
-    mock_mode: bool
     statistics: Dict
     configuration: Dict
 
@@ -81,10 +74,6 @@ async def get_labjack_status():
     hw_stats = daemon.hardware_manager.get_statistics()
     labjack_stats = hw_stats.get("labjack", {})
 
-    # Get the actual LabJack instance to check if it's mock
-    labjack = daemon.hardware_manager.labjack
-    is_mock = labjack.is_mock() if hasattr(labjack, 'is_mock') else True
-
     # Get model from stats or default
     model = labjack_stats.get("model", "U3-LV")
     if model == "Unknown" or not model:
@@ -93,7 +82,6 @@ async def get_labjack_status():
     return LabJackStatusResponse(
         connected=labjack_stats.get("connected", False),
         model=model,
-        mock_mode=is_mock,
         statistics=labjack_stats,
         configuration={
             "sample_rate": "1Hz",
@@ -187,97 +175,6 @@ async def set_pwm_outputs(request: PWMSetRequest):
     except Exception as e:
         logger.error("labjack_pwm_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Error setting PWM outputs: {str(e)}")
-
-
-@router.post(
-    "/simulate",
-    summary="Simulate Input (Mock Mode)",
-    description="Simulate an analog input value (only works in mock mode)"
-)
-async def simulate_input(request: SimulateInputRequest):
-    """Simulate an input value (mock mode only)"""
-    daemon = get_daemon_instance()
-
-    if not daemon or not daemon.hardware_manager:
-        raise HTTPException(status_code=503, detail="Hardware manager not available")
-
-    try:
-        # Get the LabJack interface
-        labjack = daemon.hardware_manager.labjack
-
-        # Check if it's a mock instance
-        if not hasattr(labjack, 'simulate_analog_input'):
-            raise HTTPException(status_code=400, detail="Simulation only available in mock mode")
-
-        # Simulate the input
-        labjack.simulate_analog_input(request.channel, request.voltage)
-
-        logger.info(
-            "labjack_input_simulated",
-            channel=request.channel,
-            voltage=request.voltage
-        )
-
-        return {
-            "status": "success",
-            "channel": request.channel,
-            "voltage": request.voltage
-        }
-
-    except Exception as e:
-        logger.error("labjack_simulate_error", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Error simulating input: {str(e)}")
-
-
-class SimulateDigitalRequest(BaseModel):
-    """Request to toggle/simulate a digital input (mock mode only)"""
-    channel: int = Field(..., ge=0, le=15, description="Channel number (0-15)")
-    state: Optional[bool] = Field(None, description="Specific state to set (None = toggle)")
-
-
-@router.post(
-    "/simulate-digital",
-    summary="Simulate/Toggle Digital Input (Mock Mode)",
-    description="Toggle or set a digital input state (only works in mock mode)"
-)
-async def simulate_digital_input(request: SimulateDigitalRequest):
-    """Toggle or set a digital input state (mock mode only)"""
-    daemon = get_daemon_instance()
-
-    if not daemon or not daemon.hardware_manager:
-        raise HTTPException(status_code=503, detail="Hardware manager not available")
-
-    try:
-        labjack = daemon.hardware_manager.labjack
-
-        # Check if it's a mock instance
-        if not labjack.is_mock():
-            raise HTTPException(status_code=400, detail="Digital simulation only available in mock mode")
-
-        # Get current state and toggle, or set specific state
-        current_state = labjack.digital_inputs.get(request.channel, False)
-        new_state = not current_state if request.state is None else request.state
-
-        # Set the new state
-        labjack.digital_inputs[request.channel] = new_state
-
-        logger.info(
-            "labjack_digital_simulated",
-            channel=request.channel,
-            state=new_state
-        )
-
-        return {
-            "status": "success",
-            "channel": request.channel,
-            "state": new_state
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("labjack_simulate_digital_error", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Error simulating digital input: {str(e)}")
 
 
 @router.post(
@@ -386,11 +283,6 @@ async def reset_labjack():
 
         # Reset all PWM outputs to 0
         await labjack.set_pwm_outputs({0: 0.0, 1: 0.0})
-
-        # In mock mode, reset all simulated inputs
-        if hasattr(labjack, 'analog_inputs'):
-            for i in range(16):
-                labjack.analog_inputs[i] = 0.0
 
         logger.info("labjack_reset")
 

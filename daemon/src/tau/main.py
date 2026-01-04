@@ -69,13 +69,9 @@ class TauDaemon:
         # Initialize hardware interfaces (LabJack/GPIO, OLA)
         logger.info(
             "initializing_hardware",
-            labjack_mock=self.settings.labjack_mock,
-            ola_mock=self.settings.ola_mock,
             use_gpio=self.settings.use_gpio,
         )
         self.hardware_manager = HardwareManager(
-            labjack_mock=self.settings.labjack_mock,
-            ola_mock=self.settings.ola_mock,
             use_gpio=self.settings.use_gpio,
             gpio_use_pigpio=self.settings.gpio_use_pigpio,
             gpio_pull_up=self.settings.gpio_pull_up,
