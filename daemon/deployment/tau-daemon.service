@@ -7,14 +7,14 @@ Wants=postgresql.service
 Type=simple
 User=tau
 Group=tau
-WorkingDirectory=/opt/tau-daemon
-Environment="PYTHONPATH=/opt/tau-daemon/src"
+WorkingDirectory=/opt/tau-daemon/daemon
+Environment="PYTHONPATH=/opt/tau-daemon/daemon/src"
 Environment="DATABASE_URL=postgresql://tau_daemon:tau_password@localhost/tau_lighting"
 Environment="DAEMON_PORT=8000"
 Environment="LOG_LEVEL=INFO"
 Environment="CONTROL_LOOP_HZ=30"
 
-ExecStart=/opt/tau-daemon/.venv/bin/python -m tau.main
+ExecStart=/opt/tau-daemon/daemon/.venv/bin/python -m tau.main
 Restart=on-failure
 RestartSec=10s
 
