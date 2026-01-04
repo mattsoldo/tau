@@ -81,8 +81,8 @@ echo "5. Creating tau user..."
 if id "tau" &>/dev/null; then
     echo "✓ User 'tau' already exists"
 else
-    sudo useradd -r -s /bin/false -G plugdev tau
-    echo "✓ Created user 'tau' with plugdev group access"
+    sudo useradd -r -m -s /bin/false -G plugdev tau
+    echo "✓ Created user 'tau' with plugdev group access and home directory"
 fi
 
 # 6. Create installation directory
