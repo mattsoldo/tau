@@ -253,7 +253,7 @@ echo "✓ npm $(npm --version) installed"
 echo ""
 echo "16b. Installing frontend dependencies..."
 cd /opt/tau-daemon/frontend
-sudo -u tau npm ci --production
+sudo -u tau npm ci
 
 echo ""
 echo "16c. Building frontend..."
