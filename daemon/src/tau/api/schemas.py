@@ -259,6 +259,38 @@ class CircadianProfileResponse(CircadianProfileBase):
         from_attributes = True
 
 
+# Switch Model Schemas
+class SwitchModelBase(BaseModel):
+    manufacturer: str = Field(..., max_length=100)
+    model: str = Field(..., max_length=100)
+    input_type: str = Field(..., pattern="^(retractive|rotary_abs|paddle_composite|switch_simple)$")
+    debounce_ms: Optional[int] = Field(default=500, ge=0, le=5000)
+    dimming_curve: Optional[str] = Field(default="logarithmic", pattern="^(linear|logarithmic)$")
+    requires_digital_pin: Optional[bool] = Field(default=True)
+    requires_analog_pin: Optional[bool] = Field(default=False)
+
+
+class SwitchModelCreate(SwitchModelBase):
+    pass
+
+
+class SwitchModelUpdate(BaseModel):
+    manufacturer: Optional[str] = Field(None, max_length=100)
+    model: Optional[str] = Field(None, max_length=100)
+    input_type: Optional[str] = Field(None, pattern="^(retractive|rotary_abs|paddle_composite|switch_simple)$")
+    debounce_ms: Optional[int] = Field(None, ge=0, le=5000)
+    dimming_curve: Optional[str] = Field(None, pattern="^(linear|logarithmic)$")
+    requires_digital_pin: Optional[bool] = None
+    requires_analog_pin: Optional[bool] = None
+
+
+class SwitchModelResponse(SwitchModelBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
 # Switch Schemas
 class SwitchBase(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
@@ -275,6 +307,7 @@ class SwitchCreate(SwitchBase):
 
 class SwitchUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
+    switch_model_id: Optional[int] = Field(None, gt=0)
     labjack_digital_pin: Optional[int] = Field(None, ge=0, le=15)
     labjack_analog_pin: Optional[int] = Field(None, ge=0, le=15)
     target_group_id: Optional[int] = None
@@ -283,6 +316,13 @@ class SwitchUpdate(BaseModel):
 
 class SwitchResponse(SwitchBase):
     id: int
+
+    class Config:
+        from_attributes = True
+
+
+class SwitchWithModelResponse(SwitchResponse):
+    model: Optional[SwitchModelResponse] = None
 
     class Config:
         from_attributes = True

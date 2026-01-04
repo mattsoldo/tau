@@ -306,7 +306,7 @@ Use this endpoint to monitor system performance and debug issues.
         return connection_manager.get_statistics()
 
     # Register API routers
-    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, system_config
+    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, system_config, switches
 
     app.include_router(fixtures.router, prefix="/api/fixtures", tags=["fixtures"])
     app.include_router(groups.router, prefix="/api/groups", tags=["groups"])
@@ -316,6 +316,7 @@ Use this endpoint to monitor system performance and debug issues.
     app.include_router(labjack.router, prefix="/api/labjack", tags=["hardware"])
     app.include_router(discovery.router, prefix="/api/discovery", tags=["discovery"])
     app.include_router(system_config.router, prefix="/api/config", tags=["configuration"])
+    app.include_router(switches.router, prefix="/api/switches", tags=["switches"])
 
     # Serve static HTML files (LabJack monitor, etc.)
     # Navigate from tau/api/__init__.py up to daemon directory

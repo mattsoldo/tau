@@ -1,7 +1,7 @@
 """
 API Routes Package
 """
-from tau.api.routes import fixtures, groups, scenes, control, circadian
+from tau.api.routes import fixtures, groups, scenes, control, circadian, switches
 
 __all__ = [
     "fixtures",
@@ -9,4 +9,5 @@ __all__ = [
     "scenes",
     "control",
     "circadian",
+    "switches",
 ]
