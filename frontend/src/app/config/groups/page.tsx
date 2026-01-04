@@ -32,6 +32,10 @@ interface GroupFormData {
   description: string;
   circadian_enabled: boolean;
   circadian_profile_id: string;
+  // Dim-to-warm configuration
+  dim_to_warm_enabled: boolean;
+  dim_to_warm_max_cct: string;
+  dim_to_warm_min_cct: string;
 }
 
 const emptyGroupFormData: GroupFormData = {
@@ -39,6 +43,9 @@ const emptyGroupFormData: GroupFormData = {
   description: '',
   circadian_enabled: false,
   circadian_profile_id: '',
+  dim_to_warm_enabled: false,
+  dim_to_warm_max_cct: '',
+  dim_to_warm_min_cct: '',
 };
 
 export default function GroupsPage() {
@@ -169,6 +176,9 @@ export default function GroupsPage() {
       description: group.description || '',
       circadian_enabled: group.circadian_enabled,
       circadian_profile_id: group.circadian_profile_id?.toString() || '',
+      dim_to_warm_enabled: group.dim_to_warm_enabled || false,
+      dim_to_warm_max_cct: group.dim_to_warm_max_cct?.toString() || '',
+      dim_to_warm_min_cct: group.dim_to_warm_min_cct?.toString() || '',
     });
     setIsGroupModalOpen(true);
   };
@@ -181,14 +191,23 @@ export default function GroupsPage() {
 
     setIsSavingGroup(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: groupFormData.name.trim(),
         description: groupFormData.description.trim() || null,
         circadian_enabled: groupFormData.circadian_enabled,
         circadian_profile_id: groupFormData.circadian_profile_id
           ? parseInt(groupFormData.circadian_profile_id)
           : null,
+        dim_to_warm_enabled: groupFormData.dim_to_warm_enabled,
       };
+
+      // Add dim-to-warm CCT overrides if provided
+      if (groupFormData.dim_to_warm_max_cct) {
+        payload.dim_to_warm_max_cct = parseInt(groupFormData.dim_to_warm_max_cct);
+      }
+      if (groupFormData.dim_to_warm_min_cct) {
+        payload.dim_to_warm_min_cct = parseInt(groupFormData.dim_to_warm_min_cct);
+      }
 
       const url = editingGroup
         ? `${API_URL}/api/groups/${editingGroup.id}`

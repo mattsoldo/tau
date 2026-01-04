@@ -60,6 +60,19 @@ class FixtureBase(BaseModel):
     fixture_model_id: int = Field(..., gt=0)
     dmx_channel_start: int = Field(..., ge=1, le=512)
     secondary_dmx_channel: Optional[int] = Field(None, ge=1, le=512)
+    # Dim-to-warm configuration
+    dim_to_warm_enabled: bool = Field(
+        default=False,
+        description="Enable dim-to-warm behavior for this fixture"
+    )
+    dim_to_warm_max_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at 100% brightness (Kelvin). Overrides system default."
+    )
+    dim_to_warm_min_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at minimum brightness (Kelvin). Overrides system default."
+    )
 
 
 class FixtureCreate(FixtureBase):
@@ -71,6 +84,19 @@ class FixtureUpdate(BaseModel):
     fixture_model_id: Optional[int] = Field(None, gt=0)
     dmx_channel_start: Optional[int] = Field(None, ge=1, le=512)
     secondary_dmx_channel: Optional[int] = Field(None, ge=1, le=512)
+    # Dim-to-warm configuration
+    dim_to_warm_enabled: Optional[bool] = Field(
+        None,
+        description="Enable dim-to-warm behavior for this fixture"
+    )
+    dim_to_warm_max_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at 100% brightness (Kelvin). Overrides system default."
+    )
+    dim_to_warm_min_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at minimum brightness (Kelvin). Overrides system default."
+    )
 
 
 class FixtureMergeRequest(BaseModel):
@@ -105,6 +131,19 @@ class GroupBase(BaseModel):
     description: Optional[str] = None
     circadian_enabled: bool = False
     circadian_profile_id: Optional[int] = None
+    # Dim-to-warm configuration
+    dim_to_warm_enabled: bool = Field(
+        default=False,
+        description="Enable dim-to-warm behavior for all fixtures in this group"
+    )
+    dim_to_warm_max_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at 100% brightness (Kelvin). Overrides system default."
+    )
+    dim_to_warm_min_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at minimum brightness (Kelvin). Overrides system default."
+    )
 
 
 class GroupCreate(GroupBase):
@@ -116,6 +155,19 @@ class GroupUpdate(BaseModel):
     description: Optional[str] = None
     circadian_enabled: Optional[bool] = None
     circadian_profile_id: Optional[int] = None
+    # Dim-to-warm configuration
+    dim_to_warm_enabled: Optional[bool] = Field(
+        None,
+        description="Enable dim-to-warm behavior for all fixtures in this group"
+    )
+    dim_to_warm_max_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at 100% brightness (Kelvin). Overrides system default."
+    )
+    dim_to_warm_min_cct: Optional[int] = Field(
+        None, ge=1000, le=10000,
+        description="CCT at minimum brightness (Kelvin). Overrides system default."
+    )
 
 
 class GroupResponse(GroupBase):
@@ -334,3 +386,44 @@ class SystemStatusResponse(BaseModel):
     persistence: Optional[dict] = None
     hardware: Optional[dict] = None
     lighting: Optional[dict] = None
+
+
+# Dim-to-Warm System Settings Schemas
+class DimToWarmSettingsBase(BaseModel):
+    """Dim-to-warm global settings"""
+    dim_to_warm_max_cct_kelvin: int = Field(
+        default=3000,
+        ge=1800, le=6500,
+        description="Default CCT at 100% brightness (Kelvin). Lower of this or fixture max."
+    )
+    dim_to_warm_min_cct_kelvin: int = Field(
+        default=1800,
+        ge=1800, le=6500,
+        description="Default CCT at minimum brightness (Kelvin). Higher of this or fixture min."
+    )
+    dim_to_warm_curve_exponent: float = Field(
+        default=0.5,
+        ge=0.1, le=2.0,
+        description="Curve exponent for dim-to-warm. 0.5=square root (incandescent-like), 1.0=linear"
+    )
+
+
+class DimToWarmSettingsUpdate(BaseModel):
+    """Update dim-to-warm settings"""
+    dim_to_warm_max_cct_kelvin: Optional[int] = Field(
+        None, ge=1800, le=6500,
+        description="Default CCT at 100% brightness (Kelvin)"
+    )
+    dim_to_warm_min_cct_kelvin: Optional[int] = Field(
+        None, ge=1800, le=6500,
+        description="Default CCT at minimum brightness (Kelvin)"
+    )
+    dim_to_warm_curve_exponent: Optional[float] = Field(
+        None, ge=0.1, le=2.0,
+        description="Curve exponent for dim-to-warm"
+    )
+
+
+class DimToWarmSettingsResponse(DimToWarmSettingsBase):
+    """Response for dim-to-warm settings"""
+    pass

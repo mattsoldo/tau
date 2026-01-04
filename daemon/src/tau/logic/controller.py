@@ -22,6 +22,10 @@ from tau.logic.color_mixing import (
     ColorMixParams,
     get_default_chromaticity,
 )
+from tau.logic.dim_to_warm import (
+    get_dim_to_warm_engine,
+    DimToWarmEngine,
+)
 from tau.database import get_db_session
 
 logger = structlog.get_logger(__name__)
@@ -57,6 +61,7 @@ class LightingController:
         self.circadian = CircadianEngine()
         self.scenes = SceneEngine(state_manager)
         self.switches = SwitchHandler(state_manager, hardware_manager)
+        self.dim_to_warm = get_dim_to_warm_engine()
 
         # Group to circadian profile mapping {group_id: profile_id}
         self.group_circadian_profiles: Dict[int, int] = {}
@@ -204,6 +209,9 @@ class LightingController:
         Uses the Planckian locus color mixing algorithm for tunable white
         fixtures when chromaticity parameters are available. Falls back to
         simple linear mixing otherwise.
+
+        Applies dim-to-warm if enabled: calculates CCT based on brightness
+        to mimic incandescent behavior.
         """
         # For each registered fixture, calculate effective state and output
         for fixture_id, fixture_state in self.state_manager.fixtures.items():
@@ -217,11 +225,18 @@ class LightingController:
             universe = fixture_state.dmx_universe
             start_channel = fixture_state.dmx_channel_start
             secondary_channel = fixture_state.secondary_dmx_channel
+            brightness = effective_state.brightness
+
+            # Apply dim-to-warm if enabled
+            # Check fixture-level and group-level dim-to-warm settings
+            dim_to_warm_cct = self._calculate_dim_to_warm_cct(fixture_id, fixture_state, brightness)
 
             # For tunable white fixtures, calculate warm/cool channel values
-            if secondary_channel is not None and effective_state.color_temp is not None:
-                cct = effective_state.color_temp
-                brightness = effective_state.brightness
+            # Use dim-to-warm CCT if calculated, otherwise use effective_state CCT
+            effective_cct = dim_to_warm_cct if dim_to_warm_cct is not None else effective_state.color_temp
+
+            if secondary_channel is not None and effective_cct is not None:
+                cct = effective_cct
 
                 # Get CCT range from fixture model (with defaults)
                 cct_min = fixture_state.cct_min or 2700
@@ -312,6 +327,57 @@ class LightingController:
                     error=str(e),
                 )
 
+    def _calculate_dim_to_warm_cct(
+        self,
+        fixture_id: int,
+        fixture_state,
+        brightness: float,
+    ) -> Optional[int]:
+        """
+        Calculate dim-to-warm CCT for a fixture based on brightness.
+
+        Checks fixture-level and group-level dim-to-warm settings and
+        calculates the appropriate CCT using the incandescent curve.
+
+        Args:
+            fixture_id: Fixture ID
+            fixture_state: Fixture state data
+            brightness: Current effective brightness (0.0 to 1.0)
+
+        Returns:
+            Calculated CCT in Kelvin, or None if dim-to-warm not enabled
+        """
+        # Get group-level dim-to-warm settings
+        group_enabled = False
+        group_max_cct = None
+        group_min_cct = None
+
+        groups = self.state_manager.fixture_group_memberships.get(fixture_id, set())
+        for group_id in groups:
+            group_state = self.state_manager.get_group_state(group_id)
+            if group_state and group_state.dim_to_warm_enabled:
+                group_enabled = True
+                # Use the first group's settings (could also merge/aggregate)
+                if group_state.dim_to_warm_max_cct is not None:
+                    group_max_cct = group_state.dim_to_warm_max_cct
+                if group_state.dim_to_warm_min_cct is not None:
+                    group_min_cct = group_state.dim_to_warm_min_cct
+                break  # Use first matching group
+
+        # Get effective parameters and calculate CCT
+        params = self.dim_to_warm.get_effective_params(
+            fixture_enabled=fixture_state.dim_to_warm_enabled,
+            fixture_max_cct=fixture_state.dim_to_warm_max_cct,
+            fixture_min_cct=fixture_state.dim_to_warm_min_cct,
+            group_enabled=group_enabled,
+            group_max_cct=group_max_cct,
+            group_min_cct=group_min_cct,
+            fixture_cct_min=fixture_state.cct_min,
+            fixture_cct_max=fixture_state.cct_max,
+        )
+
+        return self.dim_to_warm.calculate_cct(brightness, params)
+
     async def enable_circadian(self, group_id: int) -> bool:
         """
         Enable circadian rhythm for a group
@@ -386,4 +452,5 @@ class LightingController:
             "circadian": self.circadian.get_statistics(),
             "scenes": self.scenes.get_statistics(),
             "switches": self.switches.get_statistics(),
+            "dim_to_warm": self.dim_to_warm.get_statistics(),
         }

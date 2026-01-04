@@ -37,8 +37,12 @@ CREATE TABLE fixtures (
     fixture_model_id INT NOT NULL REFERENCES fixture_models(id) ON DELETE RESTRICT,
     dmx_channel_start INT NOT NULL UNIQUE,
 
+    -- Dim-to-Warm Configuration
+    dim_to_warm_enabled BOOLEAN DEFAULT FALSE,
+    dim_to_warm_max_cct INT,  -- CCT at 100% brightness (Kelvin). Overrides system default.
+    dim_to_warm_min_cct INT,  -- CCT at minimum brightness (Kelvin). Overrides system default.
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    -- No overrides here. The model dictates behavior.
 );
 
 CREATE TABLE switch_models (
@@ -69,6 +73,11 @@ CREATE TABLE groups (
     -- Circadian Configuration
     circadian_enabled BOOLEAN DEFAULT FALSE,
     circadian_profile_id INT, -- FK to a profiles table (defined later)
+
+    -- Dim-to-Warm Configuration
+    dim_to_warm_enabled BOOLEAN DEFAULT FALSE,
+    dim_to_warm_max_cct INT,  -- CCT at 100% brightness (Kelvin). Overrides system default.
+    dim_to_warm_min_cct INT,  -- CCT at minimum brightness (Kelvin). Overrides system default.
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -177,6 +186,24 @@ CREATE TABLE group_state (
     last_active_scene_id INT REFERENCES scenes(id)
 );
 
+-- SYSTEM SETTINGS (Singleton)
+-- Global configuration for the lighting system (dim-to-warm defaults, etc.)
+CREATE TABLE system_settings (
+    id INT PRIMARY KEY DEFAULT 1,
+
+    -- Dim-to-Warm Global Settings
+    dim_to_warm_max_cct_kelvin INT NOT NULL DEFAULT 3000,  -- CCT at 100% brightness
+    dim_to_warm_min_cct_kelvin INT NOT NULL DEFAULT 1800,  -- CCT at minimum brightness
+    dim_to_warm_curve_exponent REAL NOT NULL DEFAULT 0.5,  -- Power curve (0.5 = incandescent-like)
+
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Ensure only one row exists
+    CONSTRAINT system_settings_singleton CHECK (id = 1)
+);
+
 -- Add Foreign Key Constraint for circadian_profile_id after table creation
 ALTER TABLE groups ADD CONSTRAINT fk_groups_circadian_profile
     FOREIGN KEY (circadian_profile_id) REFERENCES circadian_profiles(id) ON DELETE SET NULL;
@@ -208,6 +235,15 @@ CREATE INDEX idx_fixture_state_is_on ON fixture_state(is_on) WHERE is_on = TRUE;
 CREATE INDEX idx_fixture_state_last_updated ON fixture_state(last_updated);
 
 CREATE INDEX idx_group_state_circadian_suspended ON group_state(circadian_suspended) WHERE circadian_suspended = TRUE;
+
+-- Dim-to-warm indexes
+CREATE INDEX idx_fixtures_dim_to_warm_enabled ON fixtures(dim_to_warm_enabled) WHERE dim_to_warm_enabled = TRUE;
+CREATE INDEX idx_groups_dim_to_warm_enabled ON groups(dim_to_warm_enabled) WHERE dim_to_warm_enabled = TRUE;
+
+-- Insert default system settings
+INSERT INTO system_settings (id, dim_to_warm_max_cct_kelvin, dim_to_warm_min_cct_kelvin, dim_to_warm_curve_exponent)
+VALUES (1, 3000, 1800, 0.5)
+ON CONFLICT (id) DO NOTHING;
 
 -- Insert Default Circadian Profiles
 INSERT INTO circadian_profiles (name, description, curve_points) VALUES

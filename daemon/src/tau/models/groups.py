@@ -52,6 +52,21 @@ class Group(Base):
         nullable=True,
     )
 
+    # Dim-to-Warm Configuration
+    # When enabled, CCT for all fixtures in group adjusts based on brightness
+    dim_to_warm_enabled: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True, server_default="false"
+    )
+    # Optional per-group CCT overrides (use system defaults if not set)
+    dim_to_warm_max_cct: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True,
+        comment="CCT at 100% brightness (Kelvin). Overrides system default."
+    )
+    dim_to_warm_min_cct: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True,
+        comment="CCT at minimum brightness (Kelvin). Overrides system default."
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,

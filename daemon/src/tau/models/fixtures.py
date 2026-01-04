@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     Float,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     UniqueConstraint,
@@ -123,6 +124,21 @@ class Fixture(Base):
     # DMX Configuration
     dmx_channel_start: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     secondary_dmx_channel: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, unique=True)
+
+    # Dim-to-Warm Configuration
+    # When enabled, CCT automatically adjusts based on brightness to mimic incandescent behavior
+    dim_to_warm_enabled: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True, server_default="false"
+    )
+    # Optional per-fixture CCT overrides (use system defaults if not set)
+    dim_to_warm_max_cct: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True,
+        comment="CCT at 100% brightness (Kelvin). Overrides system default."
+    )
+    dim_to_warm_min_cct: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True,
+        comment="CCT at minimum brightness (Kelvin). Overrides system default."
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

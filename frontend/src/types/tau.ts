@@ -32,6 +32,10 @@ export interface Fixture {
   dmx_channel_start: number;
   created_at: string;
   model?: FixtureModel;
+  // Dim-to-warm configuration
+  dim_to_warm_enabled: boolean;
+  dim_to_warm_max_cct?: number;
+  dim_to_warm_min_cct?: number;
 }
 
 // Switch Types
@@ -74,6 +78,10 @@ export interface Group {
   circadian_enabled: boolean;
   circadian_profile_id?: number;
   created_at: string;
+  // Dim-to-warm configuration
+  dim_to_warm_enabled: boolean;
+  dim_to_warm_max_cct?: number;
+  dim_to_warm_min_cct?: number;
 }
 
 // Circadian Types
@@ -159,4 +167,11 @@ export interface WebSocketEvent {
   type: WebSocketEventType;
   timestamp: string;
   data: unknown;
+}
+
+// Dim-to-Warm System Settings
+export interface DimToWarmSettings {
+  dim_to_warm_max_cct_kelvin: number; // CCT at 100% brightness (default 3000K)
+  dim_to_warm_min_cct_kelvin: number; // CCT at minimum brightness (default 1800K)
+  dim_to_warm_curve_exponent: number; // Curve exponent (0.5 = incandescent-like)
 }

@@ -1,5 +1,5 @@
 """
-System Configuration API Routes - Mock mode settings and hardware detection
+System Configuration API Routes - Mock mode settings, hardware detection, and dim-to-warm settings
 """
 import os
 from pathlib import Path
@@ -10,6 +10,13 @@ import structlog
 
 from tau.api import get_daemon_instance
 from tau.config import get_settings
+from tau.api.schemas import (
+    DimToWarmSettingsResponse,
+    DimToWarmSettingsUpdate,
+)
+from tau.logic.dim_to_warm import get_dim_to_warm_engine
+from tau.database import get_db_session
+from tau.models.system_settings import SystemSettings
 
 logger = structlog.get_logger(__name__)
 
@@ -280,3 +287,116 @@ async def get_hardware_alert():
         "labjack_mock": labjack_mock,
         "ola_mock": ola_mock
     }
+
+
+# === Dim-to-Warm Settings Endpoints ===
+
+@router.get(
+    "/dim-to-warm",
+    response_model=DimToWarmSettingsResponse,
+    summary="Get Dim-to-Warm Settings",
+    description="""
+Get the current global dim-to-warm settings.
+
+Dim-to-warm mimics incandescent bulb behavior: as brightness decreases,
+color temperature gets warmer (lower Kelvin). These settings define the
+system-wide defaults that can be overridden per-fixture or per-group.
+
+**Settings:**
+- **max_cct_kelvin**: CCT at 100% brightness (default 3000K)
+- **min_cct_kelvin**: CCT at minimum brightness (default 1800K)
+- **curve_exponent**: Power curve shape (0.5 = square root / incandescent-like)
+"""
+)
+async def get_dim_to_warm_settings():
+    """Get current dim-to-warm settings"""
+    engine = get_dim_to_warm_engine()
+    config = engine.config
+
+    return DimToWarmSettingsResponse(
+        dim_to_warm_max_cct_kelvin=config.max_cct_kelvin,
+        dim_to_warm_min_cct_kelvin=config.min_cct_kelvin,
+        dim_to_warm_curve_exponent=config.curve_exponent,
+    )
+
+
+@router.put(
+    "/dim-to-warm",
+    response_model=DimToWarmSettingsResponse,
+    summary="Update Dim-to-Warm Settings",
+    description="""
+Update the global dim-to-warm settings.
+
+Changes take effect immediately for the running daemon and are persisted
+to the database.
+
+**Curve Exponent Guide:**
+- 0.5 (default): Square root curve - CCT drops quickly at low brightness (incandescent-like)
+- 1.0: Linear curve - CCT changes proportionally with brightness
+- Values < 0.5: More aggressive warm shift at low brightness
+- Values > 1.0: CCT stays cooler longer as brightness decreases
+"""
+)
+async def update_dim_to_warm_settings(settings: DimToWarmSettingsUpdate):
+    """Update dim-to-warm settings"""
+    engine = get_dim_to_warm_engine()
+
+    # Validate that min <= max
+    new_max = settings.dim_to_warm_max_cct_kelvin or engine.config.max_cct_kelvin
+    new_min = settings.dim_to_warm_min_cct_kelvin or engine.config.min_cct_kelvin
+
+    if new_min > new_max:
+        raise HTTPException(
+            status_code=400,
+            detail=f"min_cct ({new_min}K) cannot be greater than max_cct ({new_max}K)"
+        )
+
+    # Update engine config (takes effect immediately)
+    engine.update_config(
+        max_cct_kelvin=settings.dim_to_warm_max_cct_kelvin,
+        min_cct_kelvin=settings.dim_to_warm_min_cct_kelvin,
+        curve_exponent=settings.dim_to_warm_curve_exponent,
+    )
+
+    # Persist to database
+    try:
+        async with get_db_session() as session:
+            # Get or create the system settings record
+            db_settings = await session.get(SystemSettings, 1)
+
+            if db_settings is None:
+                # Create new settings record
+                db_settings = SystemSettings(
+                    id=1,
+                    dim_to_warm_max_cct_kelvin=engine.config.max_cct_kelvin,
+                    dim_to_warm_min_cct_kelvin=engine.config.min_cct_kelvin,
+                    dim_to_warm_curve_exponent=engine.config.curve_exponent,
+                )
+                session.add(db_settings)
+            else:
+                # Update existing record
+                db_settings.dim_to_warm_max_cct_kelvin = engine.config.max_cct_kelvin
+                db_settings.dim_to_warm_min_cct_kelvin = engine.config.min_cct_kelvin
+                db_settings.dim_to_warm_curve_exponent = engine.config.curve_exponent
+
+            await session.commit()
+
+        logger.info(
+            "dim_to_warm_settings_updated",
+            max_cct=engine.config.max_cct_kelvin,
+            min_cct=engine.config.min_cct_kelvin,
+            curve=engine.config.curve_exponent,
+        )
+
+    except Exception as e:
+        logger.error("dim_to_warm_settings_save_failed", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Settings updated in memory but failed to persist to database"
+        )
+
+    return DimToWarmSettingsResponse(
+        dim_to_warm_max_cct_kelvin=engine.config.max_cct_kelvin,
+        dim_to_warm_min_cct_kelvin=engine.config.min_cct_kelvin,
+        dim_to_warm_curve_exponent=engine.config.curve_exponent,
+    )

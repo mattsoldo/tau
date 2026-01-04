@@ -96,6 +96,10 @@ class FixtureStateData:
     warm_lumens: Optional[int] = None
     cool_lumens: Optional[int] = None
     gamma: Optional[float] = None
+    # Dim-to-warm configuration (from fixture record)
+    dim_to_warm_enabled: bool = False
+    dim_to_warm_max_cct: Optional[int] = None
+    dim_to_warm_min_cct: Optional[int] = None
     # Override state (bypasses group/circadian control)
     override_active: bool = False
     override_expires_at: Optional[float] = None  # Unix timestamp
@@ -139,6 +143,10 @@ class GroupStateData:
     circadian_enabled: bool = False
     circadian_brightness: float = 1.0  # 0.0 to 1.0 multiplier
     circadian_color_temp: Optional[int] = None
+    # Dim-to-warm configuration (from group record)
+    dim_to_warm_enabled: bool = False
+    dim_to_warm_max_cct: Optional[int] = None
+    dim_to_warm_min_cct: Optional[int] = None
     last_updated: Optional[float] = None  # Unix timestamp
 
 

@@ -102,6 +102,10 @@ interface FixtureFormData {
   name: string;
   fixture_model_id: string;
   dmx_channel_start: string;
+  // Dim-to-warm configuration
+  dim_to_warm_enabled: boolean;
+  dim_to_warm_max_cct: string;
+  dim_to_warm_min_cct: string;
 }
 
 interface ModelFormData {
@@ -119,6 +123,9 @@ const emptyFixtureFormData: FixtureFormData = {
   name: '',
   fixture_model_id: '',
   dmx_channel_start: '',
+  dim_to_warm_enabled: false,
+  dim_to_warm_max_cct: '',
+  dim_to_warm_min_cct: '',
 };
 
 const emptyModelFormData: ModelFormData = {
@@ -941,6 +948,9 @@ export default function FixturesPage() {
       name: fixture.name,
       fixture_model_id: fixture.fixture_model_id.toString(),
       dmx_channel_start: fixture.dmx_channel_start.toString(),
+      dim_to_warm_enabled: fixture.dim_to_warm_enabled || false,
+      dim_to_warm_max_cct: fixture.dim_to_warm_max_cct?.toString() || '',
+      dim_to_warm_min_cct: fixture.dim_to_warm_min_cct?.toString() || '',
     });
     setIsFixtureModalOpen(true);
   };
@@ -953,7 +963,16 @@ export default function FixturesPage() {
       const payload: Record<string, unknown> = {
         name: fixtureFormData.name,
         dmx_channel_start: parseInt(fixtureFormData.dmx_channel_start),
+        dim_to_warm_enabled: fixtureFormData.dim_to_warm_enabled,
       };
+
+      // Add dim-to-warm CCT overrides if provided
+      if (fixtureFormData.dim_to_warm_max_cct) {
+        payload.dim_to_warm_max_cct = parseInt(fixtureFormData.dim_to_warm_max_cct);
+      }
+      if (fixtureFormData.dim_to_warm_min_cct) {
+        payload.dim_to_warm_min_cct = parseInt(fixtureFormData.dim_to_warm_min_cct);
+      }
 
       if (!editingFixture) {
         payload.fixture_model_id = parseInt(fixtureFormData.fixture_model_id);
