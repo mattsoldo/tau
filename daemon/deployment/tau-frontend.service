@@ -1,0 +1,33 @@
+[Unit]
+Description=Tau Lighting Control Frontend (Next.js)
+After=network.target tau-daemon.service
+Wants=tau-daemon.service
+
+[Service]
+Type=simple
+User=tau
+Group=tau
+WorkingDirectory=/opt/tau-daemon/frontend
+Environment="NODE_ENV=production"
+Environment="NEXT_PUBLIC_API_URL=http://localhost:8000"
+Environment="NEXT_PUBLIC_WS_URL=ws://localhost:8000"
+Environment="PORT=3000"
+
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=10s
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/tau-daemon
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tau-frontend
+
+[Install]
+WantedBy=multi-user.target

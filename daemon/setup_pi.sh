@@ -226,11 +226,59 @@ else
     echo "⚠️  OLA daemon not running"
 fi
 
-# 15. Start the service
+# 15. Frontend installation (optional)
 echo ""
-read -p "Start Tau daemon now? (y/n) " -n 1 -r
+read -p "Install web frontend? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "15a. Installing Node.js and npm..."
+
+    # Install Node.js 20.x (LTS)
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+
+    echo "✓ Node.js $(node --version) installed"
+    echo "✓ npm $(npm --version) installed"
+
+    echo ""
+    echo "15b. Installing frontend dependencies..."
+    cd /opt/tau-daemon/frontend
+    sudo -u tau npm ci --production
+
+    echo ""
+    echo "15c. Building frontend..."
+    # Get Pi's IP for build-time config
+    PI_IP=$(hostname -I | awk '{print $1}')
+    sudo -u tau bash -c "NEXT_PUBLIC_API_URL=http://$PI_IP:8000 NEXT_PUBLIC_WS_URL=ws://$PI_IP:8000 npm run build"
+
+    echo ""
+    echo "15d. Installing frontend systemd service..."
+    sudo cp /opt/tau-daemon/daemon/deployment/tau-frontend.service /etc/systemd/system/
+
+    # Update service with Pi's IP
+    sudo sed -i "s|http://localhost:8000|http://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
+    sudo sed -i "s|ws://localhost:8000|ws://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable tau-frontend
+
+    echo "✓ Frontend installed and configured"
+
+    FRONTEND_INSTALLED=true
+else
+    FRONTEND_INSTALLED=false
+fi
+
+# Get Pi's IP address
+PI_IP=$(hostname -I | awk '{print $1}')
+
+# 16. Start services
+echo ""
+read -p "Start services now? (y/n) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    # Start backend
     sudo systemctl start tau-daemon
     sleep 3
 
@@ -240,10 +288,20 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "❌ Tau daemon failed to start. Check logs:"
         echo "   sudo journalctl -u tau-daemon -n 50"
     fi
-fi
 
-# Get Pi's IP address
-PI_IP=$(hostname -I | awk '{print $1}')
+    # Start frontend if installed
+    if [ "$FRONTEND_INSTALLED" = true ]; then
+        sudo systemctl start tau-frontend
+        sleep 2
+
+        if systemctl is-active --quiet tau-frontend; then
+            echo "✓ Frontend started successfully"
+        else
+            echo "❌ Frontend failed to start. Check logs:"
+            echo "   sudo journalctl -u tau-frontend -n 50"
+        fi
+    fi
+fi
 
 echo ""
 echo "======================================"
@@ -251,26 +309,50 @@ echo "✅ Setup Complete!"
 echo "======================================"
 echo ""
 echo "Service Management:"
-echo "  Start:   sudo systemctl start tau-daemon"
-echo "  Stop:    sudo systemctl stop tau-daemon"
-echo "  Restart: sudo systemctl restart tau-daemon"
-echo "  Status:  sudo systemctl status tau-daemon"
-echo "  Logs:    sudo journalctl -u tau-daemon -f"
+echo "  Backend:"
+echo "    Start:   sudo systemctl start tau-daemon"
+echo "    Stop:    sudo systemctl stop tau-daemon"
+echo "    Restart: sudo systemctl restart tau-daemon"
+echo "    Status:  sudo systemctl status tau-daemon"
+echo "    Logs:    sudo journalctl -u tau-daemon -f"
+
+if [ "$FRONTEND_INSTALLED" = true ]; then
+    echo ""
+    echo "  Frontend:"
+    echo "    Start:   sudo systemctl start tau-frontend"
+    echo "    Stop:    sudo systemctl stop tau-frontend"
+    echo "    Restart: sudo systemctl restart tau-frontend"
+    echo "    Status:  sudo systemctl status tau-frontend"
+    echo "    Logs:    sudo journalctl -u tau-frontend -f"
+fi
+
 echo ""
-echo "Access Points:"
-echo "  API:         http://$PI_IP:8000"
-echo "  API Docs:    http://$PI_IP:8000/docs"
-echo "  OLA Web UI:  http://$PI_IP:9090"
+echo "Access Points (from any device on your network):"
+if [ "$FRONTEND_INSTALLED" = true ]; then
+    echo "  🌐 Web Interface:  http://$PI_IP:3000"
+fi
+echo "  📡 API:            http://$PI_IP:8000"
+echo "  📚 API Docs:       http://$PI_IP:8000/docs"
+echo "  💡 OLA Web UI:     http://$PI_IP:9090"
 echo ""
-echo "Configuration:"
-echo "  Environment: /opt/tau-daemon/daemon/.env"
-echo "  Service:     /etc/systemd/system/tau-daemon.service"
+echo "Configuration Files:"
+echo "  Backend:     /opt/tau-daemon/daemon/.env"
+if [ "$FRONTEND_INSTALLED" = true ]; then
+    echo "  Frontend:    /etc/systemd/system/tau-frontend.service"
+fi
+echo "  Services:    /etc/systemd/system/tau-*.service"
 echo "  Logs:        /var/log/tau/"
 echo ""
 echo "Next Steps:"
 echo "  1. Connect your LabJack U3 via USB"
-echo "  2. Configure switches in the database"
-echo "  3. Configure DMX fixtures via OLA web UI"
-echo "  4. Test API: curl http://localhost:8000/health"
+if [ "$FRONTEND_INSTALLED" = true ]; then
+    echo "  2. Open http://$PI_IP:3000 in your browser"
+    echo "  3. Configure switches, fixtures, and groups via web UI"
+else
+    echo "  2. Configure via API: http://$PI_IP:8000/docs"
+    echo "  3. Or run setup again and install frontend"
+fi
+echo "  4. Configure DMX fixtures via OLA: http://$PI_IP:9090"
+echo "  5. Test API: curl http://$PI_IP:8000/health"
 echo ""
 echo "======================================"

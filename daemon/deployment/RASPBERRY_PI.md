@@ -28,15 +28,25 @@ chmod +x setup_pi.sh
 sudo ./setup_pi.sh
 ```
 
-The script will:
-1. Install all system dependencies (PostgreSQL, OLA, Python 3.11)
-2. Set up LabJack USB permissions
-3. Create tau user and database
-4. Install Python dependencies
-5. Configure systemd service
-6. Start the daemon
+The script will interactively install:
+1. **Backend** (required):
+   - System dependencies (PostgreSQL, OLA, Python 3.11)
+   - LabJack USB permissions
+   - Tau daemon and database
+   - Python dependencies
+   - Systemd service
 
-Access the API at `http://<pi-ip>:8000`
+2. **Frontend** (optional):
+   - Node.js 20.x LTS
+   - Next.js web interface
+   - Automatic build with Pi's IP
+   - Systemd service
+
+After installation:
+- **Web UI**: `http://<pi-ip>:3000` (if frontend installed)
+- **API**: `http://<pi-ip>:8000`
+- **API Docs**: `http://<pi-ip>:8000/docs`
+- **OLA**: `http://<pi-ip>:9090`
 
 ## Manual Installation
 
@@ -175,7 +185,9 @@ sudo -u tau bash -c "source .env && .venv/bin/alembic upgrade head"
 sudo -u tau bash -c "source .env && .venv/bin/python scripts/load_example_config.py"
 ```
 
-### 11. Install Systemd Service
+### 11. Install Systemd Services
+
+**Backend Service:**
 
 ```bash
 # Copy service file
@@ -189,17 +201,45 @@ sudo systemctl daemon-reload
 sudo systemctl enable tau-daemon
 ```
 
-### 12. Start Service
+**Frontend Service (Optional):**
 
 ```bash
-# Start Tau daemon
-sudo systemctl start tau-daemon
+# Install Node.js 20.x
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-# Check status
+# Install dependencies
+cd /opt/tau-daemon/frontend
+sudo -u tau npm ci --production
+
+# Build frontend
+PI_IP=$(hostname -I | awk '{print $1}')
+sudo -u tau bash -c "NEXT_PUBLIC_API_URL=http://$PI_IP:8000 NEXT_PUBLIC_WS_URL=ws://$PI_IP:8000 npm run build"
+
+# Install service
+sudo cp /opt/tau-daemon/daemon/deployment/tau-frontend.service /etc/systemd/system/
+sudo sed -i "s|http://localhost:8000|http://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
+sudo sed -i "s|ws://localhost:8000|ws://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
+
+# Enable service
+sudo systemctl daemon-reload
+sudo systemctl enable tau-frontend
+```
+
+### 12. Start Services
+
+```bash
+# Start backend
+sudo systemctl start tau-daemon
 sudo systemctl status tau-daemon
+
+# Start frontend (if installed)
+sudo systemctl start tau-frontend
+sudo systemctl status tau-frontend
 
 # View logs
 sudo journalctl -u tau-daemon -f
+sudo journalctl -u tau-frontend -f
 ```
 
 ## Verification
@@ -207,14 +247,28 @@ sudo journalctl -u tau-daemon -f
 ### Check Services
 
 ```bash
-# Tau daemon
+# Tau daemon (backend)
 systemctl status tau-daemon
+
+# Tau frontend (web UI)
+systemctl status tau-frontend
 
 # PostgreSQL
 systemctl status postgresql
 
 # OLA daemon
 systemctl status olad
+```
+
+### Test Web Interface
+
+```bash
+# Get Pi's IP
+PI_IP=$(hostname -I | awk '{print $1}')
+echo "Web UI: http://$PI_IP:3000"
+
+# Open in browser from any device on network:
+# http://<pi-ip>:3000
 ```
 
 ### Test API
@@ -226,8 +280,8 @@ curl http://localhost:8000/health
 # System status
 curl http://localhost:8000/status
 
-# API documentation
-curl http://localhost:8000/docs
+# API documentation (interactive)
+# Open in browser: http://<pi-ip>:8000/docs
 ```
 
 ### Test Hardware
