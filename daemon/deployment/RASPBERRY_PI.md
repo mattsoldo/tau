@@ -210,16 +210,15 @@ sudo apt-get install -y nodejs
 
 # Install dependencies
 cd /opt/tau-daemon/frontend
-sudo -u tau npm ci --production
+sudo -u tau npm ci
 
 # Build frontend
-PI_IP=$(hostname -I | awk '{print $1}')
-sudo -u tau bash -c "NEXT_PUBLIC_API_URL=http://$PI_IP:8000 NEXT_PUBLIC_WS_URL=ws://$PI_IP:8000 npm run build"
+# Note: The frontend now dynamically detects the API URL from the browser's hostname,
+# so no IP address needs to be specified at build time
+sudo -u tau npm run build
 
 # Install service
 sudo cp /opt/tau-daemon/daemon/deployment/tau-frontend.service /etc/systemd/system/
-sudo sed -i "s|http://localhost:8000|http://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
-sudo sed -i "s|ws://localhost:8000|ws://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
 
 # Enable service
 sudo systemctl daemon-reload

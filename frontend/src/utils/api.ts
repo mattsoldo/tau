@@ -4,7 +4,38 @@
  * Provides type-safe API methods and consistent error handling
  */
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+/**
+ * Get API URL dynamically based on environment
+ * - In browser: uses current hostname from window.location
+ * - On server: uses environment variable or localhost fallback
+ * This allows the frontend to work with any IP address without rebuilding
+ */
+const getApiUrl = (): string => {
+  if (typeof window !== 'undefined') {
+    // Client-side: use current hostname from browser
+    const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
+    return `${protocol}://${window.location.hostname}:8000`;
+  }
+  // Server-side: use env var or localhost
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+};
+
+/**
+ * Get WebSocket URL dynamically based on environment
+ * - In browser: uses current hostname from window.location
+ * - On server: uses environment variable or localhost fallback
+ */
+export const getWsUrl = (): string => {
+  if (typeof window !== 'undefined') {
+    // Client-side: use current hostname from browser
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${protocol}://${window.location.hostname}:8000`;
+  }
+  // Server-side: use env var or localhost
+  return process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+};
+
+export const API_URL = getApiUrl();
 
 /**
  * API error with structured information

@@ -256,15 +256,11 @@ sudo -u tau npm ci
 
 echo ""
 echo "16c. Building frontend..."
-sudo -u tau bash -c "NEXT_PUBLIC_API_URL=http://$PI_IP:8000 NEXT_PUBLIC_WS_URL=ws://$PI_IP:8000 npm run build"
+sudo -u tau npm run build
 
 echo ""
 echo "16d. Installing frontend systemd service..."
 sudo cp /opt/tau-daemon/daemon/deployment/tau-frontend.service /etc/systemd/system/
-
-# Update service with Pi's IP
-sudo sed -i "s|http://localhost:8000|http://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
-sudo sed -i "s|ws://localhost:8000|ws://$PI_IP:8000|g" /etc/systemd/system/tau-frontend.service
 
 sudo systemctl daemon-reload
 sudo systemctl enable tau-frontend

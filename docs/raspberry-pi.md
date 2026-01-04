@@ -225,13 +225,9 @@ OLA_MOCK=true
 
 # CORS for network access
 CORS_ALLOW_ALL=true
-
-# Frontend
-NODE_ENV=production
-FRONTEND_PORT=3000
-NEXT_PUBLIC_API_URL=http://192.168.1.100:8000
-NEXT_PUBLIC_WS_URL=ws://192.168.1.100:8000
 ```
+
+**Note**: The frontend now automatically detects the API URL from the browser's hostname, so no frontend environment variables need to be configured.
 
 ## Using with LabJack U3
 

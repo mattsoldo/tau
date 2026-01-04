@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ToastContainer, ToastProps } from '@/components/ui/Toast';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { API_URL, getWsUrl } from '@/utils/api';
 
 // === Types ===
 
@@ -141,7 +140,7 @@ export default function SwitchesPage() {
 
   // WebSocket connection for switch auto-discovery
   useEffect(() => {
-    const ws = new WebSocket(`ws://localhost:8000/ws`);
+    const ws = new WebSocket(`${getWsUrl()}/ws`);
     wsRef.current = ws;
 
     ws.onopen = () => {

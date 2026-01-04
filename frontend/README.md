@@ -54,12 +54,14 @@ frontend/
 npm install
 ```
 
-2. Set up environment variables:
+2. (Optional) Set up environment variables for development:
 ```bash
-# Create .env.local file
+# Create .env.local file (optional - defaults to localhost:8000)
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000
 ```
+
+**Note**: The frontend automatically detects the API URL from the browser's hostname in production, so these variables are only needed if you want to override the default behavior in development.
 
 3. Run the development server:
 ```bash
@@ -184,6 +186,8 @@ docker run -p 3000:3000 tau-frontend
 
 ### Environment Variables
 
-- `NEXT_PUBLIC_API_URL`: Backend API base URL
-- `NEXT_PUBLIC_WS_URL`: WebSocket connection URL
+- `NEXT_PUBLIC_API_URL`: Backend API base URL (optional - auto-detected from browser hostname)
+- `NEXT_PUBLIC_WS_URL`: WebSocket connection URL (optional - auto-detected from browser hostname)
 - `NODE_ENV`: Environment mode (development/production)
+
+**Dynamic API Detection**: In production, the frontend automatically detects the API URL from the browser's current hostname, eliminating the need to hardcode IP addresses during deployment. This allows the same build to work on any network without reconfiguration.

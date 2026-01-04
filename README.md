@@ -191,9 +191,9 @@ Configuration is managed via environment variables. See `.env.example` for all a
 - `LABJACK_MOCK`: Use mock hardware (true/false)
 - `OLA_MOCK`: Use mock DMX (true/false)
 
-**Frontend**:
-- `NEXT_PUBLIC_API_URL`: Backend API URL
-- `NEXT_PUBLIC_WS_URL`: WebSocket connection URL
+**Frontend** (optional - auto-detected from browser hostname):
+- `NEXT_PUBLIC_API_URL`: Backend API URL (default: auto-detected)
+- `NEXT_PUBLIC_WS_URL`: WebSocket connection URL (default: auto-detected)
 
 ## Testing
 
