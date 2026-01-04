@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from tau.database import get_db
+from tau.database import get_db_session
 from tau.services.update_service import UpdateService
 
 logger = structlog.get_logger(__name__)
@@ -72,7 +72,7 @@ class ChangelogResponse(BaseModel):
     summary="Get Update Status",
     description="Get current software version and update status",
 )
-async def get_update_status(db: AsyncSession = Depends(get_db)):
+async def get_update_status(db: AsyncSession = Depends(get_db_session)):
     """Get current update status"""
     try:
         service = UpdateService(db_session=db)
@@ -89,7 +89,7 @@ async def get_update_status(db: AsyncSession = Depends(get_db)):
     summary="Check for Updates",
     description="Check if software updates are available from git remote",
 )
-async def check_for_updates(db: AsyncSession = Depends(get_db)):
+async def check_for_updates(db: AsyncSession = Depends(get_db_session)):
     """Check for available updates"""
     try:
         service = UpdateService(db_session=db)
@@ -106,7 +106,7 @@ async def check_for_updates(db: AsyncSession = Depends(get_db)):
     summary="Start Update",
     description="Start software update process (backend and frontend)",
 )
-async def start_update(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def start_update(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db_session)):
     """Start update process"""
     try:
         service = UpdateService(db_session=db)
@@ -127,7 +127,7 @@ async def start_update(background_tasks: BackgroundTasks, db: AsyncSession = Dep
     summary="Get Update History",
     description="Get recent software update history",
 )
-async def get_update_history(limit: int = 10, db: AsyncSession = Depends(get_db)):
+async def get_update_history(limit: int = 10, db: AsyncSession = Depends(get_db_session)):
     """Get update history"""
     try:
         service = UpdateService(db_session=db)
@@ -144,7 +144,7 @@ async def get_update_history(limit: int = 10, db: AsyncSession = Depends(get_db)
     summary="Get Changelog",
     description="Get git log between two commits",
 )
-async def get_changelog(from_commit: str, to_commit: str = "HEAD", db: AsyncSession = Depends(get_db)):
+async def get_changelog(from_commit: str, to_commit: str = "HEAD", db: AsyncSession = Depends(get_db_session)):
     """Get changelog between commits"""
     try:
         service = UpdateService(db_session=db)
