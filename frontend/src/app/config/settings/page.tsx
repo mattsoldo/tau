@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import UpdatePanel from '../../../components/UpdatePanel';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -109,6 +110,19 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Software Updates Section */}
+          <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#2a2a2f]">
+              <h2 className="text-lg font-semibold">Software Updates</h2>
+              <p className="text-sm text-[#636366] mt-1">
+                Manage system software updates
+              </p>
+            </div>
+            <div className="p-6">
+              <UpdatePanel />
+            </div>
+          </div>
+
           {/* Hardware Connection Status Section */}
           <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">
             <div className="px-6 py-4 border-b border-[#2a2a2f] flex items-center justify-between">

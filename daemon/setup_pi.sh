@@ -211,9 +211,17 @@ sudo systemctl daemon-reload
 sudo systemctl enable tau-daemon
 echo "✓ Systemd service installed and enabled"
 
-# 14. Test LabJack connection (if connected)
+# 14. Install sudo configuration for updates
 echo ""
-echo "14. Testing hardware connections..."
+echo "14. Installing sudo configuration for updates..."
+sudo cp /opt/tau-daemon/daemon/deployment/tau-sudoers /etc/sudoers.d/tau-daemon
+sudo chmod 0440 /etc/sudoers.d/tau-daemon
+sudo chown root:root /etc/sudoers.d/tau-daemon
+echo "✓ Sudo configuration installed (allows tau user to restart services)"
+
+# 15. Test LabJack connection (if connected)
+echo ""
+echo "15. Testing hardware connections..."
 if lsusb | grep -q "0cd5:0009"; then
     echo "✓ LabJack U3 detected"
 else
@@ -226,13 +234,13 @@ else
     echo "⚠️  OLA daemon not running"
 fi
 
-# 15. Frontend installation (optional)
+# 16. Frontend installation (optional)
 echo ""
 read -p "Install web frontend? (y/n) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo ""
-    echo "15a. Installing Node.js and npm..."
+    echo "16a. Installing Node.js and npm..."
 
     # Install Node.js 20.x (LTS)
     curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
@@ -242,18 +250,18 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "✓ npm $(npm --version) installed"
 
     echo ""
-    echo "15b. Installing frontend dependencies..."
+    echo "16b. Installing frontend dependencies..."
     cd /opt/tau-daemon/frontend
     sudo -u tau npm ci --production
 
     echo ""
-    echo "15c. Building frontend..."
+    echo "16c. Building frontend..."
     # Get Pi's IP for build-time config
     PI_IP=$(hostname -I | awk '{print $1}')
     sudo -u tau bash -c "NEXT_PUBLIC_API_URL=http://$PI_IP:8000 NEXT_PUBLIC_WS_URL=ws://$PI_IP:8000 npm run build"
 
     echo ""
-    echo "15d. Installing frontend systemd service..."
+    echo "16d. Installing frontend systemd service..."
     sudo cp /opt/tau-daemon/daemon/deployment/tau-frontend.service /etc/systemd/system/
 
     # Update service with Pi's IP
@@ -273,7 +281,7 @@ fi
 # Get Pi's IP address
 PI_IP=$(hostname -I | awk '{print $1}')
 
-# 16. Start services
+# 17. Start services
 echo ""
 read -p "Start services now? (y/n) " -n 1 -r
 echo

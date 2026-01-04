@@ -187,6 +187,19 @@ export const api = {
     health: () => request<HealthResponse>('/health'),
     status: () => request<StatusResponse>('/status'),
   },
+
+  // Updates
+  updates: {
+    getStatus: () => request<UpdateStatusResponse>('/api/updates/status'),
+    check: () => request<UpdateCheckResponse>('/api/updates/check'),
+    start: () => request<UpdateStartResponse>('/api/updates/start'),
+    getHistory: (limit?: number) =>
+      request<UpdateHistoryEntry[]>(`/api/updates/history?limit=${limit || 10}`),
+    getChangelog: (fromCommit: string, toCommit?: string) =>
+      request<ChangelogResponse>(
+        `/api/updates/changelog?from_commit=${fromCommit}&to_commit=${toCommit || 'HEAD'}`
+      ),
+  },
 };
 
 // Type definitions for API responses
@@ -312,4 +325,43 @@ export interface StatusResponse {
   persistence?: Record<string, unknown>;
   hardware?: Record<string, unknown>;
   lighting?: Record<string, unknown>;
+}
+
+export interface UpdateStatusResponse {
+  current_version: string;
+  available_version: string | null;
+  update_available: boolean;
+  is_updating: boolean;
+  last_check_at: string | null;
+}
+
+export interface UpdateCheckResponse {
+  update_available: boolean;
+  current_version: string;
+  latest_version: string;
+  commits_behind: number;
+  changelog: string;
+}
+
+export interface UpdateStartResponse {
+  message: string;
+  update_id: number;
+}
+
+export interface UpdateHistoryEntry {
+  id: number;
+  version_before: string | null;
+  version_after: string | null;
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  changelog: string | null;
+  update_type: string | null;
+}
+
+export interface ChangelogResponse {
+  changelog: string;
+  from_commit: string;
+  to_commit: string;
 }

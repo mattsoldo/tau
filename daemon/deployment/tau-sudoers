@@ -1,0 +1,15 @@
+# Tau Lighting Control - Sudo Configuration
+# This file should be installed to /etc/sudoers.d/tau-daemon
+#
+# Installation:
+#   sudo cp deployment/tau-sudoers /etc/sudoers.d/tau-daemon
+#   sudo chmod 0440 /etc/sudoers.d/tau-daemon
+#   sudo chown root:root /etc/sudoers.d/tau-daemon
+#
+# This allows the tau user to restart services for software updates
+
+# Allow tau user to restart and check status of tau services without password
+tau ALL=(ALL) NOPASSWD: /bin/systemctl restart tau-daemon
+tau ALL=(ALL) NOPASSWD: /bin/systemctl restart tau-frontend
+tau ALL=(ALL) NOPASSWD: /bin/systemctl status tau-daemon
+tau ALL=(ALL) NOPASSWD: /bin/systemctl status tau-frontend

@@ -104,6 +104,10 @@ See the `/ws` endpoint documentation for subscription management.
                 "name": "control",
                 "description": "Direct control of fixtures and groups. Set brightness, color temperature, and manage circadian automation.",
             },
+            {
+                "name": "updates",
+                "description": "Software update management. Check for updates, view changelogs, and install backend/frontend updates.",
+            },
         ],
     )
 
@@ -305,7 +309,7 @@ Use this endpoint to monitor system performance and debug issues.
         return connection_manager.get_statistics()
 
     # Register API routers
-    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, switches, system_config
+    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, switches, system_config, updates
 
     app.include_router(fixtures.router, prefix="/api/fixtures", tags=["fixtures"])
     app.include_router(groups.router, prefix="/api/groups", tags=["groups"])
@@ -316,6 +320,7 @@ Use this endpoint to monitor system performance and debug issues.
     app.include_router(labjack.router, prefix="/api/labjack", tags=["hardware"])
     app.include_router(discovery.router, prefix="/api/discovery", tags=["discovery"])
     app.include_router(system_config.router, prefix="/api/config", tags=["configuration"])
+    app.include_router(updates.router, prefix="/api/updates", tags=["updates"])
 
     # Serve static HTML files (LabJack monitor, etc.)
     # Navigate from tau/api/__init__.py up to daemon directory

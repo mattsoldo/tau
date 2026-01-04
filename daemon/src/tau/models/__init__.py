@@ -13,6 +13,7 @@ from tau.models.groups import Group, GroupFixture, GroupHierarchy
 from tau.models.circadian import CircadianProfile
 from tau.models.scenes import Scene, SceneValue
 from tau.models.state import FixtureState, GroupState
+from tau.models.update_log import UpdateLog, UpdateStatus
 
 __all__ = [
     "Base",
@@ -28,4 +29,6 @@ __all__ = [
     "SceneValue",
     "FixtureState",
     "GroupState",
+    "UpdateLog",
+    "UpdateStatus",
 ]

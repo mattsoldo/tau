@@ -493,6 +493,25 @@ sudo reboot
 
 ### Update Tau
 
+**Recommended: In-App Software Updates**
+
+The easiest way to update Tau is through the web interface:
+
+1. Open the web interface: `http://<pi-ip>:3000`
+2. Navigate to **Config → Settings**
+3. Click **Check for Updates** in the Software Updates section
+4. Review the changelog showing what changed
+5. Click **Update Now** to install updates
+
+The system will:
+- Pull latest code from git
+- Install updated dependencies (backend and frontend)
+- Run database migrations
+- Restart both services automatically
+- Refresh the web interface when complete
+
+**Manual Update (if web interface unavailable):**
+
 ```bash
 # Pull latest code
 cd /opt/tau-daemon
@@ -505,9 +524,19 @@ sudo -u tau .venv/bin/pip install -r requirements.txt --upgrade
 # Run database migrations
 sudo -u tau bash -c "source .env && .venv/bin/alembic upgrade head"
 
-# Restart daemon
+# Update frontend (if installed)
+cd ../frontend
+sudo -u tau npm ci --production
+sudo -u tau npm run build
+
+# Restart services
 sudo systemctl restart tau-daemon
+sudo systemctl restart tau-frontend  # if frontend installed
 ```
+
+**Update Logs:**
+
+Updates are logged to `/var/log/tau/update_YYYYMMDD_HHMMSS.log` for troubleshooting.
 
 ## Backup
 
