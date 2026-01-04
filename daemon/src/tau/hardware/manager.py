@@ -78,10 +78,6 @@ class HardwareManager:
             gpio_pwm_pins: Custom GPIO PWM pin mapping string
         """
         self.use_gpio = use_gpio
-
-        # Track current mode for runtime switching
-        self.labjack_mock = labjack_mock
-        self.ola_mock = ola_mock
         self.gpio_use_pigpio = gpio_use_pigpio
         self.gpio_pull_up = gpio_pull_up
         self.gpio_input_pins_str = gpio_input_pins
