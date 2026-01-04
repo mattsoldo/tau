@@ -308,6 +308,16 @@ class SwitchHandler:
         if digital_value is None:
             return
 
+        # Initialize last_digital_value on first read
+        if state.last_digital_value is None:
+            state.last_digital_value = digital_value
+            logger.debug(
+                "retractive_initialized",
+                switch_id=switch.id,
+                initial_value=digital_value
+            )
+            return
+
         # Check if value changed
         if digital_value == state.last_digital_value:
             # No state change - check for hold/dimming while pressed
