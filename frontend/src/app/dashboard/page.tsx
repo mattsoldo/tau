@@ -815,7 +815,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Lighting Control Card */}
-          <div className="col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          <div className="col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6 flex flex-col">
             <div className="flex justify-between items-center mb-5">
               <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Lighting Control</span>
               <div className="flex items-center gap-2">
@@ -827,10 +827,10 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
-            <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto pr-1">
+            <div className="flex flex-col gap-2 min-h-[100px] flex-1 max-h-[400px] overflow-y-auto pr-1">
               {/* Groups Section */}
-              {groups
-                .sort((a, b) => (b.is_system ? 1 : 0) - (a.is_system ? 1 : 0) || a.name.localeCompare(b.name))
+              {[...groups]
+                .sort((a, b) => (b?.is_system ? 1 : 0) - (a?.is_system ? 1 : 0) || (a?.name || '').localeCompare(b?.name || ''))
                 .map(group => {
                   const isExpanded = expandedGroups.has(group.id);
                   return (
