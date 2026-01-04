@@ -34,10 +34,6 @@ class Settings(BaseSettings):
     )
 
     # Hardware Configuration
-    labjack_mock: bool = Field(
-        default=True, description="Use mock LabJack interface (no real hardware)"
-    )
-    ola_mock: bool = Field(default=True, description="Use mock OLA interface (no real hardware)")
 
     # Raspberry Pi GPIO Configuration
     use_gpio: bool = Field(

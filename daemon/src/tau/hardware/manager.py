@@ -14,8 +14,6 @@ from typing import Dict, Optional
 import structlog
 
 from tau.hardware.base import LabJackInterface, OLAInterface
-from tau.hardware.labjack_mock import LabJackMock
-from tau.hardware.ola_mock import OLAMock
 
 logger = structlog.get_logger(__name__)
 
@@ -60,9 +58,6 @@ class HardwareManager:
         self,
         labjack_driver: Optional[LabJackInterface] = None,
         ola_driver: Optional[OLAInterface] = None,
-        labjack_mock: bool = True,
-        ola_mock: bool = True,
-        use_mock: Optional[bool] = None,  # Deprecated, kept for backward compatibility
         # Raspberry Pi GPIO options
         use_gpio: bool = False,
         gpio_use_pigpio: bool = True,
@@ -76,21 +71,12 @@ class HardwareManager:
         Args:
             labjack_driver: LabJack driver instance (or None to create default)
             ola_driver: OLA driver instance (or None to create default)
-            labjack_mock: If True, use mock LabJack driver
-            ola_mock: If True, use mock OLA driver
-            use_mock: Deprecated - use labjack_mock and ola_mock instead
             use_gpio: If True, use Raspberry Pi GPIO instead of LabJack
             gpio_use_pigpio: Use pigpio for hardware PWM on Raspberry Pi
             gpio_pull_up: Enable internal pull-up resistors on GPIO inputs
             gpio_input_pins: Custom GPIO input pin mapping string
             gpio_pwm_pins: Custom GPIO PWM pin mapping string
         """
-        # Handle deprecated use_mock parameter
-        if use_mock is not None:
-            labjack_mock = use_mock
-            ola_mock = use_mock
-
-        self.use_mock = labjack_mock  # Keep for backward compatibility
         self.use_gpio = use_gpio
 
         # Track current mode for runtime switching
@@ -121,10 +107,7 @@ class HardwareManager:
                     use_pigpio=gpio_use_pigpio,
                     pull_up=gpio_pull_up,
                 )
-            elif labjack_mock:
-                self.labjack = LabJackMock()
             else:
-                # Import real driver only if needed
                 from tau.hardware.labjack_driver import LabJackDriver
 
                 self.labjack = LabJackDriver()
@@ -132,13 +115,9 @@ class HardwareManager:
             self.labjack = labjack_driver
 
         if ola_driver is None:
-            if ola_mock:
-                self.ola = OLAMock()
-            else:
-                # Import real driver only if needed
-                from tau.hardware.ola_driver import OLADriver
+            from tau.hardware.ola_driver import OLADriver
 
-                self.ola = OLADriver()
+            self.ola = OLADriver()
         else:
             self.ola = ola_driver
 
@@ -152,8 +131,6 @@ class HardwareManager:
 
         logger.info(
             "hardware_manager_initialized",
-            labjack_mock=labjack_mock if not use_gpio else False,
-            ola_mock=ola_mock,
             use_gpio=use_gpio,
             labjack=self.labjack.name,
             ola=self.ola.name,

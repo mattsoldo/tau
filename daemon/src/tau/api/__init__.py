@@ -47,12 +47,11 @@ A comprehensive REST API for controlling smart lighting systems with:
 
 ## Features
 
-- 🎨 Tunable white lighting (brightness + CCT)
-- ⏰ Circadian rhythm automation
-- 🎬 Scene management (capture/recall)
-- 📊 Group-based control
-- ⚡ Real-time WebSocket updates
-- 🔧 Mock hardware mode for testing
+- Tunable white lighting (brightness + CCT)
+- Circadian rhythm automation
+- Scene management (capture/recall)
+- Group-based control
+- Real-time WebSocket updates
 
 ## Getting Started
 

@@ -89,11 +89,9 @@ async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest.fixture
 def test_settings() -> Settings:
-    """Create test settings with mock hardware enabled."""
+    """Create test settings."""
     return Settings(
         database_url="sqlite+aiosqlite:///:memory:",
-        labjack_mock=True,
-        ola_mock=True,
         log_level="DEBUG",
         api_docs_enabled=True,
         cors_origins=["*"],
