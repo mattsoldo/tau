@@ -162,12 +162,6 @@ USE_GPIO=false
 
 # CORS Configuration (allow access from local network)
 CORS_ALLOW_ALL=true
-
-# Frontend Configuration (if using)
-NODE_ENV=production
-FRONTEND_PORT=3000
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_WS_URL=ws://localhost:8000
 EOF
 
 sudo mv /tmp/tau.env /opt/tau-daemon/daemon/.env
