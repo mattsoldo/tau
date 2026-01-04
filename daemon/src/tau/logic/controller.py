@@ -41,7 +41,8 @@ class LightingController:
     def __init__(
         self,
         state_manager: "StateManager",
-        hardware_manager: HardwareManager
+        hardware_manager: HardwareManager,
+        dim_speed_ms: int = 700
     ):
         """
         Initialize lighting controller
@@ -49,6 +50,7 @@ class LightingController:
         Args:
             state_manager: Reference to state manager
             hardware_manager: Reference to hardware manager
+            dim_speed_ms: Time in ms for retractive switch dimming (0-100%)
         """
         self.state_manager = state_manager
         self.hardware_manager = hardware_manager
@@ -56,7 +58,11 @@ class LightingController:
         # Initialize sub-engines
         self.circadian = CircadianEngine()
         self.scenes = SceneEngine(state_manager)
-        self.switches = SwitchHandler(state_manager, hardware_manager)
+        self.switches = SwitchHandler(
+            state_manager,
+            hardware_manager,
+            dim_speed_ms=dim_speed_ms
+        )
 
         # Group to circadian profile mapping {group_id: profile_id}
         self.group_circadian_profiles: Dict[int, int] = {}

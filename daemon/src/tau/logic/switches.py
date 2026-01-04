@@ -40,6 +40,11 @@ class SwitchState:
     last_change_time: float = 0.0
     press_start_time: Optional[float] = None
     is_pressed: bool = False
+    # Dimming state for retractive switches
+    is_dimming: bool = False  # True while actively dimming
+    dim_direction: int = 1  # 1 = up (brighten), -1 = down (dim)
+    dim_start_brightness: float = 0.0  # Brightness when dimming started
+    was_on_at_press: bool = False  # State of target when switch was pressed
 
 
 class SwitchHandler:
@@ -55,7 +60,8 @@ class SwitchHandler:
         self,
         state_manager: "StateManager",
         hardware_manager: HardwareManager,
-        hold_threshold: float = 1.0
+        hold_threshold: float = 1.0,
+        dim_speed_ms: int = 700
     ):
         """
         Initialize switch handler
@@ -64,10 +70,12 @@ class SwitchHandler:
             state_manager: Reference to state manager for updating lights
             hardware_manager: Reference to hardware for reading inputs
             hold_threshold: Duration in seconds to consider a press as "hold"
+            dim_speed_ms: Time in ms for full brightness range (0-100%) when dimming
         """
         self.state_manager = state_manager
         self.hardware_manager = hardware_manager
         self.hold_threshold = hold_threshold
+        self.dim_speed_ms = dim_speed_ms
 
         # Switch configurations {switch_id: (Switch, SwitchModel)}
         self.switches: Dict[int, Tuple[Switch, SwitchModel]] = {}
@@ -79,7 +87,11 @@ class SwitchHandler:
         self.events_processed = 0
         self.switches_loaded = 0
 
-        logger.info("switch_handler_initialized", hold_threshold=hold_threshold)
+        logger.info(
+            "switch_handler_initialized",
+            hold_threshold=hold_threshold,
+            dim_speed_ms=dim_speed_ms
+        )
 
     async def load_switches(self) -> int:
         """
@@ -233,17 +245,25 @@ class SwitchHandler:
         digital_value: Optional[bool],
         current_time: float
     ) -> None:
-        """Process a momentary (retractive) switch"""
+        """
+        Process a momentary (retractive) switch with dim-on-hold behavior.
+
+        Behavior:
+        - Press and hold when OFF: gradually brightens (dim up)
+        - Press and hold when ON: gradually dims down
+        - Quick press and release: toggles on/off
+        - Dimming stops when switch is released
+        """
         if digital_value is None:
             return
 
         # Check if value changed
         if digital_value == state.last_digital_value:
-            # Check for hold event
+            # No state change - check for hold/dimming while pressed
             if state.is_pressed and state.press_start_time:
                 hold_duration = current_time - state.press_start_time
                 if hold_duration >= self.hold_threshold:
-                    # Generate hold event (once)
+                    # Start or continue dimming
                     await self._handle_hold_event(switch, state, current_time)
             return
 
@@ -257,15 +277,18 @@ class SwitchHandler:
         state.last_change_time = current_time
 
         if digital_value:
-            # Pressed
+            # Pressed - record initial state but don't toggle yet
             state.is_pressed = True
             state.press_start_time = current_time
+            state.is_dimming = False  # Reset dimming state
             await self._handle_press_event(switch, state, current_time)
         else:
-            # Released
+            # Released - stop dimming and potentially toggle
             state.is_pressed = False
-            state.press_start_time = None
             await self._handle_release_event(switch, state, current_time)
+            # Reset dimming state after release handling
+            state.is_dimming = False
+            state.press_start_time = None
 
         self.events_processed += 1
 
@@ -333,40 +356,40 @@ class SwitchHandler:
         state: SwitchState,
         current_time: float
     ) -> None:
-        """Handle press event for retractive switch (toggle on)"""
-        # Toggle target on
+        """
+        Handle press event for retractive switch.
+
+        Records the current on/off state for determining dim direction.
+        Does NOT toggle - toggling only happens on release if no dimming occurred.
+        """
+        # Get current brightness to determine dim direction
+        current_brightness = 0.0
         if switch.target_fixture_id:
-            # Get current state and toggle
             current = self.state_manager.get_fixture_state(switch.target_fixture_id)
-            new_brightness = 0.0 if (current and current.brightness > 0) else 1.0
-
-            self.state_manager.set_fixture_brightness(
-                switch.target_fixture_id,
-                new_brightness,
-                current_time
-            )
-            logger.debug(
-                "retractive_pressed_fixture",
-                switch_id=switch.id,
-                fixture_id=switch.target_fixture_id,
-                brightness=new_brightness
-            )
+            if current:
+                current_brightness = current.brightness
         elif switch.target_group_id:
-            # Toggle group
             current = self.state_manager.get_group_state(switch.target_group_id)
-            new_brightness = 0.0 if (current and current.brightness > 0) else 1.0
+            if current:
+                current_brightness = current.brightness
 
-            self.state_manager.set_group_brightness(
-                switch.target_group_id,
-                new_brightness,
-                current_time
-            )
-            logger.debug(
-                "retractive_pressed_group",
-                switch_id=switch.id,
-                group_id=switch.target_group_id,
-                brightness=new_brightness
-            )
+        # Record whether target was on at press time (for dimming direction)
+        state.was_on_at_press = current_brightness > 0
+        state.dim_start_brightness = current_brightness
+
+        # Set dim direction: dim down if on, dim up if off
+        if state.was_on_at_press:
+            state.dim_direction = -1  # Dim down
+        else:
+            state.dim_direction = 1  # Dim up
+
+        logger.debug(
+            "retractive_pressed",
+            switch_id=switch.id,
+            was_on=state.was_on_at_press,
+            dim_direction="down" if state.dim_direction < 0 else "up",
+            current_brightness=current_brightness
+        )
 
     async def _handle_release_event(
         self,
@@ -374,9 +397,53 @@ class SwitchHandler:
         state: SwitchState,
         current_time: float
     ) -> None:
-        """Handle release event for retractive switch"""
-        # For now, just log it
-        logger.debug("retractive_released", switch_id=switch.id)
+        """
+        Handle release event for retractive switch.
+
+        If dimming occurred, just stop dimming (brightness stays where it is).
+        If no dimming occurred (quick press), toggle on/off.
+        """
+        if state.is_dimming:
+            # Dimming occurred - stop dimming, keep current brightness
+            logger.debug(
+                "retractive_dim_stopped",
+                switch_id=switch.id,
+                final_brightness=state.dim_start_brightness
+            )
+            # Brightness is already set by hold events, nothing more to do
+        else:
+            # No dimming - this was a quick press, so toggle
+            if switch.target_fixture_id:
+                current = self.state_manager.get_fixture_state(switch.target_fixture_id)
+                new_brightness = 0.0 if (current and current.brightness > 0) else 1.0
+
+                self.state_manager.set_fixture_brightness(
+                    switch.target_fixture_id,
+                    new_brightness,
+                    transition_duration=0.0,  # Instant toggle
+                    timestamp=current_time
+                )
+                logger.debug(
+                    "retractive_toggled_fixture",
+                    switch_id=switch.id,
+                    fixture_id=switch.target_fixture_id,
+                    brightness=new_brightness
+                )
+            elif switch.target_group_id:
+                current = self.state_manager.get_group_state(switch.target_group_id)
+                new_brightness = 0.0 if (current and current.brightness > 0) else 1.0
+
+                self.state_manager.set_group_brightness(
+                    switch.target_group_id,
+                    new_brightness,
+                    timestamp=current_time
+                )
+                logger.debug(
+                    "retractive_toggled_group",
+                    switch_id=switch.id,
+                    group_id=switch.target_group_id,
+                    brightness=new_brightness
+                )
 
     async def _handle_hold_event(
         self,
@@ -384,9 +451,79 @@ class SwitchHandler:
         state: SwitchState,
         current_time: float
     ) -> None:
-        """Handle hold event for retractive switch (held for > threshold)"""
-        # TODO: Implement hold actions (e.g., start dimming, activate scene)
-        logger.debug("retractive_held", switch_id=switch.id)
+        """
+        Handle hold event for retractive switch (held for > threshold).
+
+        Calculates and applies brightness based on hold duration and dim direction:
+        - If target was OFF at press: dims UP from 0% toward 100%
+        - If target was ON at press: dims DOWN toward 0%
+
+        Dimming rate is controlled by dim_speed_ms (time for 0-100% change).
+        """
+        if not state.is_dimming:
+            # First hold event - mark as dimming
+            state.is_dimming = True
+            # Reset dim start brightness to current value at start of dimming
+            if switch.target_fixture_id:
+                current = self.state_manager.get_fixture_state(switch.target_fixture_id)
+                if current:
+                    state.dim_start_brightness = current.brightness
+            elif switch.target_group_id:
+                current = self.state_manager.get_group_state(switch.target_group_id)
+                if current:
+                    state.dim_start_brightness = current.brightness
+
+            logger.debug(
+                "retractive_dim_started",
+                switch_id=switch.id,
+                direction="up" if state.dim_direction > 0 else "down",
+                start_brightness=state.dim_start_brightness
+            )
+
+        # Calculate new brightness based on time held
+        # Time since dimming started (subtract hold_threshold since that's when dimming begins)
+        hold_duration = current_time - state.press_start_time - self.hold_threshold
+        hold_duration = max(0.0, hold_duration)
+
+        # Calculate brightness change: full range (0 to 1) in dim_speed_ms
+        dim_speed_seconds = self.dim_speed_ms / 1000.0
+        if dim_speed_seconds <= 0:
+            brightness_change = 1.0  # Instant
+        else:
+            brightness_change = hold_duration / dim_speed_seconds
+
+        # Apply direction and calculate new brightness
+        if state.dim_direction > 0:
+            # Dimming up from 0
+            new_brightness = min(1.0, brightness_change)
+        else:
+            # Dimming down from start brightness
+            new_brightness = max(0.0, state.dim_start_brightness - brightness_change)
+
+        # Clamp to valid range
+        new_brightness = max(0.0, min(1.0, new_brightness))
+
+        # Apply brightness (instant, no transition - continuous updates)
+        if switch.target_fixture_id:
+            self.state_manager.set_fixture_brightness(
+                switch.target_fixture_id,
+                new_brightness,
+                transition_duration=0.0,
+                timestamp=current_time
+            )
+        elif switch.target_group_id:
+            self.state_manager.set_group_brightness(
+                switch.target_group_id,
+                new_brightness,
+                timestamp=current_time
+            )
+
+        logger.debug(
+            "retractive_dimming",
+            switch_id=switch.id,
+            brightness=round(new_brightness, 3),
+            hold_duration=round(hold_duration, 3)
+        )
 
     def get_statistics(self) -> dict:
         """

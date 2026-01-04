@@ -91,7 +91,8 @@ class TauDaemon:
         logger.info("initializing_lighting_controller")
         self.lighting_controller = LightingController(
             self.state_manager,
-            self.hardware_manager
+            self.hardware_manager,
+            dim_speed_ms=self.settings.retractive_dim_speed_ms
         )
         controller_ok = await self.lighting_controller.initialize()
         if not controller_ok:
