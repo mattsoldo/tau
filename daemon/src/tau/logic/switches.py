@@ -116,6 +116,9 @@ class SwitchHandler:
 
                 self.switches_loaded = len(switches)
 
+                # Configure LabJack channels based on switch requirements
+                await self._configure_hardware_channels()
+
                 logger.info("switches_loaded", count=self.switches_loaded)
                 return self.switches_loaded
 
@@ -126,6 +129,53 @@ class SwitchHandler:
                 exc_info=True,
             )
             return 0
+
+    async def _configure_hardware_channels(self) -> None:
+        """
+        Configure LabJack channels based on switch requirements
+
+        This ensures pins are in the correct mode (digital/analog) for each switch.
+        """
+        if not hasattr(self.hardware_manager.labjack, 'configure_channel'):
+            # Hardware doesn't support dynamic channel configuration (e.g., mock mode)
+            return
+
+        try:
+            for switch_id, (switch, model) in self.switches.items():
+                # Configure digital pin if required
+                if model.requires_digital_pin and switch.labjack_digital_pin is not None:
+                    await self.hardware_manager.labjack.configure_channel(
+                        switch.labjack_digital_pin,
+                        'digital-in'
+                    )
+                    logger.debug(
+                        "switch_channel_configured",
+                        switch_id=switch_id,
+                        channel=switch.labjack_digital_pin,
+                        mode="digital-in"
+                    )
+
+                # Configure analog pin if required
+                if model.requires_analog_pin and switch.labjack_analog_pin is not None:
+                    await self.hardware_manager.labjack.configure_channel(
+                        switch.labjack_analog_pin,
+                        'analog'
+                    )
+                    logger.debug(
+                        "switch_channel_configured",
+                        switch_id=switch_id,
+                        channel=switch.labjack_analog_pin,
+                        mode="analog"
+                    )
+
+            logger.info("switch_channels_configured", count=len(self.switches))
+
+        except Exception as e:
+            logger.error(
+                "switch_channel_configuration_failed",
+                error=str(e),
+                exc_info=True
+            )
 
     async def process_inputs(self) -> None:
         """
@@ -226,7 +276,8 @@ class SwitchHandler:
             self.state_manager.set_group_brightness(
                 switch.target_group_id,
                 brightness,
-                current_time
+                transition_duration=0.5,
+                timestamp=current_time
             )
             logger.debug(
                 "switch_toggled_group",
@@ -339,7 +390,8 @@ class SwitchHandler:
             self.state_manager.set_group_brightness(
                 switch.target_group_id,
                 brightness,
-                current_time
+                transition_duration=0.1,
+                timestamp=current_time
             )
             logger.debug(
                 "rotary_adjusted_group",
@@ -369,9 +421,14 @@ class SwitchHandler:
             if current:
                 current_brightness = current.brightness
         elif switch.target_group_id:
-            current = self.state_manager.get_group_state(switch.target_group_id)
-            if current:
-                current_brightness = current.brightness
+            # Check fixture states to determine current group brightness
+            # (since groups no longer have multiplier state)
+            for fixture_id, group_ids in self.state_manager.fixture_group_memberships.items():
+                if switch.target_group_id in group_ids:
+                    fixture_state = self.state_manager.get_fixture_state(fixture_id)
+                    if fixture_state and fixture_state.current_brightness > 0.01:
+                        current_brightness = fixture_state.current_brightness
+                        break
 
         # Record whether target was on at press time (for dimming direction)
         state.was_on_at_press = current_brightness > 0

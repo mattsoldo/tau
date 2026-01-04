@@ -142,9 +142,9 @@ async def control_group(
     updated = False
 
     if control_data.brightness is not None:
-        # Set brightness for all fixtures in the group directly
+        # Set brightness for all fixtures in the group
         transition = control_data.transition_duration
-        fixtures_updated = daemon.state_manager.set_group_fixture_brightness(
+        fixtures_updated = daemon.state_manager.set_group_brightness(
             group_id,
             control_data.brightness,
             transition_duration=transition,

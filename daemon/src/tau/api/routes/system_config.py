@@ -31,6 +31,12 @@ class SystemConfigUpdate(BaseModel):
     ola_mock: Optional[bool] = Field(None, description="Set OLA mock mode")
 
 
+class HardwareModeSwitch(BaseModel):
+    """Switch hardware mode at runtime"""
+    labjack_mock: Optional[bool] = Field(None, description="Switch LabJack to mock (True) or real (False)")
+    ola_mock: Optional[bool] = Field(None, description="Switch OLA to mock (True) or real (False)")
+
+
 class HardwareAvailabilityResponse(BaseModel):
     """Hardware detection results"""
     labjack_available: bool = Field(..., description="LabJack hardware detected")
@@ -279,4 +285,68 @@ async def get_hardware_alert():
         "alerts": alerts,
         "labjack_mock": labjack_mock,
         "ola_mock": ola_mock
+    }
+
+
+@router.post(
+    "/hardware-mode",
+    summary="Switch Hardware Mode",
+    description="""
+Switch between mock and real hardware at runtime without restarting the daemon.
+
+This endpoint allows hot-swapping hardware drivers, useful for:
+- Testing with mock hardware, then switching to real hardware
+- Disconnecting real hardware temporarily
+- Switching individual components (LabJack or OLA) independently
+
+**Note**: This switch happens immediately and does not require daemon restart.
+After switching, the discovery service will reload configured switches.
+"""
+)
+async def switch_hardware_mode(mode: HardwareModeSwitch):
+    """Switch hardware mode at runtime"""
+    daemon = get_daemon_instance()
+
+    if not daemon or not daemon.hardware_manager:
+        raise HTTPException(
+            status_code=503,
+            detail="Daemon not running or hardware manager not available"
+        )
+
+    # Validate at least one mode is specified
+    if mode.labjack_mock is None and mode.ola_mock is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Must specify at least one mode to switch (labjack_mock or ola_mock)"
+        )
+
+    # Attempt the switch
+    success = await daemon.hardware_manager.switch_mode(
+        labjack_mock=mode.labjack_mock,
+        ola_mock=mode.ola_mock
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Hardware mode switch failed. Check daemon logs for details."
+        )
+
+    # Reload switch discovery if we switched LabJack mode
+    if mode.labjack_mock is not None and daemon.switch_discovery:
+        try:
+            await daemon.switch_discovery.load_configured_switches()
+            logger.info("switch_discovery_reloaded_after_mode_switch")
+        except Exception as e:
+            logger.warning("switch_discovery_reload_failed", error=str(e))
+
+    # Get new hardware status
+    stats = daemon.hardware_manager.get_statistics()
+    current_mode = stats.get("mode", {})
+
+    return {
+        "status": "success",
+        "message": "Hardware mode switched successfully",
+        "current_mode": current_mode,
+        "restart_required": False
     }

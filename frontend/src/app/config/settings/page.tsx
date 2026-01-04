@@ -169,6 +169,41 @@ export default function SettingsPage() {
     }
   };
 
+  // Switch hardware mode at runtime (no restart required)
+  const handleRuntimeSwitch = async (field: 'labjack_mock' | 'ola_mock', toMock: boolean) => {
+    try {
+      const res = await fetch(`${API_URL}/api/config/hardware-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          [field]: toMock,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to switch hardware mode');
+      }
+
+      const result = await res.json();
+
+      showToast({
+        type: 'success',
+        message: `Switched to ${toMock ? 'mock' : 'live'} mode successfully. No restart required.`,
+        duration: 5000,
+      });
+
+      // Refresh all data to show new mode
+      await fetchData();
+    } catch (err) {
+      showToast({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Failed to switch hardware mode',
+        duration: 5000,
+      });
+    }
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -240,6 +275,28 @@ export default function SettingsPage() {
                       <span>Hardware detected: {hardware.labjack_details}</span>
                     </div>
                   )}
+                  {/* Runtime mode switch buttons */}
+                  {config && (
+                    <div className="mt-3 ml-13 flex gap-2">
+                      {config.labjack_mock ? (
+                        <button
+                          onClick={() => handleRuntimeSwitch('labjack_mock', false)}
+                          disabled={!hardware?.labjack_available}
+                          className="px-3 py-1.5 text-xs font-medium bg-green-500/10 hover:bg-green-500/20 disabled:bg-green-500/5 border border-green-500/30 disabled:border-green-500/10 text-green-400 disabled:text-green-400/40 rounded-lg transition-colors disabled:cursor-not-allowed"
+                        >
+                          Switch to Live Mode
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleRuntimeSwitch('labjack_mock', true)}
+                          className="px-3 py-1.5 text-xs font-medium bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg transition-colors"
+                        >
+                          Switch to Mock Mode
+                        </button>
+                      )}
+                      <span className="text-xs text-[#636366] self-center">No restart required</span>
+                    </div>
+                  )}
                 </div>
                 <button
                   onClick={() => handleToggle('labjack_mock')}
@@ -292,6 +349,28 @@ export default function SettingsPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                       </svg>
                       <span>Hardware detected: {hardware.ola_details}</span>
+                    </div>
+                  )}
+                  {/* Runtime mode switch buttons */}
+                  {config && (
+                    <div className="mt-3 ml-13 flex gap-2">
+                      {config.ola_mock ? (
+                        <button
+                          onClick={() => handleRuntimeSwitch('ola_mock', false)}
+                          disabled={!hardware?.ola_available}
+                          className="px-3 py-1.5 text-xs font-medium bg-green-500/10 hover:bg-green-500/20 disabled:bg-green-500/5 border border-green-500/30 disabled:border-green-500/10 text-green-400 disabled:text-green-400/40 rounded-lg transition-colors disabled:cursor-not-allowed"
+                        >
+                          Switch to Live Mode
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleRuntimeSwitch('ola_mock', true)}
+                          className="px-3 py-1.5 text-xs font-medium bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-lg transition-colors"
+                        >
+                          Switch to Mock Mode
+                        </button>
+                      )}
+                      <span className="text-xs text-[#636366] self-center">No restart required</span>
                     </div>
                   )}
                 </div>

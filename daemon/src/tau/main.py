@@ -23,6 +23,7 @@ from tau.control import (
 )
 from tau.hardware import HardwareManager
 from tau.logic import LightingController
+from tau.logic.switch_discovery import SwitchDiscovery
 
 logger = structlog.get_logger(__name__)
 
@@ -41,6 +42,7 @@ class TauDaemon:
         self.config_loader: Optional[ConfigLoader] = None
         self.hardware_manager: Optional[HardwareManager] = None
         self.lighting_controller: Optional[LightingController] = None
+        self.switch_discovery: Optional[SwitchDiscovery] = None
 
     async def startup(self):
         """Initialize all daemon components"""
@@ -99,6 +101,15 @@ class TauDaemon:
             logger.error("lighting_controller_initialization_failed")
             raise RuntimeError("Failed to initialize lighting controller")
 
+        # Initialize switch auto-discovery
+        logger.info("initializing_switch_discovery")
+        self.switch_discovery = SwitchDiscovery(
+            self.hardware_manager,
+            change_threshold=3,
+            time_window=10.0
+        )
+        await self.switch_discovery.load_configured_switches()
+
         # Create scheduler for periodic tasks
         self.scheduler = Scheduler()
 
@@ -107,6 +118,13 @@ class TauDaemon:
             name="state_persistence",
             callback=self.persistence.save_state,
             interval_seconds=5.0,
+        )
+
+        # Schedule switch discovery scan every 0.5 seconds
+        self.scheduler.schedule(
+            name="switch_discovery",
+            callback=self._run_switch_discovery,
+            interval_seconds=0.5,
         )
 
         # Create and configure event loop
@@ -123,6 +141,31 @@ class TauDaemon:
         self.event_loop.start()
 
         logger.info("tau_daemon_ready", port=self.settings.daemon_port)
+
+    async def _run_switch_discovery(self) -> None:
+        """Run switch discovery scan and emit WebSocket events for new switches"""
+        if not self.switch_discovery:
+            return
+
+        try:
+            detected = await self.switch_discovery.scan_for_activity()
+            if detected:
+                # Emit WebSocket notification
+                from tau.api.websocket import connection_manager
+                await connection_manager.broadcast({
+                    "type": "switch_discovered",
+                    "pin": detected["pin"],
+                    "is_digital": detected["is_digital"],
+                    "change_count": detected["change_count"],
+                    "timestamp": detected.get("time_span", 0)
+                })
+
+                logger.info("switch_discovery_notification_sent",
+                           pin=detected["pin"],
+                           is_digital=detected["is_digital"])
+
+        except Exception as e:
+            logger.error("switch_discovery_error", error=str(e))
 
     async def shutdown(self):
         """Gracefully shutdown all components"""

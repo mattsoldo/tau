@@ -355,3 +355,81 @@ async def delete_switch(
 
     await session.delete(switch)
     await session.commit()
+
+    return {"status": "deleted"}
+
+
+# ============================================================================
+# Switch Discovery Endpoints
+# ============================================================================
+
+@router.get("/discovery/stats")
+async def get_discovery_stats():
+    """Get switch auto-discovery statistics"""
+    from tau.api import get_daemon_instance
+    daemon = get_daemon_instance()
+    
+    if not daemon or not daemon.switch_discovery:
+        return {
+            "enabled": False,
+            "message": "Switch discovery not initialized"
+        }
+    
+    stats = daemon.switch_discovery.get_statistics()
+    stats["enabled"] = True
+    return stats
+
+
+@router.post("/discovery/dismiss")
+async def dismiss_discovery(
+    pin: int,
+    is_digital: bool = True
+):
+    """
+    Dismiss a switch discovery notification
+    
+    Args:
+        pin: Pin number that was detected
+        is_digital: True for digital pin, False for analog pin
+    """
+    from tau.api import get_daemon_instance
+    daemon = get_daemon_instance()
+    
+    if not daemon or not daemon.switch_discovery:
+        raise HTTPException(
+            status_code=503,
+            detail="Switch discovery not available"
+        )
+    
+    daemon.switch_discovery.clear_detection(pin, is_digital)
+    
+    return {
+        "status": "dismissed",
+        "pin": pin,
+        "is_digital": is_digital
+    }
+
+
+@router.post("/discovery/reload")
+async def reload_configured_switches():
+    """
+    Reload the list of configured switches
+    
+    Call this after adding a new switch to update the discovery service
+    """
+    from tau.api import get_daemon_instance
+    daemon = get_daemon_instance()
+    
+    if not daemon or not daemon.switch_discovery:
+        raise HTTPException(
+            status_code=503,
+            detail="Switch discovery not available"
+        )
+    
+    await daemon.switch_discovery.load_configured_switches()
+    
+    return {
+        "status": "reloaded",
+        "configured_digital_pins": len(daemon.switch_discovery.configured_digital_pins),
+        "configured_analog_pins": len(daemon.switch_discovery.configured_analog_pins)
+    }

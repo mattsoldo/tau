@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ToastContainer, ToastProps } from '@/components/ui/Toast';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -96,6 +97,10 @@ export default function SwitchesPage() {
   const [sortColumn, setSortColumn] = useState<SortColumn>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
+  // Toast state for switch discovery
+  const [toasts, setToasts] = useState<ToastProps[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+
   // Fetch all data
   const fetchData = useCallback(async () => {
     try {
@@ -133,6 +138,105 @@ export default function SwitchesPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // WebSocket connection for switch auto-discovery
+  useEffect(() => {
+    const ws = new WebSocket(`ws://localhost:8000/ws`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('WebSocket connected for switch discovery');
+      // Subscribe to switch discovery events
+      ws.send(JSON.stringify({
+        action: 'subscribe',
+        event_types: ['switch_discovered']
+      }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'switch_discovered') {
+          handleSwitchDiscovered(data);
+        }
+      } catch (err) {
+        console.error('WebSocket message error:', err);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket closed');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
+  // Handle new switch discovered
+  const handleSwitchDiscovered = useCallback((data: {
+    pin: number;
+    is_digital: boolean;
+    change_count: number;
+  }) => {
+    const pinType = data.is_digital ? 'Digital' : 'Analog';
+    const message = `New ${pinType} switch detected on pin ${data.pin}`;
+
+    // Add toast notification with Configure and Ignore actions
+    const toastId = `switch-${data.pin}-${data.is_digital ? 'digital' : 'analog'}`;
+
+    setToasts(prev => [
+      ...prev.filter(t => t.id !== toastId), // Remove duplicate if exists
+      {
+        id: toastId,
+        type: 'success',
+        message,
+        action: {
+          label: 'Configure',
+          onClick: () => {
+            handleConfigureDiscoveredSwitch(data.pin, data.is_digital);
+          },
+        },
+        duration: 0, // Don't auto-dismiss
+        onDismiss: (id) => handleDismissToast(id, data.pin, data.is_digital),
+      },
+    ]);
+  }, []);
+
+  // Handle clicking "Configure" on discovery toast
+  const handleConfigureDiscoveredSwitch = useCallback((pin: number, isDigital: boolean) => {
+    // Pre-fill form with detected pin
+    setFormData({
+      ...emptyFormData,
+      [isDigital ? 'labjack_digital_pin' : 'labjack_analog_pin']: pin.toString(),
+    });
+    setEditingSwitch(null);
+    setIsModalOpen(true);
+
+    // Dismiss the toast
+    handleDismissToast(`switch-${pin}-${isDigital ? 'digital' : 'analog'}`, pin, isDigital);
+  }, []);
+
+  // Handle dismissing a toast
+  const handleDismissToast = useCallback(async (toastId: string, pin?: number, isDigital?: boolean) => {
+    setToasts(prev => prev.filter(t => t.id !== toastId));
+
+    // If pin info provided, notify backend to clear detection
+    if (pin !== undefined && isDigital !== undefined) {
+      try {
+        await fetch(`${API_URL}/api/switches/discovery/dismiss?pin=${pin}&is_digital=${isDigital}`, {
+          method: 'POST',
+        });
+      } catch (err) {
+        console.error('Failed to dismiss discovery:', err);
+      }
+    }
+  }, []);
 
   // Helpers
   const getModelById = (id: number): SwitchModel | undefined => {
@@ -703,6 +807,9 @@ export default function SwitchesPage() {
           </div>
         </div>
       )}
+
+      {/* Toast notifications for switch auto-discovery */}
+      <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
     </div>
   );
 }

@@ -492,38 +492,6 @@ class StateManager:
         return start + (end - start) * t
 
     def set_group_brightness(
-        self, group_id: int, brightness: float, timestamp: Optional[float] = None
-    ) -> bool:
-        """
-        Set brightness for a group
-
-        Args:
-            group_id: Group ID
-            brightness: Brightness value (0.0 to 1.0)
-            timestamp: Optional timestamp
-
-        Returns:
-            True if successful, False if group not found
-        """
-        if group_id not in self.groups:
-            logger.warning("group_not_found", group_id=group_id)
-            return False
-
-        # Clamp brightness to valid range
-        brightness = max(0.0, min(1.0, brightness))
-
-        self.groups[group_id].brightness = brightness
-        self.groups[group_id].last_updated = timestamp
-        self.dirty = True
-
-        logger.debug(
-            "group_brightness_updated",
-            group_id=group_id,
-            brightness=brightness,
-        )
-        return True
-
-    def set_group_fixture_brightness(
         self,
         group_id: int,
         brightness: float,
@@ -531,10 +499,9 @@ class StateManager:
         timestamp: Optional[float] = None,
     ) -> int:
         """
-        Set brightness for all fixtures in a group directly.
+        Set brightness for all fixtures in a group.
 
-        Unlike set_group_brightness (which sets a multiplier), this method
-        sets the actual brightness of each fixture in the group.
+        Directly sets the brightness of each fixture in the group.
 
         Args:
             group_id: Group ID
@@ -565,8 +532,13 @@ class StateManager:
                 if success:
                     updated_count += 1
 
+        # Also update the group state for tracking
+        self.groups[group_id].brightness = brightness
+        self.groups[group_id].last_updated = timestamp
+        self.dirty = True
+
         logger.debug(
-            "group_fixture_brightness_updated",
+            "group_brightness_updated",
             group_id=group_id,
             brightness=brightness,
             fixtures_updated=updated_count,
@@ -887,20 +859,17 @@ class StateManager:
                     override_source=fixture.override_source,
                 )
 
-        # No override - apply group and circadian settings
+        # No override - use fixture state directly (groups already set fixture values)
         effective_brightness = fixture.current_brightness
         effective_color_temp = fixture.current_color_temp
 
-        # Apply group settings (if fixture belongs to any groups)
+        # Apply circadian settings if enabled for any group this fixture belongs to
         groups = self.fixture_group_memberships.get(fixture_id, set())
         for group_id in groups:
             if group_id not in self.groups:
                 continue
 
             group_state = self.groups[group_id]
-
-            # Apply group brightness (multiply)
-            effective_brightness *= group_state.brightness
 
             # Apply circadian if enabled
             if group_state.circadian_enabled:
