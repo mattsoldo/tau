@@ -5,7 +5,7 @@ Processes physical switch inputs (buttons, dimmers, rotary encoders) and
 translates them into lighting control actions. Handles debouncing, state
 tracking, and dimming curves.
 """
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 import time
@@ -13,8 +13,10 @@ import structlog
 
 from tau.database import get_db_session
 from tau.models.switches import Switch, SwitchModel
-from tau.control.state_manager import StateManager
 from tau.hardware import HardwareManager
+
+if TYPE_CHECKING:
+    from tau.control.state_manager import StateManager
 
 logger = structlog.get_logger(__name__)
 
@@ -51,7 +53,7 @@ class SwitchHandler:
 
     def __init__(
         self,
-        state_manager: StateManager,
+        state_manager: "StateManager",
         hardware_manager: HardwareManager,
         hold_threshold: float = 1.0
     ):

@@ -7,11 +7,25 @@ periodically persisted to the database.
 
 Supports gradual transitions: API calls set "goal" state, and the control
 loop interpolates "current" state toward the goal over a configurable duration.
+
+Transitions support:
+- Independent brightness and CCT transition timing
+- Easing functions (LINEAR, EASE_IN, EASE_OUT, EASE_IN_OUT, etc.)
+- Proportional duration based on amount of change within the full range
 """
 from typing import Dict, Optional, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 import structlog
+
+from tau.logic.transitions import (
+    EasingFunction,
+    DEFAULT_EASING,
+    apply_easing,
+    get_transition_config,
+    calculate_brightness_transition_time,
+    calculate_cct_transition_time,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -20,8 +34,12 @@ logger = structlog.get_logger(__name__)
 class FixtureStateData:
     """Runtime state for a single fixture.
 
-    Supports gradual transitions between states. The control loop interpolates
-    from start_* values toward goal_* values over transition_duration seconds.
+    Supports gradual transitions between states with independent timing for
+    brightness and CCT. The control loop interpolates from start_* values
+    toward goal_* values using configurable easing functions.
+
+    Transition times are proportional to the amount of change within the
+    full range (0-100% for brightness, fixture CCT range for color temp).
 
     Attributes:
         goal_brightness: Target brightness (what user/scene requested)
@@ -30,8 +48,12 @@ class FixtureStateData:
         current_color_temp: Actual CCT (interpolating toward goal)
         start_brightness: Brightness when transition began
         start_color_temp: CCT when transition began
-        transition_start: Unix timestamp when transition began
-        transition_duration: Seconds to complete transition (0 = instant)
+        brightness_transition_start: Unix timestamp when brightness transition began
+        brightness_transition_duration: Seconds to complete brightness transition
+        brightness_easing: Easing function for brightness transition
+        cct_transition_start: Unix timestamp when CCT transition began
+        cct_transition_duration: Seconds to complete CCT transition
+        cct_easing: Easing function for CCT transition
     """
     fixture_id: int
     # Goal state (user intent)
@@ -43,9 +65,17 @@ class FixtureStateData:
     # Transition start values (where we're interpolating from)
     start_brightness: float = 0.0
     start_color_temp: Optional[int] = None
-    # Transition timing
-    transition_start: Optional[float] = None  # Unix timestamp
-    transition_duration: float = 0.0  # Seconds (0 = instant)
+    # Brightness transition timing (independent)
+    brightness_transition_start: Optional[float] = None  # Unix timestamp
+    brightness_transition_duration: float = 0.0  # Seconds (0 = instant)
+    brightness_easing: EasingFunction = field(default=DEFAULT_EASING)
+    # CCT transition timing (independent)
+    cct_transition_start: Optional[float] = None  # Unix timestamp
+    cct_transition_duration: float = 0.0  # Seconds (0 = instant)
+    cct_easing: EasingFunction = field(default=DEFAULT_EASING)
+    # Legacy fields - kept for backwards compatibility
+    transition_start: Optional[float] = None  # Deprecated: use brightness_transition_start
+    transition_duration: float = 0.0  # Deprecated: use brightness_transition_duration
     # Legacy fields for compatibility
     hue: Optional[int] = None
     saturation: Optional[int] = None
@@ -66,6 +96,10 @@ class FixtureStateData:
     warm_lumens: Optional[int] = None
     cool_lumens: Optional[int] = None
     gamma: Optional[float] = None
+    # Override state (bypasses group/circadian control)
+    override_active: bool = False
+    override_expires_at: Optional[float] = None  # Unix timestamp
+    override_source: Optional[str] = None  # 'fixture' or 'group'
 
     @property
     def brightness(self) -> float:
@@ -77,12 +111,28 @@ class FixtureStateData:
         """Alias for current_color_temp (backwards compatibility)"""
         return self.current_color_temp
 
+    @property
+    def is_brightness_transitioning(self) -> bool:
+        """Check if brightness is currently transitioning."""
+        return (
+            self.brightness_transition_start is not None
+            and self.brightness_transition_duration > 0
+        )
+
+    @property
+    def is_cct_transitioning(self) -> bool:
+        """Check if CCT is currently transitioning."""
+        return (
+            self.cct_transition_start is not None
+            and self.cct_transition_duration > 0
+        )
+
 
 @dataclass
 class GroupStateData:
     """Runtime state for a group"""
     group_id: int
-    brightness: float = 0.0
+    brightness: float = 1.0  # Multiplier: 1.0 = pass-through, 0.0 = off
     color_temp: Optional[int] = None
     hue: Optional[int] = None
     saturation: Optional[int] = None
@@ -182,7 +232,9 @@ class StateManager:
         self,
         fixture_id: int,
         brightness: float,
-        transition_duration: float = 0.0,
+        transition_duration: Optional[float] = None,
+        easing: Optional[EasingFunction] = None,
+        use_proportional_time: bool = True,
         timestamp: Optional[float] = None
     ) -> bool:
         """
@@ -191,7 +243,11 @@ class StateManager:
         Args:
             fixture_id: Fixture ID
             brightness: Target brightness value (0.0 to 1.0)
-            transition_duration: Seconds to transition (0 = instant)
+            transition_duration: Seconds to transition. If None and use_proportional_time
+                is True, calculates based on change amount. If 0, instant change.
+            easing: Easing function to use (defaults to EASE_IN_OUT)
+            use_proportional_time: If True and transition_duration is None, calculate
+                duration proportionally based on amount of brightness change
             timestamp: Optional timestamp (defaults to current time)
 
         Returns:
@@ -206,18 +262,39 @@ class StateManager:
         now = timestamp or time.time()
 
         fixture = self.fixtures[fixture_id]
+
+        # Calculate transition duration if not specified
+        if transition_duration is None:
+            if use_proportional_time:
+                transition_duration = calculate_brightness_transition_time(
+                    fixture.current_brightness, brightness
+                )
+            else:
+                transition_duration = 0.0
+
+        # Use default easing if not specified
+        if easing is None:
+            easing = get_transition_config().default_easing
+
         fixture.goal_brightness = brightness
         fixture.last_updated = now
 
         if transition_duration > 0:
             # Start a transition from current to goal
             fixture.start_brightness = fixture.current_brightness
+            fixture.brightness_transition_start = now
+            fixture.brightness_transition_duration = transition_duration
+            fixture.brightness_easing = easing
+            # Legacy field support
             fixture.transition_start = now
             fixture.transition_duration = transition_duration
         else:
             # Instant change - set current to goal immediately
             fixture.current_brightness = brightness
             fixture.start_brightness = brightness
+            fixture.brightness_transition_start = None
+            fixture.brightness_transition_duration = 0.0
+            # Legacy field support
             fixture.transition_start = None
             fixture.transition_duration = 0.0
 
@@ -228,6 +305,7 @@ class StateManager:
             fixture_id=fixture_id,
             goal_brightness=brightness,
             transition_duration=transition_duration,
+            easing=easing.value if easing else None,
         )
         return True
 
@@ -235,7 +313,9 @@ class StateManager:
         self,
         fixture_id: int,
         color_temp: int,
-        transition_duration: float = 0.0,
+        transition_duration: Optional[float] = None,
+        easing: Optional[EasingFunction] = None,
+        use_proportional_time: bool = True,
         timestamp: Optional[float] = None
     ) -> bool:
         """
@@ -244,7 +324,12 @@ class StateManager:
         Args:
             fixture_id: Fixture ID
             color_temp: Target color temperature in Kelvin (2000-6500)
-            transition_duration: Seconds to transition (0 = instant)
+            transition_duration: Seconds to transition. If None and use_proportional_time
+                is True, calculates based on change amount relative to fixture's CCT range.
+                If 0, instant change.
+            easing: Easing function to use (defaults to EASE_IN_OUT)
+            use_proportional_time: If True and transition_duration is None, calculate
+                duration proportionally based on amount of CCT change
             timestamp: Optional timestamp (defaults to current time)
 
         Returns:
@@ -259,20 +344,42 @@ class StateManager:
         now = timestamp or time.time()
 
         fixture = self.fixtures[fixture_id]
+
+        # Calculate transition duration if not specified
+        if transition_duration is None:
+            if use_proportional_time and fixture.current_color_temp is not None:
+                # Use fixture's CCT range for proportional calculation
+                cct_min = fixture.cct_min or 2000
+                cct_max = fixture.cct_max or 6500
+                transition_duration = calculate_cct_transition_time(
+                    fixture.current_color_temp, color_temp, cct_min, cct_max
+                )
+            else:
+                transition_duration = 0.0
+
+        # Use default easing if not specified
+        if easing is None:
+            easing = get_transition_config().default_easing
+
         fixture.goal_color_temp = color_temp
         fixture.last_updated = now
 
         if transition_duration > 0:
             # Start a transition from current to goal
             fixture.start_color_temp = fixture.current_color_temp
-            fixture.transition_start = now
-            fixture.transition_duration = transition_duration
+            fixture.cct_transition_start = now
+            fixture.cct_transition_duration = transition_duration
+            fixture.cct_easing = easing
+            # Legacy field support (use CCT timing if no brightness transition active)
+            if not fixture.is_brightness_transitioning:
+                fixture.transition_start = now
+                fixture.transition_duration = transition_duration
         else:
             # Instant change - set current to goal immediately
             fixture.current_color_temp = color_temp
             fixture.start_color_temp = color_temp
-            fixture.transition_start = None
-            fixture.transition_duration = 0.0
+            fixture.cct_transition_start = None
+            fixture.cct_transition_duration = 0.0
 
         self.dirty = True
 
@@ -281,6 +388,7 @@ class StateManager:
             fixture_id=fixture_id,
             goal_color_temp=color_temp,
             transition_duration=transition_duration,
+            easing=easing.value if easing else None,
         )
         return True
 
@@ -290,6 +398,8 @@ class StateManager:
 
         Called each control loop iteration (30 Hz) to interpolate current
         values toward goal values for fixtures with active transitions.
+        Brightness and CCT transitions are handled independently with their
+        own timing and easing functions.
 
         Args:
             timestamp: Current time (defaults to time.time())
@@ -301,46 +411,84 @@ class StateManager:
         transitioning_count = 0
 
         for fixture in self.fixtures.values():
-            if fixture.transition_start is None or fixture.transition_duration <= 0:
-                # No active transition - ensure current matches goal
+            fixture_transitioning = False
+
+            # Update brightness transition
+            if fixture.brightness_transition_start is not None and fixture.brightness_transition_duration > 0:
+                elapsed = now - fixture.brightness_transition_start
+                linear_progress = min(1.0, elapsed / fixture.brightness_transition_duration)
+
+                # Apply easing function
+                eased_progress = apply_easing(linear_progress, fixture.brightness_easing)
+
+                # Interpolate brightness with easing
+                fixture.current_brightness = self._lerp(
+                    fixture.start_brightness, fixture.goal_brightness, eased_progress
+                )
+
+                if linear_progress >= 1.0:
+                    # Transition complete
+                    fixture.current_brightness = fixture.goal_brightness
+                    fixture.brightness_transition_start = None
+                    fixture.brightness_transition_duration = 0.0
+                    self.dirty = True
+                else:
+                    fixture_transitioning = True
+            else:
+                # No active brightness transition - ensure current matches goal
                 if fixture.current_brightness != fixture.goal_brightness:
                     fixture.current_brightness = fixture.goal_brightness
+
+            # Update CCT transition (independent of brightness)
+            if fixture.cct_transition_start is not None and fixture.cct_transition_duration > 0:
+                elapsed = now - fixture.cct_transition_start
+                linear_progress = min(1.0, elapsed / fixture.cct_transition_duration)
+
+                # Apply easing function
+                eased_progress = apply_easing(linear_progress, fixture.cct_easing)
+
+                # Interpolate CCT with easing
+                if fixture.goal_color_temp is not None and fixture.start_color_temp is not None:
+                    fixture.current_color_temp = round(self._lerp(
+                        float(fixture.start_color_temp),
+                        float(fixture.goal_color_temp),
+                        eased_progress
+                    ))
+
+                if linear_progress >= 1.0:
+                    # Transition complete
+                    fixture.current_color_temp = fixture.goal_color_temp
+                    fixture.cct_transition_start = None
+                    fixture.cct_transition_duration = 0.0
+                    self.dirty = True
+                else:
+                    fixture_transitioning = True
+            else:
+                # No active CCT transition - ensure current matches goal
                 if fixture.current_color_temp != fixture.goal_color_temp:
                     fixture.current_color_temp = fixture.goal_color_temp
-                continue
 
-            # Calculate transition progress (0.0 to 1.0)
-            elapsed = now - fixture.transition_start
-            progress = min(1.0, elapsed / fixture.transition_duration)
-
-            # Interpolate brightness from start to goal
-            fixture.current_brightness = self._lerp(
-                fixture.start_brightness, fixture.goal_brightness, progress
-            )
-
-            # Interpolate color temp from start to goal
-            if fixture.goal_color_temp is not None and fixture.start_color_temp is not None:
-                fixture.current_color_temp = round(self._lerp(
-                    float(fixture.start_color_temp),
-                    float(fixture.goal_color_temp),
-                    progress
-                ))
-
-            # Check if transition complete
-            if progress >= 1.0:
-                fixture.current_brightness = fixture.goal_brightness
-                fixture.current_color_temp = fixture.goal_color_temp
+            # Update legacy fields
+            if fixture_transitioning:
+                transitioning_count += 1
+            else:
                 fixture.transition_start = None
                 fixture.transition_duration = 0.0
-                self.dirty = True
-            else:
-                transitioning_count += 1
 
         return transitioning_count
 
     @staticmethod
     def _lerp(start: float, end: float, t: float) -> float:
-        """Linear interpolation between start and end."""
+        """Linear interpolation between start and end.
+
+        Args:
+            start: Starting value
+            end: Ending value
+            t: Progress from 0.0 to 1.0 (already eased if using easing)
+
+        Returns:
+            Interpolated value
+        """
         return start + (end - start) * t
 
     def set_group_brightness(
@@ -374,6 +522,106 @@ class StateManager:
             brightness=brightness,
         )
         return True
+
+    def set_group_fixture_brightness(
+        self,
+        group_id: int,
+        brightness: float,
+        transition_duration: float = 0.0,
+        timestamp: Optional[float] = None,
+    ) -> int:
+        """
+        Set brightness for all fixtures in a group directly.
+
+        Unlike set_group_brightness (which sets a multiplier), this method
+        sets the actual brightness of each fixture in the group.
+
+        Args:
+            group_id: Group ID
+            brightness: Brightness value (0.0 to 1.0)
+            transition_duration: Optional transition time in seconds
+            timestamp: Optional timestamp
+
+        Returns:
+            Number of fixtures updated
+        """
+        if group_id not in self.groups:
+            logger.warning("group_not_found", group_id=group_id)
+            return 0
+
+        # Clamp brightness to valid range
+        brightness = max(0.0, min(1.0, brightness))
+        updated_count = 0
+
+        # Iterate through all fixtures and check if they belong to this group
+        for fixture_id, groups in self.fixture_group_memberships.items():
+            if group_id in groups:
+                success = self.set_fixture_brightness(
+                    fixture_id,
+                    brightness,
+                    transition_duration=transition_duration,
+                    timestamp=timestamp,
+                )
+                if success:
+                    updated_count += 1
+
+        logger.debug(
+            "group_fixture_brightness_updated",
+            group_id=group_id,
+            brightness=brightness,
+            fixtures_updated=updated_count,
+        )
+        return updated_count
+
+    def set_group_color_temp(
+        self,
+        group_id: int,
+        color_temp: int,
+        transition_duration: float = 0.0,
+        timestamp: Optional[float] = None,
+    ) -> int:
+        """
+        Set color temperature for all fixtures in a group.
+
+        This directly sets the CCT goal for each fixture in the group,
+        bypassing the circadian system. This is used for manual group CCT control.
+
+        Args:
+            group_id: Group ID
+            color_temp: Color temperature in Kelvin (2000-6500)
+            transition_duration: Optional transition time in seconds
+            timestamp: Optional timestamp
+
+        Returns:
+            Number of fixtures updated
+        """
+        if group_id not in self.groups:
+            logger.warning("group_not_found", group_id=group_id)
+            return 0
+
+        # Clamp color temp to valid range
+        color_temp = max(2000, min(6500, color_temp))
+        updated_count = 0
+
+        # Iterate through all fixtures and check if they belong to this group
+        for fixture_id, groups in self.fixture_group_memberships.items():
+            if group_id in groups:
+                success = self.set_fixture_color_temp(
+                    fixture_id,
+                    color_temp,
+                    transition_duration=transition_duration,
+                    timestamp=timestamp,
+                )
+                if success:
+                    updated_count += 1
+
+        logger.debug(
+            "group_color_temp_updated",
+            group_id=group_id,
+            color_temp=color_temp,
+            fixtures_updated=updated_count,
+        )
+        return updated_count
 
     def set_group_circadian(
         self,
@@ -413,15 +661,181 @@ class StateManager:
         )
         return True
 
+    def set_fixture_override(
+        self,
+        fixture_id: int,
+        source: str = "fixture",
+        expiry_hours: float = 8.0,
+        timestamp: Optional[float] = None,
+    ) -> bool:
+        """
+        Set override flag for a fixture, bypassing group/circadian control.
+
+        Args:
+            fixture_id: Fixture ID
+            source: Override source ('fixture' for individual control, 'group' for group control)
+            expiry_hours: Hours until override expires (default 8)
+            timestamp: Optional timestamp (defaults to current time)
+
+        Returns:
+            True if successful, False if fixture not found
+        """
+        if fixture_id not in self.fixtures:
+            logger.warning("fixture_not_found", fixture_id=fixture_id)
+            return False
+
+        now = timestamp or time.time()
+        fixture = self.fixtures[fixture_id]
+        fixture.override_active = True
+        fixture.override_expires_at = now + (expiry_hours * 3600)
+        fixture.override_source = source
+        self.dirty = True
+
+        logger.debug(
+            "fixture_override_set",
+            fixture_id=fixture_id,
+            source=source,
+            expires_in_hours=expiry_hours,
+        )
+        return True
+
+    def clear_fixture_override(
+        self, fixture_id: int, timestamp: Optional[float] = None
+    ) -> bool:
+        """
+        Clear override for a single fixture.
+
+        Args:
+            fixture_id: Fixture ID
+            timestamp: Optional timestamp
+
+        Returns:
+            True if successful, False if fixture not found
+        """
+        if fixture_id not in self.fixtures:
+            logger.warning("fixture_not_found", fixture_id=fixture_id)
+            return False
+
+        fixture = self.fixtures[fixture_id]
+        was_active = fixture.override_active
+        fixture.override_active = False
+        fixture.override_expires_at = None
+        fixture.override_source = None
+        fixture.last_updated = timestamp or time.time()
+
+        if was_active:
+            self.dirty = True
+            logger.debug("fixture_override_cleared", fixture_id=fixture_id)
+
+        return True
+
+    def clear_group_overrides(self, group_id: int) -> int:
+        """
+        Clear overrides for all fixtures in a group.
+
+        Called when a group control is issued - clears all individual
+        fixture overrides so the group setting takes effect.
+
+        Args:
+            group_id: Group ID
+
+        Returns:
+            Number of overrides cleared
+        """
+        cleared_count = 0
+        now = time.time()
+
+        for fixture_id, groups in self.fixture_group_memberships.items():
+            if group_id in groups:
+                fixture = self.fixtures.get(fixture_id)
+                if fixture and fixture.override_active:
+                    fixture.override_active = False
+                    fixture.override_expires_at = None
+                    fixture.override_source = None
+                    fixture.last_updated = now
+                    cleared_count += 1
+
+        if cleared_count > 0:
+            self.dirty = True
+            logger.info(
+                "group_overrides_cleared",
+                group_id=group_id,
+                cleared_count=cleared_count,
+            )
+
+        return cleared_count
+
+    def check_override_expiry(self, timestamp: Optional[float] = None) -> int:
+        """
+        Check all fixtures for expired overrides and clear them.
+
+        Should be called periodically (e.g., every 30 seconds) from the
+        control loop to automatically expire overrides.
+
+        Args:
+            timestamp: Current time (defaults to time.time())
+
+        Returns:
+            Number of overrides that were expired
+        """
+        now = timestamp or time.time()
+        expired_count = 0
+
+        for fixture in self.fixtures.values():
+            if fixture.override_active and fixture.override_expires_at:
+                if now >= fixture.override_expires_at:
+                    fixture.override_active = False
+                    fixture.override_expires_at = None
+                    fixture.override_source = None
+                    fixture.last_updated = now
+                    expired_count += 1
+                    logger.debug(
+                        "fixture_override_expired",
+                        fixture_id=fixture.fixture_id,
+                    )
+
+        if expired_count > 0:
+            self.dirty = True
+            logger.info("overrides_expired", count=expired_count)
+
+        return expired_count
+
+    def get_active_overrides(self) -> list:
+        """
+        Get list of all fixtures with active overrides.
+
+        Returns:
+            List of dicts with fixture_id, expires_at, source, and time_remaining
+        """
+        now = time.time()
+        overrides = []
+
+        for fixture in self.fixtures.values():
+            if fixture.override_active:
+                time_remaining = None
+                if fixture.override_expires_at:
+                    time_remaining = max(0, fixture.override_expires_at - now)
+
+                overrides.append({
+                    "fixture_id": fixture.fixture_id,
+                    "expires_at": fixture.override_expires_at,
+                    "source": fixture.override_source,
+                    "time_remaining_seconds": time_remaining,
+                })
+
+        return overrides
+
     def get_effective_fixture_state(
         self, fixture_id: int
     ) -> Optional[FixtureStateData]:
         """
-        Get effective state for a fixture, considering group memberships
-        and circadian rhythms
+        Get effective state for a fixture, considering overrides, group memberships,
+        and circadian rhythms.
 
-        This calculates the final output state by applying group settings
-        and circadian multipliers to the fixture's base state.
+        Priority (highest to lowest):
+        1. Override active → use fixture's current values directly
+        2. Group multipliers → multiply fixture brightness by group brightness
+        3. Circadian values → multiply by circadian brightness, use circadian CCT
 
         Args:
             fixture_id: Fixture ID
@@ -434,7 +848,46 @@ class StateManager:
 
         fixture = self.fixtures[fixture_id]
 
-        # Start with fixture's current state (what's actually being output)
+        # Check if override is active
+        if fixture.override_active:
+            # Check if override has expired (edge case - expiry check runs periodically)
+            if fixture.override_expires_at and time.time() >= fixture.override_expires_at:
+                # Clear the expired override
+                fixture.override_active = False
+                fixture.override_expires_at = None
+                fixture.override_source = None
+                self.dirty = True
+            else:
+                # Override active - return fixture's current state directly
+                # (no group or circadian multipliers applied)
+                return FixtureStateData(
+                    fixture_id=fixture_id,
+                    goal_brightness=fixture.goal_brightness,
+                    goal_color_temp=fixture.goal_color_temp,
+                    current_brightness=fixture.current_brightness,
+                    current_color_temp=fixture.current_color_temp,
+                    hue=fixture.hue,
+                    saturation=fixture.saturation,
+                    last_updated=fixture.last_updated,
+                    dmx_universe=fixture.dmx_universe,
+                    dmx_channel_start=fixture.dmx_channel_start,
+                    secondary_dmx_channel=fixture.secondary_dmx_channel,
+                    fixture_model_id=fixture.fixture_model_id,
+                    cct_min=fixture.cct_min,
+                    cct_max=fixture.cct_max,
+                    warm_xy_x=fixture.warm_xy_x,
+                    warm_xy_y=fixture.warm_xy_y,
+                    cool_xy_x=fixture.cool_xy_x,
+                    cool_xy_y=fixture.cool_xy_y,
+                    warm_lumens=fixture.warm_lumens,
+                    cool_lumens=fixture.cool_lumens,
+                    gamma=fixture.gamma,
+                    override_active=True,
+                    override_expires_at=fixture.override_expires_at,
+                    override_source=fixture.override_source,
+                )
+
+        # No override - apply group and circadian settings
         effective_brightness = fixture.current_brightness
         effective_color_temp = fixture.current_color_temp
 
@@ -467,6 +920,19 @@ class StateManager:
             hue=fixture.hue,
             saturation=fixture.saturation,
             last_updated=fixture.last_updated,
+            dmx_universe=fixture.dmx_universe,
+            dmx_channel_start=fixture.dmx_channel_start,
+            secondary_dmx_channel=fixture.secondary_dmx_channel,
+            fixture_model_id=fixture.fixture_model_id,
+            cct_min=fixture.cct_min,
+            cct_max=fixture.cct_max,
+            warm_xy_x=fixture.warm_xy_x,
+            warm_xy_y=fixture.warm_xy_y,
+            cool_xy_x=fixture.cool_xy_x,
+            cool_xy_y=fixture.cool_xy_y,
+            warm_lumens=fixture.warm_lumens,
+            cool_lumens=fixture.cool_lumens,
+            gamma=fixture.gamma,
         )
 
         return state
@@ -478,9 +944,13 @@ class StateManager:
         Returns:
             Dictionary with statistics
         """
+        active_overrides = sum(
+            1 for f in self.fixtures.values() if f.override_active
+        )
         return {
             "fixture_count": len(self.fixtures),
             "group_count": len(self.groups),
+            "active_overrides": active_overrides,
             "dirty": self.dirty,
         }
 

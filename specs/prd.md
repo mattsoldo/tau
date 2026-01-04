@@ -182,6 +182,7 @@ Lower-level assignments override higher-level ones.
   - Applies a configured default brightness and CCT
 - Turning a group OFF turns off all member fixtures.
 - Group-level controls propagate to member fixtures.
+- Group-level controls **clear individual fixture overrides** for all member fixtures.
 
 ---
 
@@ -290,26 +291,70 @@ Circadian profiles:
 
 ---
 
-## 12. Runtime State & Persistence
+## 12. Fixture Override System
 
-### 12.1 Logical State
+### 12.1 Overview
+
+The override system enables per-fixture control that bypasses group and circadian automation. This allows users to manually adjust individual fixtures without affecting other fixtures in the same group.
+
+### 12.2 Override Behavior
+
+**Individual Fixture Control:**
+- Setting a fixture's brightness or CCT directly activates an override
+- Override bypasses both circadian rhythm and group brightness multipliers
+- Override automatically expires after **8 hours**
+
+**Group Control:**
+- Controlling a group's brightness or CCT clears all individual overrides for member fixtures
+- Cleared fixtures immediately return to circadian/group control
+
+### 12.3 Override Priority
+
+When determining a fixture's effective state, the system follows this priority (highest to lowest):
+
+1. **Individual Override** - Fixture's stored state is used directly
+2. **Group Control** - Group brightness multiplier is applied
+3. **Circadian Profile** - Time-based brightness/CCT is applied
+
+### 12.4 Override Expiry
+
+- Overrides expire automatically after 8 hours
+- Expiry is checked every 30 seconds
+- When an override expires, the fixture silently returns to circadian/group control
+- Users may manually remove overrides before expiry
+
+### 12.5 UI Indicators
+
+The system provides visual feedback for override status:
+
+- **Test Lights Page**: Override badge on fixtures showing time remaining
+- **Dashboard**: Active Overrides card listing all overridden fixtures
+- **Remove Override**: Per-fixture and "Remove All" actions available
+
+---
+
+## 13. Runtime State & Persistence
+
+### 13.1 Logical State
 
 The system maintains logical state for:
 - Fixture brightness, CCT, and on/off status
 - Group circadian suspension
 - Last active scene per group
+- Fixture override status (active, expiry time, source)
 
-### 12.2 Persistence
+### 13.2 Persistence
 
 - Logical state is persisted to disk.
 - State is restored on startup.
+- Override state is persisted and restored.
 - DMX output values themselves are not persisted.
 
 ---
 
-## 13. Error Handling & Logging
+## 14. Error Handling & Logging
 
-### 13.1 Error Conditions
+### 14.1 Error Conditions
 
 - LabJack disconnected
 - USB-DMX adapter removed
@@ -320,12 +365,12 @@ System behavior:
 - Display alerts to the user
 - Continue operating where safe
 
-### 13.2 Alerts
+### 14.2 Alerts
 
 - Blocking alerts: dismissible notifications
 - Non-blocking warnings: colored status bar
 
-### 13.3 Logging
+### 14.3 Logging
 
 - Log all system events and user actions
 - Retain logs for 7 days
@@ -333,38 +378,46 @@ System behavior:
 
 ---
 
-## 14. Web User Interface
+## 15. Web User Interface
 
-### 14.1 General
+### 15.1 General
 
 - No authentication in v1
 - Modern, minimal design
 - Light and dark modes
 - Responsive on desktop, tablet, and mobile
 
-### 14.2 Default View
+### 15.2 Default View
 
 - Displays all groups
 - Group on/off control
 - Scene selection
-- Expandable to show fixtures
+- Expandable to show fixtures with override indicators
 
-### 14.3 Fixture Controls
+### 15.3 Fixture Controls
 
 - Non-dimmable: on/off
 - Dimmable: on/off + brightness slider
 - Tunable white: brightness + CCT sliders
 - Sliders update continuously
 - Value indicators show current targets
+- Override badge with time remaining when active
 
-### 14.4 Developer Mode
+### 15.4 Developer Mode
 
 - Optional
 - Exposes diagnostics such as DMX values and input state
 
+### 15.5 Dashboard
+
+- System health monitoring
+- Active overrides card with remove functionality
+- Hardware status (LabJack, OLA)
+- Event loop performance metrics
+
 ---
 
-## 15. Out of Scope (Phase 2)
+## 16. Out of Scope (Phase 2)
 
 - Multi-universe DMX
 - Spline-based color curves

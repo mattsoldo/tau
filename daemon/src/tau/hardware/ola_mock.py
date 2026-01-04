@@ -283,3 +283,7 @@ class OLAMock(OLAInterface):
             "non_zero_values": non_zero[:20],  # First 20 non-zero channels
             "max_value": max(data) if any(data) else 0,
         }
+
+    def is_mock(self) -> bool:
+        """Check if this is a mock driver"""
+        return True

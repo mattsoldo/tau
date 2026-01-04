@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKey,
+    String,
     TIMESTAMP,
 )
 from sqlalchemy.orm import relationship, Mapped, mapped_column
@@ -52,6 +53,21 @@ class FixtureState(Base):
         server_default="false",
     )
 
+    # Override State (for bypassing group/circadian control)
+    override_active: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,
+        server_default="false",
+    )
+    override_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP,
+        nullable=True,
+    )
+    override_source: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
     # Timestamps
     last_updated: Mapped[datetime] = mapped_column(
         TIMESTAMP,
@@ -74,9 +90,10 @@ class FixtureState(Base):
     )
 
     def __repr__(self) -> str:
+        override = f", override={self.override_source}" if self.override_active else ""
         return (
             f"<FixtureState(fixture={self.fixture_id}, "
-            f"on={self.is_on}, brightness={self.current_brightness}, cct={self.current_cct})>"
+            f"on={self.is_on}, brightness={self.current_brightness}, cct={self.current_cct}{override})>"
         )
 
 

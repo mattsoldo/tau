@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from tau.config import get_settings
-from tau.database import init_database
+from tau.database import init_database, close_database
 from tau.api import create_app, set_daemon_instance
 from tau.logging_config import setup_logging
 from tau.control import (
@@ -66,11 +66,21 @@ class TauDaemon:
         logger.info("loading_configuration")
         await self.config_loader.load_configuration()
 
-        # Initialize hardware interfaces (LabJack, OLA)
-        logger.info("initializing_hardware", labjack_mock=self.settings.labjack_mock, ola_mock=self.settings.ola_mock)
+        # Initialize hardware interfaces (LabJack/GPIO, OLA)
+        logger.info(
+            "initializing_hardware",
+            labjack_mock=self.settings.labjack_mock,
+            ola_mock=self.settings.ola_mock,
+            use_gpio=self.settings.use_gpio,
+        )
         self.hardware_manager = HardwareManager(
             labjack_mock=self.settings.labjack_mock,
-            ola_mock=self.settings.ola_mock
+            ola_mock=self.settings.ola_mock,
+            use_gpio=self.settings.use_gpio,
+            gpio_use_pigpio=self.settings.gpio_use_pigpio,
+            gpio_pull_up=self.settings.gpio_pull_up,
+            gpio_input_pins=self.settings.gpio_input_pins,
+            gpio_pwm_pins=self.settings.gpio_pwm_pins,
         )
         hardware_ok = await self.hardware_manager.initialize()
         if not hardware_ok:
@@ -126,7 +136,7 @@ class TauDaemon:
             await self.hardware_manager.shutdown()
 
         # Close database connections
-        # TODO: Close database connections properly
+        await close_database()
 
         logger.info("tau_daemon_stopped")
 
@@ -151,7 +161,7 @@ async def main_async():
         # Run FastAPI with uvicorn
         config = uvicorn.Config(
             daemon.app,
-            host="0.0.0.0",
+            host=daemon.settings.daemon_host,
             port=daemon.settings.daemon_port,
             log_level=daemon.settings.log_level.lower(),
             access_log=True,

@@ -89,11 +89,14 @@ CREATE TABLE groups (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    
+
+    -- Reserved for future system-managed groups
+    is_system BOOLEAN DEFAULT FALSE,
+
     -- Circadian Configuration [cite: 144]
     circadian_enabled BOOLEAN DEFAULT FALSE,
     circadian_profile_id INT, -- FK to a profiles table (defined later)
-    
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -183,11 +186,16 @@ CREATE TABLE scene_values (
 -- Updated on every change, read on startup.
 CREATE TABLE fixture_state (
     fixture_id INT PRIMARY KEY REFERENCES fixtures(id) ON DELETE CASCADE,
-    
+
     current_brightness INT DEFAULT 0 CHECK (current_brightness BETWEEN 0 AND 1000), -- 0-1000 (tenths of a percent)
     current_cct INT DEFAULT 2700,
     is_on BOOLEAN DEFAULT FALSE,
-    
+
+    -- Override state (bypasses group/circadian control)
+    override_active BOOLEAN DEFAULT FALSE,
+    override_expires_at TIMESTAMP,
+    override_source VARCHAR(20), -- 'fixture' or 'group'
+
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

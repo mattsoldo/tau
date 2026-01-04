@@ -66,6 +66,36 @@ interface Fixture {
   id: number;
   name: string;
   dmx_channel_start: number;
+  fixture_model_id: number;
+}
+
+interface FixtureModel {
+  id: number;
+  cct_min_kelvin: number;
+  cct_max_kelvin: number;
+}
+
+interface FixtureState {
+  fixture_id: number;
+  goal_brightness: number;
+  goal_cct: number;
+  current_brightness: number;
+  current_cct: number;
+  is_on: boolean;
+}
+
+interface Group {
+  id: number;
+  name: string;
+  is_system: boolean;
+  circadian_enabled: boolean;
+}
+
+interface ActiveOverride {
+  fixture_id: number;
+  override_source: string;
+  expires_at: number;
+  time_remaining_hours: number;
 }
 
 interface LightState {
@@ -89,8 +119,14 @@ function formatUptime(seconds: number): string {
 export default function DashboardPage() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [fixtureStates, setFixtureStates] = useState<Map<number, FixtureState>>(new Map());
+  const [fixtureModels, setFixtureModels] = useState<Map<number, FixtureModel>>(new Map());
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [activeOverrides, setActiveOverrides] = useState<ActiveOverride[]>([]);
   const [currentTime, setCurrentTime] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [expandedFixtures, setExpandedFixtures] = useState<Set<number>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
 
   // Light simulator state for each FIO channel
   const [lightStates, setLightStates] = useState<LightState[]>(
@@ -268,15 +304,43 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statusRes, fixturesRes] = await Promise.all([
+        const [statusRes, fixturesRes, groupsRes, modelsRes] = await Promise.all([
           fetch(`${API_URL}/status`),
-          fetch(`${API_URL}/api/fixtures/`)
+          fetch(`${API_URL}/api/fixtures/`),
+          fetch(`${API_URL}/api/groups/`),
+          fetch(`${API_URL}/api/fixtures/models`),
         ]);
 
         if (!statusRes.ok) throw new Error('Status API error');
 
         setStatus(await statusRes.json());
-        setFixtures(await fixturesRes.json());
+        const fixturesData = await fixturesRes.json();
+        setFixtures(fixturesData);
+        setGroups(await groupsRes.json());
+
+        // Build models map
+        const modelsData = await modelsRes.json();
+        const modelsMap = new Map<number, FixtureModel>();
+        modelsData.forEach((m: FixtureModel) => modelsMap.set(m.id, m));
+        setFixtureModels(modelsMap);
+
+        // Fetch fixture states
+        const statesMap = new Map<number, FixtureState>();
+        await Promise.all(
+          fixturesData.map(async (f: Fixture) => {
+            try {
+              const stateRes = await fetch(`${API_URL}/api/fixtures/${f.id}/state`);
+              if (stateRes.ok) {
+                const state = await stateRes.json();
+                statesMap.set(f.id, state);
+              }
+            } catch {
+              // Ignore individual state fetch errors
+            }
+          })
+        );
+        setFixtureStates(statesMap);
+
         setError(null);
       } catch (err) {
         setError('Connection error');
@@ -284,9 +348,200 @@ export default function DashboardPage() {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 1000);
+    const interval = setInterval(fetchData, 2000); // Slower poll for larger data set
     return () => clearInterval(interval);
   }, []);
+
+  // Poll active overrides every 2 seconds
+  useEffect(() => {
+    const fetchOverrides = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/control/overrides`);
+        if (response.ok) {
+          const data = await response.json();
+          setActiveOverrides(data.overrides || []);
+        }
+      } catch {
+        // Ignore errors in override poll
+      }
+    };
+
+    fetchOverrides();
+    const interval = setInterval(fetchOverrides, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Remove individual fixture override
+  const handleRemoveOverride = async (fixtureId: number) => {
+    try {
+      const response = await fetch(`${API_URL}/api/control/overrides/fixtures/${fixtureId}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        setActiveOverrides(prev => prev.filter(o => o.fixture_id !== fixtureId));
+      }
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Remove all overrides
+  const handleRemoveAllOverrides = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/control/overrides/all`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        setActiveOverrides([]);
+      }
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Get fixture name by ID
+  const getFixtureName = (fixtureId: number): string => {
+    const fixture = fixtures.find(f => f.id === fixtureId);
+    return fixture?.name || `Fixture ${fixtureId}`;
+  };
+
+  // Format time remaining for override expiry
+  const formatTimeRemaining = (expiresAt: number): string => {
+    const now = Date.now() / 1000;
+    const remaining = expiresAt - now;
+    if (remaining <= 0) return 'Expiring...';
+    const hours = Math.floor(remaining / 3600);
+    const minutes = Math.floor((remaining % 3600) / 60);
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  };
+
+  // Toggle fixture on/off
+  const handleFixtureToggle = async (fixtureId: number) => {
+    const state = fixtureStates.get(fixtureId);
+    const newBrightness = state?.is_on ? 0.0 : 1.0;
+    try {
+      await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brightness: newBrightness }),
+      });
+      // Optimistic update
+      setFixtureStates(prev => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(fixtureId);
+        if (existing) {
+          newMap.set(fixtureId, { ...existing, goal_brightness: newBrightness * 1000, is_on: newBrightness > 0 });
+        }
+        return newMap;
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Control fixture brightness
+  const handleFixtureBrightness = async (fixtureId: number, brightness: number) => {
+    try {
+      await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brightness }),
+      });
+      setFixtureStates(prev => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(fixtureId);
+        if (existing) {
+          newMap.set(fixtureId, { ...existing, goal_brightness: brightness * 1000, is_on: brightness > 0 });
+        }
+        return newMap;
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Control fixture CCT
+  const handleFixtureCCT = async (fixtureId: number, cct: number) => {
+    try {
+      await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color_temp: cct }),
+      });
+      setFixtureStates(prev => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(fixtureId);
+        if (existing) {
+          newMap.set(fixtureId, { ...existing, goal_cct: cct });
+        }
+        return newMap;
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Control group brightness
+  const handleGroupBrightness = async (groupId: number, brightness: number) => {
+    try {
+      await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brightness }),
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Control group CCT
+  const handleGroupCCT = async (groupId: number, cct: number) => {
+    try {
+      await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ color_temp: cct }),
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Toggle expand for fixture
+  const toggleFixtureExpand = (fixtureId: number) => {
+    setExpandedFixtures(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(fixtureId)) {
+        newSet.delete(fixtureId);
+      } else {
+        newSet.add(fixtureId);
+      }
+      return newSet;
+    });
+  };
+
+  // Toggle expand for group
+  const toggleGroupExpand = (groupId: number) => {
+    setExpandedGroups(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(groupId)) {
+        newSet.delete(groupId);
+      } else {
+        newSet.add(groupId);
+      }
+      return newSet;
+    });
+  };
+
+  // Kelvin to color for CCT slider
+  const kelvinToColor = (kelvin: number): string => {
+    const t = (kelvin - 2000) / 4500;
+    const r = Math.round(255 * (1 - t * 0.3));
+    const g = Math.round(200 + t * 55);
+    const b = Math.round(150 + t * 105);
+    return `rgb(${r}, ${g}, ${b})`;
+  };
 
   const isHealthy = status?.hardware?.overall_healthy && status?.event_loop?.running;
   const healthPassed = status?.hardware?.health_checks?.passed || 0;
@@ -559,28 +814,187 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Fixtures Card */}
+          {/* Lighting Control Card */}
           <div className="col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex justify-between items-center mb-5">
-              <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Fixtures</span>
-              <span className="font-mono text-[11px] px-2.5 py-1 rounded-md bg-green-500/15 text-green-500 border border-green-500/20">
-                {fixtures.length} fixtures
-              </span>
+              <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Lighting Control</span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[11px] px-2.5 py-1 rounded-md bg-purple-500/15 text-purple-400 border border-purple-500/20">
+                  {groups.length} groups
+                </span>
+                <span className="font-mono text-[11px] px-2.5 py-1 rounded-md bg-green-500/15 text-green-500 border border-green-500/20">
+                  {fixtures.length} fixtures
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col gap-2.5">
-              {fixtures.map(fixture => (
-                <div key={fixture.id} className="flex items-center gap-4 px-4 py-3.5 bg-[#111113] rounded-xl hover:bg-white/[0.04] transition-colors">
-                  <div className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_12px_rgba(245,158,11,0.15)]" />
-                  <span className="flex-1 text-sm font-medium">{fixture.name}</span>
-                  <span className="font-mono text-[12px] text-[#636366] px-2.5 py-1 bg-[#161619] rounded-md">
-                    DMX {fixture.dmx_channel_start}
-                  </span>
-                  <div className="w-[120px] h-1.5 bg-[#2a2a2f] rounded-full overflow-hidden">
-                    <div className="h-full w-0 bg-gradient-to-r from-amber-700 to-amber-500 rounded-full transition-all" />
+            <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto pr-1">
+              {/* Groups Section */}
+              {groups
+                .sort((a, b) => (b.is_system ? 1 : 0) - (a.is_system ? 1 : 0) || a.name.localeCompare(b.name))
+                .map(group => {
+                  const isExpanded = expandedGroups.has(group.id);
+                  return (
+                    <div key={`group-${group.id}`} className="bg-[#111113] rounded-xl overflow-hidden">
+                      <div
+                        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.02] transition-colors"
+                        onClick={() => toggleGroupExpand(group.id)}
+                      >
+                        <svg
+                          className={`w-4 h-4 stroke-[#636366] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          fill="none"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M9 18l6-6-6-6" />
+                        </svg>
+                        <div className="w-2.5 h-2.5 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.3)]" />
+                        <span className="flex-1 text-sm font-medium">{group.name}</span>
+                        {group.is_system && (
+                          <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">SYSTEM</span>
+                        )}
+                        {group.circadian_enabled && (
+                          <span className="text-[9px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">CIRCADIAN</span>
+                        )}
+                      </div>
+                      {isExpanded && (
+                        <div className="px-4 pb-4 pt-2 border-t border-[#2a2a2f] space-y-3">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-[#636366] w-16">Brightness</span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={100}
+                              defaultValue={100}
+                              className="flex-1 h-1.5 rounded-full appearance-none bg-[#2a2a2f] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-500"
+                              onChange={(e) => handleGroupBrightness(group.id, parseInt(e.target.value) / 100)}
+                            />
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-[#636366] w-16">CCT</span>
+                            <input
+                              type="range"
+                              min={2700}
+                              max={6500}
+                              defaultValue={4000}
+                              className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                              style={{ background: `linear-gradient(to right, ${kelvinToColor(2700)}, ${kelvinToColor(6500)})` }}
+                              onChange={(e) => handleGroupCCT(group.id, parseInt(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+              {/* Fixtures Section */}
+              {fixtures.map(fixture => {
+                const state = fixtureStates.get(fixture.id);
+                const model = fixtureModels.get(fixture.fixture_model_id);
+                const isExpanded = expandedFixtures.has(fixture.id);
+                const brightness = state ? Math.round(state.goal_brightness / 10) : 0;
+                const cct = state?.goal_cct ?? 2700;
+                const cctMin = model?.cct_min_kelvin ?? 2700;
+                const cctMax = model?.cct_max_kelvin ?? 6500;
+                const isOn = state?.is_on ?? false;
+
+                return (
+                  <div key={`fixture-${fixture.id}`} className="bg-[#111113] rounded-xl overflow-hidden">
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      {/* Expand button */}
+                      <button
+                        onClick={() => toggleFixtureExpand(fixture.id)}
+                        className="p-0.5 hover:bg-white/10 rounded transition-colors"
+                      >
+                        <svg
+                          className={`w-4 h-4 stroke-[#636366] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          fill="none"
+                          strokeWidth="2"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M9 18l6-6-6-6" />
+                        </svg>
+                      </button>
+
+                      {/* Status indicator */}
+                      <div
+                        className={`w-2.5 h-2.5 rounded-full transition-all ${
+                          isOn ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : 'bg-[#3a3a3f]'
+                        }`}
+                      />
+
+                      {/* Name */}
+                      <span className="flex-1 text-sm font-medium truncate">{fixture.name}</span>
+
+                      {/* DMX channel */}
+                      <span className="font-mono text-[10px] text-[#636366] px-2 py-0.5 bg-[#1a1a1d] rounded">
+                        CH {fixture.dmx_channel_start}
+                      </span>
+
+                      {/* Brightness indicator */}
+                      <div className="w-[80px] h-1.5 bg-[#2a2a2f] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-amber-700 to-amber-500 rounded-full transition-all"
+                          style={{ width: `${brightness}%` }}
+                        />
+                      </div>
+
+                      {/* Percentage */}
+                      <span className="font-mono text-[11px] text-[#a1a1a6] w-[36px] text-right">
+                        {brightness}%
+                      </span>
+
+                      {/* On/Off Toggle */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleFixtureToggle(fixture.id);
+                        }}
+                        className={`w-10 h-5 rounded-full transition-all relative ${
+                          isOn ? 'bg-amber-500' : 'bg-[#3a3a3f]'
+                        }`}
+                      >
+                        <div
+                          className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow ${
+                            isOn ? 'left-5' : 'left-0.5'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Expanded controls */}
+                    {isExpanded && (
+                      <div className="px-4 pb-4 pt-2 border-t border-[#2a2a2f] space-y-3">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] text-[#636366] w-16">Brightness</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={brightness}
+                            className="flex-1 h-1.5 rounded-full appearance-none bg-[#2a2a2f] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-500"
+                            onChange={(e) => handleFixtureBrightness(fixture.id, parseInt(e.target.value) / 100)}
+                          />
+                          <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{brightness}%</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[11px] text-[#636366] w-16">CCT</span>
+                          <input
+                            type="range"
+                            min={cctMin}
+                            max={cctMax}
+                            value={cct}
+                            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                            style={{ background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})` }}
+                            onChange={(e) => handleFixtureCCT(fixture.id, parseInt(e.target.value))}
+                          />
+                          <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{cct}K</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <span className="font-mono text-[13px] text-[#a1a1a6] w-[45px] text-right">--</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -610,6 +1024,73 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Active Overrides Card */}
+          <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+            <div className="flex justify-between items-center mb-5">
+              <div className="flex items-center gap-3">
+                <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Active Overrides</span>
+                {activeOverrides.length > 0 && (
+                  <span className="font-mono text-[11px] px-2.5 py-1 rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/20">
+                    {activeOverrides.length}
+                  </span>
+                )}
+              </div>
+              {activeOverrides.length > 0 && (
+                <button
+                  onClick={handleRemoveAllOverrides}
+                  className="font-mono text-[11px] px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+                >
+                  Remove All
+                </button>
+              )}
+            </div>
+
+            {activeOverrides.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-12 h-12 rounded-xl bg-[#111113] border border-[#2a2a2f] flex items-center justify-center mb-3">
+                  <svg className="w-6 h-6 stroke-[#636366]" fill="none" strokeWidth="1.5" viewBox="0 0 24 24">
+                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                </div>
+                <p className="text-[13px] text-[#636366]">No active overrides</p>
+                <p className="text-[11px] text-[#4a4a4f] mt-1">Circadian automation active</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {activeOverrides.map(override => (
+                  <div
+                    key={override.fixture_id}
+                    className="flex items-center gap-3 px-3 py-2.5 bg-[#111113] rounded-lg border border-[#2a2a2f] hover:border-amber-500/30 transition-colors"
+                  >
+                    <div className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium truncate">
+                        {getFixtureName(override.fixture_id)}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-[#636366]">
+                          {formatTimeRemaining(override.expires_at)} remaining
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 bg-[#2a2a2f] rounded text-[#8e8e93]">
+                          {override.override_source}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveOverride(override.fixture_id)}
+                      className="p-1.5 rounded-md hover:bg-red-500/20 transition-colors group"
+                      title="Remove override"
+                    >
+                      <svg className="w-4 h-4 stroke-[#636366] group-hover:stroke-red-400" fill="none" strokeWidth="1.5" viewBox="0 0 24 24">
+                        <path d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </main>

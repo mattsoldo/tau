@@ -37,6 +37,11 @@ class Group(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # System flag (for built-in groups like "All Fixtures")
+    is_system: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True, server_default="false"
+    )
+
     # Circadian Configuration
     circadian_enabled: Mapped[Optional[bool]] = mapped_column(
         Boolean, nullable=True, server_default="false"
@@ -109,7 +114,8 @@ class Group(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Group(id={self.id}, name={self.name}, circadian={self.circadian_enabled})>"
+        system = ", system" if self.is_system else ""
+        return f"<Group(id={self.id}, name={self.name}, circadian={self.circadian_enabled}{system})>"
 
 
 class GroupFixture(Base):

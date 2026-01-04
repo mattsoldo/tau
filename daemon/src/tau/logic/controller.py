@@ -5,10 +5,12 @@ Main coordination logic for the lighting control system. Orchestrates
 circadian calculations, scene management, switch processing, and hardware
 output on each control loop iteration.
 """
-from typing import Optional, Dict, Set
+from typing import Optional, Dict, Set, TYPE_CHECKING
 import structlog
 
-from tau.control.state_manager import StateManager
+if TYPE_CHECKING:
+    from tau.control.state_manager import StateManager
+
 from tau.hardware import HardwareManager
 from tau.logic.circadian import CircadianEngine
 from tau.logic.scenes import SceneEngine
@@ -38,7 +40,7 @@ class LightingController:
 
     def __init__(
         self,
-        state_manager: StateManager,
+        state_manager: "StateManager",
         hardware_manager: HardwareManager
     ):
         """
@@ -65,6 +67,10 @@ class LightingController:
         # Statistics
         self.loop_iterations = 0
         self.hardware_updates = 0
+
+        # Override expiry check counter (check every ~30 seconds at 30 Hz)
+        self._expiry_check_counter = 0
+        self._expiry_check_interval = 900  # 30 Hz × 30 seconds
 
         logger.info("lighting_controller_initialized")
 
@@ -140,9 +146,10 @@ class LightingController:
 
         1. Process switch inputs
         2. Apply circadian calculations
-        3. Update fixture transitions (interpolate current toward goal)
-        4. Calculate final fixture states
-        5. Update hardware outputs
+        3. Check for expired overrides (every ~30 seconds)
+        4. Update fixture transitions (interpolate current toward goal)
+        5. Calculate final fixture states
+        6. Update hardware outputs
         """
         self.loop_iterations += 1
 
@@ -152,10 +159,18 @@ class LightingController:
         # Step 2: Apply circadian rhythms to enabled groups
         await self._apply_circadian()
 
-        # Step 3: Update fixture transitions (interpolate current toward goal)
+        # Step 3: Check for expired overrides (every ~30 seconds)
+        self._expiry_check_counter += 1
+        if self._expiry_check_counter >= self._expiry_check_interval:
+            expired = self.state_manager.check_override_expiry()
+            if expired > 0:
+                logger.debug("control_loop_overrides_expired", count=expired)
+            self._expiry_check_counter = 0
+
+        # Step 4: Update fixture transitions (interpolate current toward goal)
         self.state_manager.update_fixture_transitions()
 
-        # Step 4: Calculate final fixture states and update hardware
+        # Step 5: Calculate final fixture states and update hardware
         await self._update_hardware()
 
     async def _apply_circadian(self) -> None:

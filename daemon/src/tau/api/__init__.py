@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import uuid
 
-from tau.config import Settings
+from tau.config import Settings, get_effective_cors_origins
 from tau.api.websocket import connection_manager
 
 # Global reference to daemon (set by main.py)
@@ -108,10 +108,12 @@ See the `/ws` endpoint documentation for subscription management.
         ],
     )
 
-    # Configure CORS
+    # Configure CORS - use settings.cors_origins for production security
+    # For Raspberry Pi deployment, set CORS_ALLOW_ALL=true in .env
+    cors_origins = get_effective_cors_origins(settings)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # TODO: Configure properly for production
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -304,7 +306,7 @@ Use this endpoint to monitor system performance and debug issues.
         return connection_manager.get_statistics()
 
     # Register API routers
-    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, switches
+    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, switches, system_config
 
     app.include_router(fixtures.router, prefix="/api/fixtures", tags=["fixtures"])
     app.include_router(groups.router, prefix="/api/groups", tags=["groups"])
@@ -314,6 +316,7 @@ Use this endpoint to monitor system performance and debug issues.
     app.include_router(circadian.router, prefix="/api/circadian", tags=["circadian"])
     app.include_router(labjack.router, prefix="/api/labjack", tags=["hardware"])
     app.include_router(discovery.router, prefix="/api/discovery", tags=["discovery"])
+    app.include_router(system_config.router, prefix="/api/config", tags=["configuration"])
 
     # Serve static HTML files (LabJack monitor, etc.)
     # Navigate from tau/api/__init__.py up to daemon directory

@@ -5,14 +5,16 @@ Manages lighting scenes (static presets) that can be captured from current
 state and recalled to quickly set specific lighting configurations. Scenes
 store target brightness and CCT values for fixtures.
 """
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import structlog
 from datetime import datetime
 
 from tau.database import get_db_session
 from tau.models.scenes import Scene, SceneValue
 from tau.models.fixtures import Fixture
-from tau.control.state_manager import StateManager
+
+if TYPE_CHECKING:
+    from tau.control.state_manager import StateManager
 
 logger = structlog.get_logger(__name__)
 
@@ -26,7 +28,7 @@ class SceneEngine:
     exact lighting configuration.
     """
 
-    def __init__(self, state_manager: StateManager):
+    def __init__(self, state_manager: "StateManager"):
         """
         Initialize scene engine
 
