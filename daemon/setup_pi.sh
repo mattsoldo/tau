@@ -85,6 +85,11 @@ else
     echo "✓ Created user 'tau' with plugdev group access and home directory"
 fi
 
+# Fix permissions on tau home directory (prevents PostgreSQL SSL key errors)
+sudo chown -R tau:tau /home/tau
+sudo chmod 700 /home/tau
+echo "✓ Fixed permissions on tau home directory"
+
 # 6. Create installation directory
 echo ""
 echo "6. Setting up installation directory..."
@@ -314,7 +319,7 @@ echo "    Logs:    sudo journalctl -u tau-frontend -f"
 
 echo ""
 echo "Access Points (from any device on your network):"
-echo "  🌐 Web Interface:  http://$PI_IP:3000"
+echo "  🌐 Web Interface:  http://$PI_IP"
 echo "  📡 API:            http://$PI_IP:8000"
 echo "  📚 API Docs:       http://$PI_IP:8000/docs"
 echo "  💡 OLA Web UI:     http://$PI_IP:9090"
@@ -331,7 +336,7 @@ echo "  /opt/tau-daemon/daemon/.env"
 echo ""
 echo "Next Steps:"
 echo "  1. Connect your LabJack U3 via USB"
-echo "  2. Open http://$PI_IP:3000 in your browser"
+echo "  2. Open http://$PI_IP in your browser"
 echo "  3. Configure switches, fixtures, and groups via web UI"
 echo "  4. Configure DMX fixtures via OLA: http://$PI_IP:9090"
 echo "  5. Test software updates: Config → Settings → Check for Updates"
