@@ -33,8 +33,8 @@ sudo apt-get upgrade -y
 echo ""
 echo "2. Installing prerequisites..."
 sudo apt-get install -y \
-    python3.11 \
-    python3.11-venv \
+    python3 \
+    python3-venv \
     python3-pip \
     postgresql \
     postgresql-contrib \
@@ -42,6 +42,10 @@ sudo apt-get install -y \
     libusb-1.0-0-dev \
     git \
     curl
+
+# Detect Python version
+PYTHON_VERSION=$(python3 --version | awk '{print $2}')
+echo "✓ Detected Python $PYTHON_VERSION"
 
 # 3. Install OLA (Open Lighting Architecture)
 echo ""
@@ -104,7 +108,7 @@ cd /opt/tau-daemon/daemon
 if [ -d ".venv" ]; then
     echo "Virtual environment exists, updating..."
 else
-    sudo -u tau python3.11 -m venv .venv
+    sudo -u tau python3 -m venv .venv
 fi
 
 sudo -u tau .venv/bin/pip install --upgrade pip
