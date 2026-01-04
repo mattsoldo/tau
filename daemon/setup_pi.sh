@@ -114,6 +114,10 @@ fi
 sudo -u tau .venv/bin/pip install --upgrade pip
 sudo -u tau .venv/bin/pip install -r requirements.txt
 
+# Install tau package in editable mode
+echo "Installing tau package..."
+sudo -u tau .venv/bin/pip install -e .
+
 # Install OLA Python bindings manually
 echo "Installing OLA Python bindings..."
 sudo -u tau .venv/bin/pip install ola || echo "⚠️  OLA bindings install failed (non-critical)"
