@@ -190,113 +190,6 @@ class HardwareManager:
 
         logger.info("hardware_shutdown_complete")
 
-    async def switch_mode(
-        self,
-        labjack_mock: Optional[bool] = None,
-        ola_mock: Optional[bool] = None
-    ) -> bool:
-        """
-        Switch between mock and real hardware at runtime
-
-        Args:
-            labjack_mock: If provided, switch LabJack to mock (True) or real (False)
-            ola_mock: If provided, switch OLA to mock (True) or real (False)
-
-        Returns:
-            True if switch was successful
-
-        Note:
-            If a mode is not provided, that hardware will not be changed
-        """
-        logger.info(
-            "switching_hardware_mode",
-            labjack_mock=labjack_mock,
-            ola_mock=ola_mock,
-            current_labjack_mock=self.labjack_mock,
-            current_ola_mock=self.ola_mock
-        )
-
-        # Track if we need to switch each device
-        switch_labjack = labjack_mock is not None and labjack_mock != self.labjack_mock
-        switch_ola = ola_mock is not None and ola_mock != self.ola_mock
-
-        if not switch_labjack and not switch_ola:
-            logger.info("no_mode_change_needed")
-            return True
-
-        try:
-            # Switch LabJack if requested
-            if switch_labjack:
-                logger.info("switching_labjack_mode", from_mock=self.labjack_mock, to_mock=labjack_mock)
-
-                # Disconnect current LabJack
-                await self.labjack.disconnect()
-
-                # Create new LabJack driver
-                if self.use_gpio:
-                    from tau.hardware.gpio_driver import GPIODriver
-                    input_pins = parse_pin_mapping(self.gpio_input_pins_str)
-                    pwm_pins = parse_pin_mapping(self.gpio_pwm_pins_str)
-                    self.labjack = GPIODriver(
-                        input_pins=input_pins,
-                        pwm_pins=pwm_pins,
-                        use_pigpio=self.gpio_use_pigpio,
-                        pull_up=self.gpio_pull_up,
-                    )
-                elif labjack_mock:
-                    self.labjack = LabJackMock()
-                else:
-                    from tau.hardware.labjack_driver import LabJackDriver
-                    self.labjack = LabJackDriver()
-
-                # Connect new LabJack
-                labjack_ok = await self.labjack.connect()
-                if not labjack_ok:
-                    logger.error("labjack_switch_failed")
-                    return False
-
-                # Update stored mode
-                self.labjack_mock = labjack_mock
-                self.use_mock = labjack_mock  # For backward compatibility
-
-                logger.info("labjack_mode_switched", mock=labjack_mock, driver=self.labjack.name)
-
-            # Switch OLA if requested
-            if switch_ola:
-                logger.info("switching_ola_mode", from_mock=self.ola_mock, to_mock=ola_mock)
-
-                # Disconnect current OLA
-                await self.ola.disconnect()
-
-                # Create new OLA driver
-                if ola_mock:
-                    self.ola = OLAMock()
-                else:
-                    from tau.hardware.ola_driver import OLADriver
-                    self.ola = OLADriver()
-
-                # Connect new OLA
-                ola_ok = await self.ola.connect()
-                if not ola_ok:
-                    logger.error("ola_switch_failed")
-                    return False
-
-                # Update stored mode
-                self.ola_mock = ola_mock
-
-                logger.info("ola_mode_switched", mock=ola_mock, driver=self.ola.name)
-
-            logger.info(
-                "hardware_mode_switch_complete",
-                labjack_mock=self.labjack_mock,
-                ola_mock=self.ola_mock
-            )
-            return True
-
-        except Exception as e:
-            logger.error("hardware_mode_switch_failed", error=str(e), exc_info=True)
-            return False
-
     async def _health_check_loop(self) -> None:
         """Background task for periodic health checks"""
         logger.info("health_check_loop_started", interval_s=self.health_check_interval)
@@ -425,8 +318,6 @@ class HardwareManager:
             },
             "overall_healthy": self.is_healthy(),
             "mode": {
-                "labjack_mock": self.labjack_mock,
-                "ola_mock": self.ola_mock,
                 "use_gpio": self.use_gpio,
             },
         }
