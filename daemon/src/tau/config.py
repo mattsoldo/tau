@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     # Switch Input Configuration
     switch_poll_hz: int = Field(default=100, description="Switch input polling frequency in Hz")
     switch_debounce_ms: int = Field(default=50, description="Default switch debounce time in ms")
+    retractive_dim_speed_ms: int = Field(
+        default=700,
+        ge=0,
+        le=10000,
+        description="Time in milliseconds to dim from 0% to 100% when holding a retractive switch"
+    )
 
     # Transition Configuration
     # Times are for the full range - actual time scales proportionally to change amount
