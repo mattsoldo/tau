@@ -54,16 +54,42 @@ export interface SwitchModel {
   requires_analog_pin: boolean;
 }
 
+export type SwitchType = 'normally-open' | 'normally-closed';
+
 export interface Switch {
   id: number;
   name?: string;
   switch_model_id: number;
   labjack_digital_pin?: number;
   labjack_analog_pin?: number;
+  switch_type: SwitchType;
+  invert_reading: boolean;
   target_group_id?: number;
   target_fixture_id?: number;
   photo_url?: string;
   model?: SwitchModel;
+}
+
+export interface SwitchModelCreate {
+  manufacturer: string;
+  model: string;
+  input_type: SwitchInputType;
+  debounce_ms?: number;
+  dimming_curve?: DimmingCurve;
+  requires_digital_pin?: boolean;
+  requires_analog_pin?: boolean;
+}
+
+export interface SwitchCreate {
+  name?: string;
+  switch_model_id: number;
+  labjack_digital_pin?: number;
+  labjack_analog_pin?: number;
+  switch_type?: SwitchType;
+  invert_reading?: boolean;
+  target_group_id?: number;
+  target_fixture_id?: number;
+  photo_url?: string;
 }
 
 // Group Types

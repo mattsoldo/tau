@@ -175,6 +175,42 @@ export const api = {
       }),
   },
 
+  // Switches
+  switches: {
+    list: () => request<Switch[]>('/api/switches/'),
+    get: (id: number) => request<Switch>(`/api/switches/${id}`),
+    create: (data: SwitchCreate) =>
+      request<Switch>('/api/switches/', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<SwitchCreate>) =>
+      request<Switch>(`/api/switches/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: number) =>
+      request<void>(`/api/switches/${id}`, { method: 'DELETE' }),
+  },
+
+  // Switch Models
+  switchModels: {
+    list: () => request<SwitchModel[]>('/api/switches/models'),
+    get: (id: number) => request<SwitchModel>(`/api/switches/models/${id}`),
+    create: (data: SwitchModelCreate) =>
+      request<SwitchModel>('/api/switches/models', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: Partial<SwitchModelCreate>) =>
+      request<SwitchModel>(`/api/switches/models/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: number) =>
+      request<void>(`/api/switches/models/${id}`, { method: 'DELETE' }),
+  },
+
   // Circadian Profiles
   circadian: {
     list: () => request<CircadianProfile[]>('/api/circadian/'),
