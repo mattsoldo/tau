@@ -1,22 +1,18 @@
 /** @type {import('next').NextConfig} */
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 const nextConfig = {
-  output: 'standalone',
+  // Generate static files for nginx to serve
+  output: 'export',
+
+  // Disable image optimization for static export
+  images: {
+    unoptimized: true,
+  },
+
   reactStrictMode: true,
   swcMinify: true,
-  env: {
-    NEXT_PUBLIC_API_URL: API_URL,
-    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000',
-  },
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: `${API_URL}/api/:path*`,
-      },
-    ];
-  },
+
+  // Trailing slash ensures consistent routing
+  trailingSlash: true,
 };
 
 module.exports = nextConfig;
