@@ -8,6 +8,7 @@ import type {
   Switch,
   SwitchModel,
   SwitchCreate,
+  SwitchModelCreate,
 } from '../types/tau';
 
 /**
