@@ -117,10 +117,10 @@ def _apply_curve(brightness: float, curve: DTWCurve) -> float:
 
     elif curve == DTWCurve.LOG:
         # Logarithmic: more CCT change at low brightness
-        # Formula: log10(1 + 9 * brightness) / log10(10)
-        # At brightness=0: log10(1)/1 = 0
-        # At brightness=1: log10(10)/1 = 1
-        return math.log10(1 + 9 * brightness) / math.log10(10)
+        # Formula: log10(1 + 9 * brightness)
+        # At brightness=0: log10(1) = 0
+        # At brightness=1: log10(10) = 1
+        return math.log10(1 + 9 * brightness)
 
     elif curve == DTWCurve.SQUARE:
         # Quadratic: gentle warm-up, aggressive at low end

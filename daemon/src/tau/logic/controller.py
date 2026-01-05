@@ -162,29 +162,28 @@ class LightingController:
                 from tau.models.fixtures import Fixture
                 from tau.models.groups import GroupFixture
 
-                # Load all fixtures with their models
-                query = select(Fixture).options(selectinload(Fixture.fixture_model))
+                # Load all fixtures with their models and group memberships in 3 queries:
+                # 1. Fixtures with fixture_model
+                # 2. Group memberships (via selectinload)
+                # 3. Groups (via nested selectinload)
+                query = select(Fixture).options(
+                    selectinload(Fixture.fixture_model),
+                    selectinload(Fixture.group_memberships).selectinload(GroupFixture.group)
+                )
                 result = await session.execute(query)
                 fixtures = result.scalars().all()
 
                 for fixture in fixtures:
                     # Get primary group info (first group the fixture belongs to)
-                    group_query = select(GroupFixture).where(
-                        GroupFixture.fixture_id == fixture.id
-                    ).limit(1)
-                    group_result = await session.execute(group_query)
-                    group_membership = group_result.scalar_one_or_none()
-
                     group_id = None
                     group_dtw_ignore = False
                     group_dtw_min_cct = None
                     group_dtw_max_cct = None
 
-                    if group_membership:
-                        from tau.models.groups import Group
-                        group_query = select(Group).where(Group.id == group_membership.group_id)
-                        group_result = await session.execute(group_query)
-                        group = group_result.scalar_one_or_none()
+                    if fixture.group_memberships:
+                        # Use first group membership
+                        first_membership = fixture.group_memberships[0]
+                        group = first_membership.group
                         if group:
                             group_id = group.id
                             group_dtw_ignore = group.dtw_ignore or False
@@ -243,9 +242,13 @@ class LightingController:
         # Step 3: Check for expired overrides (every ~30 seconds)
         self._expiry_check_counter += 1
         if self._expiry_check_counter >= self._expiry_check_interval:
+            # Check in-memory state manager overrides
             expired = self.state_manager.check_override_expiry()
             if expired > 0:
                 logger.debug("control_loop_overrides_expired", count=expired)
+
+            # Cleanup expired database overrides and refresh DTW settings
+            await self._cleanup_expired_overrides()
             self._expiry_check_counter = 0
 
         # Step 4: Update fixture transitions (interpolate current toward goal)
@@ -273,6 +276,29 @@ class LightingController:
                 group_id,
                 brightness_multiplier=brightness,
                 color_temp=cct
+            )
+
+    async def _cleanup_expired_overrides(self) -> None:
+        """
+        Cleanup expired database overrides and refresh DTW settings.
+
+        Called periodically (~every 30 seconds) from the control loop.
+        """
+        try:
+            from tau.models.dtw_helper import cleanup_expired_overrides
+
+            count = await cleanup_expired_overrides()
+            if count > 0:
+                logger.debug("dtw_db_overrides_cleaned", count=count)
+
+            # Refresh DTW settings periodically
+            await self.dtw.refresh_settings()
+
+        except Exception as e:
+            logger.error(
+                "override_cleanup_failed",
+                error=str(e),
+                exc_info=True,
             )
 
     async def _update_hardware(self) -> None:

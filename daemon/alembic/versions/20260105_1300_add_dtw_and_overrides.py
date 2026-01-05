@@ -100,12 +100,19 @@ def upgrade() -> None:
     # Create indexes for common queries
     op.create_index('ix_overrides_target', 'overrides', ['target_type', 'target_id'])
     op.create_index('ix_overrides_expires_at', 'overrides', ['expires_at'])
-    op.create_index('ix_overrides_property', 'overrides', ['target_type', 'target_id', 'property'])
+
+    # Create unique constraint to prevent duplicate overrides for same target+property
+    # This prevents race conditions when creating overrides
+    op.create_unique_constraint(
+        'uq_overrides_target_property',
+        'overrides',
+        ['target_type', 'target_id', 'property']
+    )
 
 
 def downgrade() -> None:
-    # Drop overrides table and indexes
-    op.drop_index('ix_overrides_property', table_name='overrides')
+    # Drop overrides table indexes and constraints
+    op.drop_constraint('uq_overrides_target_property', 'overrides', type_='unique')
     op.drop_index('ix_overrides_expires_at', table_name='overrides')
     op.drop_index('ix_overrides_target', table_name='overrides')
     op.drop_table('overrides')
