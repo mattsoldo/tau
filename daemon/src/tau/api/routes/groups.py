@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+import structlog
 
 from tau.database import get_session
 from tau.models.groups import Group, GroupFixture
@@ -20,6 +21,8 @@ from tau.api.schemas import (
     GroupStateResponse,
     FixtureResponse,
 )
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -63,11 +66,25 @@ async def create_group(
     # Register group with StateManager so it can be controlled immediately
     daemon = get_daemon_instance()
     if daemon and daemon.state_manager:
-        daemon.state_manager.register_group(group.id)
-        # Set circadian enabled flag
-        group_state = daemon.state_manager.groups.get(group.id)
-        if group_state:
-            group_state.circadian_enabled = group_data.circadian_enabled
+        try:
+            daemon.state_manager.register_group(group.id)
+            # Set circadian enabled flag
+            group_state = daemon.state_manager.groups.get(group.id)
+            if group_state:
+                group_state.circadian_enabled = group_data.circadian_enabled
+            logger.info(
+                "group_registered_in_state_manager",
+                group_id=group.id,
+                group_name=group.name,
+                circadian_enabled=group_data.circadian_enabled
+            )
+        except Exception as e:
+            logger.error(
+                "state_manager_sync_failed",
+                operation="register_group",
+                group_id=group.id,
+                error=str(e)
+            )
 
     return group
 
@@ -129,7 +146,19 @@ async def delete_group(
     # Unregister group from StateManager cache
     daemon = get_daemon_instance()
     if daemon and daemon.state_manager:
-        daemon.state_manager.unregister_group(group_id)
+        try:
+            daemon.state_manager.unregister_group(group_id)
+            logger.info(
+                "group_unregistered_from_state_manager",
+                group_id=group_id
+            )
+        except Exception as e:
+            logger.error(
+                "state_manager_sync_failed",
+                operation="unregister_group",
+                group_id=group_id,
+                error=str(e)
+            )
 
 
 @router.get("/{group_id}/state", response_model=GroupStateResponse)
@@ -202,7 +231,21 @@ async def add_fixture_to_group(
     # Update StateManager cache so the fixture responds to group controls immediately
     daemon = get_daemon_instance()
     if daemon and daemon.state_manager:
-        daemon.state_manager.add_fixture_to_group(fixture_data.fixture_id, group_id)
+        try:
+            daemon.state_manager.add_fixture_to_group(fixture_data.fixture_id, group_id)
+            logger.info(
+                "fixture_added_to_group_in_state_manager",
+                fixture_id=fixture_data.fixture_id,
+                group_id=group_id
+            )
+        except Exception as e:
+            logger.error(
+                "state_manager_sync_failed",
+                operation="add_fixture_to_group",
+                fixture_id=fixture_data.fixture_id,
+                group_id=group_id,
+                error=str(e)
+            )
 
     return {"message": "Fixture added to group successfully"}
 
@@ -231,4 +274,18 @@ async def remove_fixture_from_group(
     # Update StateManager cache so removed fixtures no longer respond to group controls
     daemon = get_daemon_instance()
     if daemon and daemon.state_manager:
-        daemon.state_manager.remove_fixture_from_group(fixture_id, group_id)
+        try:
+            daemon.state_manager.remove_fixture_from_group(fixture_id, group_id)
+            logger.info(
+                "fixture_removed_from_group_in_state_manager",
+                fixture_id=fixture_id,
+                group_id=group_id
+            )
+        except Exception as e:
+            logger.error(
+                "state_manager_sync_failed",
+                operation="remove_fixture_from_group",
+                fixture_id=fixture_id,
+                group_id=group_id,
+                error=str(e)
+            )
