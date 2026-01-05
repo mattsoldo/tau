@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import SoftwareUpdatePanel from '../../../components/SoftwareUpdatePanel';
-import SwitchConfigPanel from '../../../components/SwitchConfigPanel';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -257,19 +256,6 @@ export default function SettingsPage() {
             </div>
             <div className="p-6">
               <SoftwareUpdatePanel />
-            </div>
-          </div>
-
-          {/* Switch Configuration Section */}
-          <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">
-            <div className="px-6 py-4 border-b border-[#2a2a2f]">
-              <h2 className="text-lg font-semibold">Switch Configuration</h2>
-              <p className="text-sm text-[#636366] mt-1">
-                Configure hardware behavior for normally-open and normally-closed switches
-              </p>
-            </div>
-            <div className="p-6">
-              <SwitchConfigPanel />
             </div>
           </div>
 

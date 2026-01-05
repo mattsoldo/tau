@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { filterMergedFixtures } from '@/utils/fixtures';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -140,10 +141,13 @@ export default function LightTestPage() {
 
       setFixtureModels(modelsData);
 
-      // Fetch state for all fixtures
+      // Filter out fixtures that are merged into other fixtures
+      const visibleFixtures = filterMergedFixtures(fixturesData);
+
+      // Fetch state for all visible fixtures
       const now = Date.now();
       const fixturesWithState: FixtureWithState[] = await Promise.all(
-        fixturesData.map(async (fixture: Fixture) => {
+        visibleFixtures.map(async (fixture: Fixture) => {
           const model = modelsData.find((m: FixtureModel) => m.id === fixture.fixture_model_id);
           let state: FixtureState | undefined;
 

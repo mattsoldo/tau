@@ -221,6 +221,9 @@ export default function FixturesPage() {
         groupsRes.json(),
       ]);
 
+      // NOTE: Config page intentionally shows ALL fixtures including merged secondaries
+      // This allows administrators to see, edit, and manage all fixture records.
+      // Other pages (dashboard, test controls) filter out merged secondaries to avoid duplicates.
       setFixtures(fixturesData);
       setFixtureModels(modelsData);
       setGroups(groupsData);
