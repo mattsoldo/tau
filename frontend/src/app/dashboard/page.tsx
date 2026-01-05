@@ -563,7 +563,7 @@ export default function DashboardPage() {
         setControlError(`Failed to set brightness for ${fixtureName}`);
       }
     }, SLIDER_DEBOUNCE_MS));
-  }, []);
+  }, [fixtures]);
 
   // Control fixture CCT (debounced with race condition handling)
   const handleFixtureCCT = useCallback((fixtureId: number, cct: number) => {
@@ -611,7 +611,7 @@ export default function DashboardPage() {
         setControlError(`Failed to set color temperature for ${fixtureName}`);
       }
     }, SLIDER_DEBOUNCE_MS));
-  }, []);
+  }, [fixtures]);
 
   // Control group brightness (debounced with optimistic update and race condition handling)
   const handleGroupBrightness = useCallback((groupId: number, brightness: number) => {
@@ -786,15 +786,19 @@ export default function DashboardPage() {
       return;
     }
 
-    const brightness = parseInt(trimmedValue, 10);
+    // Use parseFloat to handle decimals, then round
+    const parsedValue = parseFloat(trimmedValue);
 
     // Check for non-numeric input
-    if (isNaN(brightness)) {
+    if (isNaN(parsedValue)) {
       setValidationError('Brightness must be a number');
       setEditingBrightness(null);
       setBrightnessInputValue('');
       return;
     }
+
+    // Round to nearest integer
+    const brightness = Math.round(parsedValue);
 
     // Check for out of range
     if (brightness < 0 || brightness > 100) {
