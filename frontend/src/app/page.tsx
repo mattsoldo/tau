@@ -56,6 +56,20 @@ export default function HomePage() {
             </div>
           </a>
 
+          {/* OLA Dashboard */}
+          <a href="/ola/" target="_blank" rel="noopener noreferrer" className="block bg-gradient-to-br from-purple-600 to-purple-700 rounded-lg shadow-lg p-6 text-white hover:from-purple-500 hover:to-purple-600 transition-all hover:shadow-xl hover:-translate-y-0.5">
+            <h2 className="text-2xl font-semibold mb-2">OLA Dashboard</h2>
+            <p className="text-purple-200">
+              Configure DMX universes, test output, and manage ENTTEC USB DMX PRO device
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+              <span>Open OLA Web UI</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </div>
+          </a>
+
           {/* Test Lighting */}
           <Link href="/test" className="block bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-lg shadow-lg p-6 text-white hover:from-emerald-500 hover:to-emerald-600 transition-all hover:shadow-xl hover:-translate-y-0.5">
             <h2 className="text-2xl font-semibold mb-2">Test Lighting</h2>
