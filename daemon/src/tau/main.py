@@ -24,6 +24,7 @@ from tau.control import (
 from tau.hardware import HardwareManager
 from tau.logic import LightingController
 from tau.logic.switch_discovery import SwitchDiscovery
+from tau.models.system_settings_helper import get_system_setting_typed
 
 logger = structlog.get_logger(__name__)
 
@@ -89,10 +90,19 @@ class TauDaemon:
 
         # Initialize lighting controller
         logger.info("initializing_lighting_controller")
+
+        # Load dim_speed from system settings (default 2000ms if not found)
+        dim_speed_ms = await get_system_setting_typed(
+            key="dim_speed_ms",
+            value_type="int",
+            default_value=2000
+        )
+        logger.info("dim_speed_loaded", dim_speed_ms=dim_speed_ms)
+
         self.lighting_controller = LightingController(
             self.state_manager,
             self.hardware_manager,
-            dim_speed_ms=self.settings.retractive_dim_speed_ms
+            dim_speed_ms=dim_speed_ms
         )
         controller_ok = await self.lighting_controller.initialize()
         if not controller_ok:

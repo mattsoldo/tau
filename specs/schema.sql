@@ -202,9 +202,28 @@ CREATE TABLE fixture_state (
 -- Tracks logical state of groups (e.g. is Circadian suspended?) [cite: 150]
 CREATE TABLE group_state (
     group_id INT PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
-    
+
     circadian_suspended BOOLEAN DEFAULT FALSE,
     circadian_suspended_at TIMESTAMP,
-    
+
     last_active_scene_id INT REFERENCES scenes(id)
+);
+
+-- SYSTEM SETTINGS
+-- Global configuration values stored in database for runtime modification
+CREATE TABLE system_settings (
+    id SERIAL PRIMARY KEY,
+    key VARCHAR(100) NOT NULL UNIQUE,
+    value TEXT NOT NULL,
+    description TEXT,
+    value_type VARCHAR(20) NOT NULL DEFAULT 'str' CHECK (value_type IN ('int', 'float', 'bool', 'str'))
+);
+
+-- Insert default system settings
+INSERT INTO system_settings (key, value, description, value_type) VALUES
+(
+    'dim_speed_ms',
+    '2000',
+    'Time in milliseconds for a full 0-100% brightness transition when dimming',
+    'int'
 );

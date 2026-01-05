@@ -14,6 +14,7 @@ from tau.models.circadian import CircadianProfile
 from tau.models.scenes import Scene, SceneValue
 from tau.models.state import FixtureState, GroupState
 from tau.models.update_log import UpdateLog, UpdateStatus
+from tau.models.system_settings import SystemSetting
 
 __all__ = [
     "Base",
@@ -31,4 +32,5 @@ __all__ = [
     "GroupState",
     "UpdateLog",
     "UpdateStatus",
+    "SystemSetting",
 ]
