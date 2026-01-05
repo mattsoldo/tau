@@ -1,12 +1,19 @@
 """
-System Configuration API Routes - Hardware detection
+System Configuration API Routes - Hardware detection and system settings
 """
-from typing import Optional
-from fastapi import APIRouter
+from typing import Optional, List
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 import structlog
 
 from tau.api import get_daemon_instance
+from tau.database import get_db_session
+from tau.models.system_settings_helper import (
+    get_system_setting_typed,
+    set_system_setting
+)
+from tau.models.system_settings import SystemSetting
+from sqlalchemy import select
 
 logger = structlog.get_logger(__name__)
 
@@ -102,3 +109,122 @@ async def check_hardware_availability():
         ola_available=ola_available,
         ola_details=ola_details
     )
+
+
+# System Settings Models and Endpoints
+
+class SystemSettingResponse(BaseModel):
+    """System setting response"""
+    id: int = Field(..., description="Setting ID")
+    key: str = Field(..., description="Setting key")
+    value: str = Field(..., description="Setting value (as string)")
+    description: Optional[str] = Field(None, description="Human-readable description")
+    value_type: str = Field(..., description="Value type (int, float, bool, str)")
+
+    class Config:
+        from_attributes = True
+
+
+class SystemSettingUpdateRequest(BaseModel):
+    """System setting update request"""
+    value: str = Field(..., description="New value (as string)")
+
+
+@router.get(
+    "/settings",
+    response_model=List[SystemSettingResponse],
+    summary="Get All System Settings",
+    description="Retrieve all global system settings"
+)
+async def get_all_system_settings():
+    """Get all system settings"""
+    async with get_db_session() as session:
+        try:
+            result = await session.execute(select(SystemSetting))
+            settings = result.scalars().all()
+            return [SystemSettingResponse.model_validate(s) for s in settings]
+        except Exception as e:
+            logger.error("get_system_settings_error", error=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to fetch system settings: {str(e)}")
+
+
+@router.get(
+    "/settings/{key}",
+    response_model=SystemSettingResponse,
+    summary="Get System Setting by Key",
+    description="Retrieve a specific system setting by its key"
+)
+async def get_system_setting_by_key(key: str):
+    """Get a specific system setting by key"""
+    async with get_db_session() as session:
+        try:
+            result = await session.execute(
+                select(SystemSetting).where(SystemSetting.key == key)
+            )
+            setting = result.scalar_one_or_none()
+
+            if setting is None:
+                raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+
+            return SystemSettingResponse.model_validate(setting)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("get_system_setting_error", key=key, error=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to fetch setting: {str(e)}")
+
+
+@router.put(
+    "/settings/{key}",
+    response_model=SystemSettingResponse,
+    summary="Update System Setting",
+    description="Update a system setting value"
+)
+async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
+    """Update a system setting"""
+    async with get_db_session() as session:
+        try:
+            # Get the setting first to validate it exists
+            result = await session.execute(
+                select(SystemSetting).where(SystemSetting.key == key)
+            )
+            setting = result.scalar_one_or_none()
+
+            if setting is None:
+                raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+
+            # Validate the new value can be converted to the expected type
+            try:
+                if setting.value_type == "int":
+                    int(update.value)
+                elif setting.value_type == "float":
+                    float(update.value)
+                elif setting.value_type == "bool":
+                    if update.value.lower() not in ("true", "false", "1", "0", "yes", "no"):
+                        raise ValueError("Boolean value must be true/false, 1/0, or yes/no")
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid value for type {setting.value_type}: {str(e)}"
+                )
+
+            # Update the setting
+            setting.value = update.value
+            await session.commit()
+            await session.refresh(setting)
+
+            logger.info(
+                "system_setting_updated_via_api",
+                key=key,
+                old_value=setting.value,
+                new_value=update.value
+            )
+
+            return SystemSettingResponse.model_validate(setting)
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            await session.rollback()
+            logger.error("update_system_setting_error", key=key, error=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to update setting: {str(e)}")

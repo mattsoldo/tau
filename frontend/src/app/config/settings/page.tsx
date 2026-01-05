@@ -29,31 +29,46 @@ interface SystemStatus {
   };
 }
 
+interface SystemSetting {
+  id: number;
+  key: string;
+  value: string;
+  description: string | null;
+  value_type: string;
+}
+
 export default function SettingsPage() {
   // State
   const [hardware, setHardware] = useState<HardwareAvailability | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [settings, setSettings] = useState<SystemSetting[]>([]);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
-      const [hardwareRes, statusRes] = await Promise.all([
+      const [hardwareRes, statusRes, settingsRes] = await Promise.all([
         fetch(`${API_URL}/api/config/hardware-availability`),
         fetch(`${API_URL}/status`),
+        fetch(`${API_URL}/api/config/settings`),
       ]);
 
       if (!hardwareRes.ok) throw new Error('Failed to fetch hardware availability');
       if (!statusRes.ok) throw new Error('Failed to fetch system status');
+      if (!settingsRes.ok) throw new Error('Failed to fetch system settings');
 
-      const [hardwareData, statusData] = await Promise.all([
+      const [hardwareData, statusData, settingsData] = await Promise.all([
         hardwareRes.json(),
         statusRes.json(),
+        settingsRes.json(),
       ]);
 
       setHardware(hardwareData);
       setStatus(statusData);
+      setSettings(settingsData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -80,6 +95,63 @@ export default function SettingsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh hardware');
     }
+  };
+
+  // Start editing a setting
+  const handleEditSetting = (setting: SystemSetting) => {
+    setEditingKey(setting.key);
+    setEditValue(setting.value);
+  };
+
+  // Save edited setting
+  const handleSaveSetting = async (key: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/config/settings/${key}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ value: editValue }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to update setting');
+      }
+
+      // Refresh settings
+      await fetchData();
+      setEditingKey(null);
+      setEditValue('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save setting');
+    }
+  };
+
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setEditingKey(null);
+    setEditValue('');
+  };
+
+  // Format value for display
+  const formatValue = (value: string, type: string) => {
+    if (type === 'int' || type === 'float') {
+      return value;
+    } else if (type === 'bool') {
+      return value === 'true' || value === '1' ? 'Enabled' : 'Disabled';
+    }
+    return value;
+  };
+
+  // Get input type for editing
+  const getInputType = (valueType: string) => {
+    if (valueType === 'int' || valueType === 'float') {
+      return 'number';
+    } else if (valueType === 'bool') {
+      return 'checkbox';
+    }
+    return 'text';
   };
 
   return (
@@ -134,6 +206,90 @@ export default function SettingsPage() {
             </div>
             <div className="p-6">
               <SwitchConfigPanel />
+            </div>
+          </div>
+
+          {/* Global Settings Section */}
+          <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#2a2a2f]">
+              <h2 className="text-lg font-semibold">Global Settings</h2>
+              <p className="text-sm text-[#636366] mt-1">
+                System-wide configuration values
+              </p>
+            </div>
+            <div className="p-6">
+              {settings.length === 0 ? (
+                <p className="text-[#636366] text-sm">No settings configured</p>
+              ) : (
+                <div className="space-y-3">
+                  {settings.map((setting) => (
+                    <div
+                      key={setting.key}
+                      className="flex items-center justify-between p-4 bg-[#0f0f14] rounded-lg border border-[#2a2a2f] hover:border-[#3a3a3f] transition-colors"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <h3 className="font-medium text-white">{setting.key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</h3>
+                          <span className="text-xs px-2 py-0.5 bg-amber-500/10 text-amber-400 rounded border border-amber-500/30 font-mono">
+                            {setting.value_type}
+                          </span>
+                        </div>
+                        {setting.description && (
+                          <p className="text-sm text-[#636366] mt-1">{setting.description}</p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3 ml-6">
+                        {editingKey === setting.key ? (
+                          <>
+                            <input
+                              type={getInputType(setting.value_type)}
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              className="px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white focus:outline-none focus:border-amber-500 font-mono text-sm w-32"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleSaveSetting(setting.key)}
+                              className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors"
+                              title="Save"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                              title="Cancel"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="font-mono text-amber-400 text-sm min-w-[100px] text-right">
+                              {formatValue(setting.value, setting.value_type)}
+                              {setting.value_type === 'int' && setting.key.includes('ms') && ' ms'}
+                            </span>
+                            <button
+                              onClick={() => handleEditSetting(setting)}
+                              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-[#a1a1a6] hover:text-white"
+                              title="Edit"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                              </svg>
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
