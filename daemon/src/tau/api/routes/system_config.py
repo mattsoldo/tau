@@ -209,6 +209,7 @@ async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
                 )
 
             # Update the setting
+            old_value = setting.value
             setting.value = update.value
             await session.commit()
             await session.refresh(setting)
@@ -216,9 +217,16 @@ async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
             logger.info(
                 "system_setting_updated_via_api",
                 key=key,
-                old_value=setting.value,
+                old_value=old_value,
                 new_value=update.value
             )
+
+            # Hot-reload specific settings that need runtime updates
+            if key == "dim_speed_ms":
+                daemon = get_daemon_instance()
+                if daemon and daemon.lighting_controller:
+                    daemon.lighting_controller.set_dim_speed_ms(int(update.value))
+                    logger.info("dim_speed_hot_reloaded", new_value=update.value)
 
             return SystemSettingResponse.model_validate(setting)
 
