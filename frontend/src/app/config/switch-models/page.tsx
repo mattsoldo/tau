@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = ''; // Use relative paths for nginx proxy
 
 type SwitchInputType = 'retractive' | 'rotary_abs' | 'paddle_composite' | 'switch_simple';
 type DimmingCurve = 'linear' | 'logarithmic';

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import UpdatePanel from '../../../components/UpdatePanel';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = ''; // Use relative paths for nginx proxy
 
 interface HardwareAvailability {
   labjack_available: boolean;
