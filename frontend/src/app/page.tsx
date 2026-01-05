@@ -43,7 +43,7 @@ export default function HomePage() {
           </Link>
 
           {/* LabJack Monitor */}
-          <a href="http://localhost:8000/labjack_monitor.html" target="_blank" rel="noopener noreferrer" className="block bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg shadow-lg p-6 text-white hover:from-slate-600 hover:to-slate-700 transition-all hover:shadow-xl hover:-translate-y-0.5">
+          <a href="/labjack_monitor.html" target="_blank" rel="noopener noreferrer" className="block bg-gradient-to-br from-slate-700 to-slate-800 rounded-lg shadow-lg p-6 text-white hover:from-slate-600 hover:to-slate-700 transition-all hover:shadow-xl hover:-translate-y-0.5">
             <h2 className="text-2xl font-semibold mb-2">LabJack Monitor</h2>
             <p className="text-slate-300">
               Monitor digital I/O channels and test switch behavior with light simulation
