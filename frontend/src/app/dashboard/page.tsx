@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import Link from 'next/link';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -123,7 +122,6 @@ export default function DashboardPage() {
   const [fixtureModels, setFixtureModels] = useState<Map<number, FixtureModel>>(new Map());
   const [groups, setGroups] = useState<Group[]>([]);
   const [activeOverrides, setActiveOverrides] = useState<ActiveOverride[]>([]);
-  const [currentTime, setCurrentTime] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [expandedFixtures, setExpandedFixtures] = useState<Set<number>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -290,15 +288,6 @@ export default function DashboardPage() {
       mounted = false;
       clearInterval(interval);
     };
-  }, []);
-
-  useEffect(() => {
-    const updateTime = () => {
-      setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -562,27 +551,6 @@ export default function DashboardPage() {
         backgroundImage: 'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)',
         backgroundSize: '60px 60px'
       }} />
-
-      {/* Header */}
-      <header className="relative z-10 px-10 py-6 flex justify-between items-center border-b border-[#1f1f24] bg-[#0a0a0b]/80 backdrop-blur-xl">
-        <div className="flex items-center gap-3.5">
-          <div className="w-[38px] h-[38px] bg-gradient-to-br from-amber-500 to-amber-700 rounded-[10px] flex items-center justify-center shadow-[0_4px_20px_rgba(245,158,11,0.15)]">
-            <svg className="w-[22px] h-[22px] fill-[#0a0a0b]" viewBox="0 0 24 24">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-          </div>
-          <div className="text-[22px] font-semibold tracking-tight">
-            Tau <span className="text-[#636366] font-normal">Lighting</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 px-4 py-2 bg-[#161619] border border-[#2a2a2f] rounded-full text-[13px] font-mono">
-            <span className={`w-2 h-2 rounded-full ${isHealthy ? 'bg-green-500 shadow-[0_0_12px_#22c55e] animate-pulse' : 'bg-red-500 shadow-[0_0_12px_#ef4444]'}`} />
-            <span>{error || (isHealthy ? 'All Systems Operational' : 'Issues Detected')}</span>
-          </div>
-          <div className="font-mono text-[13px] text-[#a1a1a6]">{currentTime}</div>
-        </div>
-      </header>
 
       {/* Main content */}
       <main className="relative z-5 px-10 py-8 max-w-[1800px] mx-auto">
@@ -1096,14 +1064,13 @@ export default function DashboardPage() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-5 px-10 py-5 border-t border-[#1f1f24] flex justify-between items-center mt-5">
-        <div className="flex gap-6">
-          <Link href="/" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">Home</Link>
-          <Link href="/test" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">Light Test</Link>
-          <Link href="/config" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">Config</Link>
-          <a href="http://localhost:8000/docs" target="_blank" className="text-[13px] text-[#636366] hover:text-[#a1a1a6] transition-colors">API Docs</a>
+      <footer className="relative z-5 px-10 py-4 border-t border-[#1f1f24] flex justify-between items-center mt-5">
+        <div className="flex items-center gap-4">
+          <a href="/api/docs" target="_blank" className="text-xs text-[#636366] hover:text-[#a1a1a6] transition-colors">API Docs</a>
+          <span className="text-[#2a2a2f]">|</span>
+          <span className="text-xs text-[#4a4a4f]">Tau Lighting Control System</span>
         </div>
-        <div className="font-mono text-[12px] text-[#636366]">
+        <div className="font-mono text-xs text-[#636366]">
           {status?.service || 'tau-daemon'} v{status?.version || '--'}
         </div>
       </footer>
