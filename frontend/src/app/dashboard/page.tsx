@@ -122,11 +122,14 @@ export default function DashboardPage() {
   const [fixtureStates, setFixtureStates] = useState<Map<number, FixtureState>>(new Map());
   const [fixtureModels, setFixtureModels] = useState<Map<number, FixtureModel>>(new Map());
   const [groups, setGroups] = useState<Group[]>([]);
+  const [groupFixtures, setGroupFixtures] = useState<Map<number, Fixture[]>>(new Map());
   const [activeOverrides, setActiveOverrides] = useState<ActiveOverride[]>([]);
   const [currentTime, setCurrentTime] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [expandedFixtures, setExpandedFixtures] = useState<Set<number>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const [editingBrightness, setEditingBrightness] = useState<{ type: 'fixture' | 'group'; id: number } | null>(null);
+  const [brightnessInputValue, setBrightnessInputValue] = useState('');
 
   // Light simulator state for each FIO channel
   const [lightStates, setLightStates] = useState<LightState[]>(
@@ -316,13 +319,31 @@ export default function DashboardPage() {
         setStatus(await statusRes.json());
         const fixturesData = await fixturesRes.json();
         setFixtures(fixturesData);
-        setGroups(await groupsRes.json());
+        const groupsData = await groupsRes.json();
+        setGroups(groupsData);
 
         // Build models map
         const modelsData = await modelsRes.json();
         const modelsMap = new Map<number, FixtureModel>();
         modelsData.forEach((m: FixtureModel) => modelsMap.set(m.id, m));
         setFixtureModels(modelsMap);
+
+        // Fetch fixtures for each group
+        const groupFixturesMap = new Map<number, Fixture[]>();
+        await Promise.all(
+          groupsData.map(async (g: Group) => {
+            try {
+              const groupFixturesRes = await fetch(`${API_URL}/api/groups/${g.id}/fixtures`);
+              if (groupFixturesRes.ok) {
+                const groupFixturesData = await groupFixturesRes.json();
+                groupFixturesMap.set(g.id, groupFixturesData);
+              }
+            } catch {
+              // Ignore individual group fixture fetch errors
+            }
+          })
+        );
+        setGroupFixtures(groupFixturesMap);
 
         // Fetch fixture states
         const statesMap = new Map<number, FixtureState>();
@@ -506,6 +527,62 @@ export default function DashboardPage() {
     } catch {
       // Ignore errors
     }
+  };
+
+  // Toggle group on/off
+  const handleGroupToggle = async (groupId: number, turnOn: boolean) => {
+    try {
+      await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brightness: turnOn ? 1.0 : 0.0 }),
+      });
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  // Check if a group has any fixtures currently on
+  const isGroupOn = (groupId: number): boolean => {
+    const fixtures = groupFixtures.get(groupId) || [];
+    return fixtures.some(f => fixtureStates.get(f.id)?.is_on);
+  };
+
+  // Get average brightness for a group
+  const getGroupBrightness = (groupId: number): number => {
+    const fixtures = groupFixtures.get(groupId) || [];
+    if (fixtures.length === 0) return 0;
+    const total = fixtures.reduce((sum, f) => {
+      const state = fixtureStates.get(f.id);
+      return sum + (state ? state.goal_brightness / 10 : 0);
+    }, 0);
+    return Math.round(total / fixtures.length);
+  };
+
+  // Handle brightness input submit
+  const handleBrightnessInputSubmit = async (type: 'fixture' | 'group', id: number, value: string) => {
+    const brightness = parseInt(value, 10);
+    if (isNaN(brightness) || brightness < 0 || brightness > 100) {
+      setEditingBrightness(null);
+      setBrightnessInputValue('');
+      return;
+    }
+    if (type === 'fixture') {
+      await handleFixtureBrightness(id, brightness / 100);
+    } else {
+      await handleGroupBrightness(id, brightness / 100);
+    }
+    setEditingBrightness(null);
+    setBrightnessInputValue('');
+  };
+
+  // Get ungrouped fixtures
+  const getUngroupedFixtures = (): Fixture[] => {
+    const groupedFixtureIds = new Set<number>();
+    groupFixtures.forEach(fixtureList => {
+      fixtureList.forEach(f => groupedFixtureIds.add(f.id));
+    });
+    return fixtures.filter(f => !groupedFixtureIds.has(f.id));
   };
 
   // Toggle expand for fixture
@@ -827,174 +904,452 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
-            <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto pr-1">
+            <div className="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
               {/* Groups Section */}
               {groups
                 .sort((a, b) => (b.is_system ? 1 : 0) - (a.is_system ? 1 : 0) || a.name.localeCompare(b.name))
                 .map(group => {
                   const isExpanded = expandedGroups.has(group.id);
+                  const groupOn = isGroupOn(group.id);
+                  const groupBrightness = getGroupBrightness(group.id);
+                  const fixturesInGroup = groupFixtures.get(group.id) || [];
+
                   return (
                     <div key={`group-${group.id}`} className="bg-[#111113] rounded-xl overflow-hidden">
-                      <div
-                        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.02] transition-colors"
-                        onClick={() => toggleGroupExpand(group.id)}
-                      >
-                        <svg
-                          className={`w-4 h-4 stroke-[#636366] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                          fill="none"
-                          strokeWidth="2"
-                          viewBox="0 0 24 24"
+                      {/* Group Header */}
+                      <div className="flex items-center gap-3 px-4 py-3">
+                        {/* Expand button */}
+                        <button
+                          onClick={() => toggleGroupExpand(group.id)}
+                          className="p-0.5 hover:bg-white/10 rounded transition-colors"
                         >
-                          <path d="M9 18l6-6-6-6" />
-                        </svg>
-                        <div className="w-2.5 h-2.5 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.3)]" />
-                        <span className="flex-1 text-sm font-medium">{group.name}</span>
+                          <svg
+                            className={`w-4 h-4 stroke-[#636366] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                            fill="none"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
+                          >
+                            <path d="M9 18l6-6-6-6" />
+                          </svg>
+                        </button>
+
+                        {/* Status indicator */}
+                        <div
+                          className={`w-2.5 h-2.5 rounded-full transition-all ${
+                            groupOn ? 'bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.4)]' : 'bg-[#3a3a3f]'
+                          }`}
+                        />
+
+                        {/* Name */}
+                        <span className="flex-1 text-sm font-medium truncate">{group.name}</span>
+
+                        {/* Fixture count badge */}
+                        <span className="font-mono text-[9px] text-[#636366] px-1.5 py-0.5 bg-[#1a1a1d] rounded">
+                          {fixturesInGroup.length} fixtures
+                        </span>
+
                         {group.is_system && (
                           <span className="text-[9px] px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">SYSTEM</span>
                         )}
                         {group.circadian_enabled && (
                           <span className="text-[9px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">CIRCADIAN</span>
                         )}
+
+                        {/* Brightness indicator */}
+                        <div className="w-[60px] h-1.5 bg-[#2a2a2f] rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-purple-700 to-purple-500 rounded-full transition-all"
+                            style={{ width: `${groupBrightness}%` }}
+                          />
+                        </div>
+
+                        {/* Editable brightness percentage */}
+                        {editingBrightness?.type === 'group' && editingBrightness.id === group.id ? (
+                          <input
+                            type="text"
+                            autoFocus
+                            className="font-mono text-[11px] text-[#a1a1a6] w-[40px] text-right bg-[#1a1a1d] border border-purple-500/50 rounded px-1 py-0.5 outline-none"
+                            value={brightnessInputValue}
+                            onChange={(e) => setBrightnessInputValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleBrightnessInputSubmit('group', group.id, brightnessInputValue);
+                              } else if (e.key === 'Escape') {
+                                setEditingBrightness(null);
+                                setBrightnessInputValue('');
+                              }
+                            }}
+                            onBlur={() => {
+                              setEditingBrightness(null);
+                              setBrightnessInputValue('');
+                            }}
+                          />
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingBrightness({ type: 'group', id: group.id });
+                              setBrightnessInputValue(String(groupBrightness));
+                            }}
+                            className="font-mono text-[11px] text-[#a1a1a6] w-[36px] text-right hover:text-white transition-colors"
+                          >
+                            {groupBrightness}%
+                          </button>
+                        )}
+
+                        {/* On/Off Toggle */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleGroupToggle(group.id, !groupOn);
+                          }}
+                          className={`w-10 h-5 rounded-full transition-all relative ${
+                            groupOn ? 'bg-purple-500' : 'bg-[#3a3a3f]'
+                          }`}
+                        >
+                          <div
+                            className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow ${
+                              groupOn ? 'left-5' : 'left-0.5'
+                            }`}
+                          />
+                        </button>
                       </div>
+
+                      {/* Expanded Group Controls and Fixtures */}
                       {isExpanded && (
-                        <div className="px-4 pb-4 pt-2 border-t border-[#2a2a2f] space-y-3">
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] text-[#636366] w-16">Brightness</span>
-                            <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              defaultValue={100}
-                              className="flex-1 h-1.5 rounded-full appearance-none bg-[#2a2a2f] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-500"
-                              onChange={(e) => handleGroupBrightness(group.id, parseInt(e.target.value) / 100)}
-                            />
+                        <div className="border-t border-[#2a2a2f]">
+                          {/* Group-level controls */}
+                          <div className="px-4 py-3 bg-[#0d0d0f] space-y-3">
+                            <div className="flex items-center gap-3">
+                              <span className="text-[11px] text-[#636366] w-16">Brightness</span>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={groupBrightness}
+                                className="flex-1 h-1.5 rounded-full appearance-none bg-[#2a2a2f] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-500"
+                                onChange={(e) => handleGroupBrightness(group.id, parseInt(e.target.value) / 100)}
+                              />
+                              <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{groupBrightness}%</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-[11px] text-[#636366] w-16">CCT</span>
+                              <input
+                                type="range"
+                                min={2700}
+                                max={6500}
+                                defaultValue={4000}
+                                className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                                style={{ background: `linear-gradient(to right, ${kelvinToColor(2700)}, ${kelvinToColor(6500)})` }}
+                                onChange={(e) => handleGroupCCT(group.id, parseInt(e.target.value))}
+                              />
+                            </div>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] text-[#636366] w-16">CCT</span>
-                            <input
-                              type="range"
-                              min={2700}
-                              max={6500}
-                              defaultValue={4000}
-                              className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-                              style={{ background: `linear-gradient(to right, ${kelvinToColor(2700)}, ${kelvinToColor(6500)})` }}
-                              onChange={(e) => handleGroupCCT(group.id, parseInt(e.target.value))}
-                            />
-                          </div>
+
+                          {/* Fixtures in group */}
+                          {fixturesInGroup.length > 0 && (
+                            <div className="px-2 py-2 space-y-1">
+                              {fixturesInGroup.map(fixture => {
+                                const state = fixtureStates.get(fixture.id);
+                                const model = fixtureModels.get(fixture.fixture_model_id);
+                                const isFixtureExpanded = expandedFixtures.has(fixture.id);
+                                const brightness = state ? Math.round(state.goal_brightness / 10) : 0;
+                                const cct = state?.goal_cct ?? 2700;
+                                const cctMin = model?.cct_min_kelvin ?? 2700;
+                                const cctMax = model?.cct_max_kelvin ?? 6500;
+                                const isOn = state?.is_on ?? false;
+
+                                return (
+                                  <div key={`grouped-fixture-${fixture.id}`} className="bg-[#161619] rounded-lg overflow-hidden ml-4">
+                                    <div className="flex items-center gap-2 px-3 py-2">
+                                      {/* Expand button */}
+                                      <button
+                                        onClick={() => toggleFixtureExpand(fixture.id)}
+                                        className="p-0.5 hover:bg-white/10 rounded transition-colors"
+                                      >
+                                        <svg
+                                          className={`w-3 h-3 stroke-[#636366] transition-transform ${isFixtureExpanded ? 'rotate-90' : ''}`}
+                                          fill="none"
+                                          strokeWidth="2"
+                                          viewBox="0 0 24 24"
+                                        >
+                                          <path d="M9 18l6-6-6-6" />
+                                        </svg>
+                                      </button>
+
+                                      {/* Status indicator */}
+                                      <div
+                                        className={`w-2 h-2 rounded-full transition-all ${
+                                          isOn ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]' : 'bg-[#3a3a3f]'
+                                        }`}
+                                      />
+
+                                      {/* Name */}
+                                      <span className="flex-1 text-[12px] font-medium truncate">{fixture.name}</span>
+
+                                      {/* DMX channel */}
+                                      <span className="font-mono text-[9px] text-[#636366] px-1.5 py-0.5 bg-[#1a1a1d] rounded">
+                                        CH {fixture.dmx_channel_start}
+                                      </span>
+
+                                      {/* Brightness indicator */}
+                                      <div className="w-[50px] h-1 bg-[#2a2a2f] rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full bg-gradient-to-r from-amber-700 to-amber-500 rounded-full transition-all"
+                                          style={{ width: `${brightness}%` }}
+                                        />
+                                      </div>
+
+                                      {/* Editable brightness percentage */}
+                                      {editingBrightness?.type === 'fixture' && editingBrightness.id === fixture.id ? (
+                                        <input
+                                          type="text"
+                                          autoFocus
+                                          className="font-mono text-[10px] text-[#a1a1a6] w-[36px] text-right bg-[#1a1a1d] border border-amber-500/50 rounded px-1 py-0.5 outline-none"
+                                          value={brightnessInputValue}
+                                          onChange={(e) => setBrightnessInputValue(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              handleBrightnessInputSubmit('fixture', fixture.id, brightnessInputValue);
+                                            } else if (e.key === 'Escape') {
+                                              setEditingBrightness(null);
+                                              setBrightnessInputValue('');
+                                            }
+                                          }}
+                                          onBlur={() => {
+                                            setEditingBrightness(null);
+                                            setBrightnessInputValue('');
+                                          }}
+                                        />
+                                      ) : (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingBrightness({ type: 'fixture', id: fixture.id });
+                                            setBrightnessInputValue(String(brightness));
+                                          }}
+                                          className="font-mono text-[10px] text-[#a1a1a6] w-[30px] text-right hover:text-white transition-colors"
+                                        >
+                                          {brightness}%
+                                        </button>
+                                      )}
+
+                                      {/* On/Off Toggle */}
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleFixtureToggle(fixture.id);
+                                        }}
+                                        className={`w-8 h-4 rounded-full transition-all relative ${
+                                          isOn ? 'bg-amber-500' : 'bg-[#3a3a3f]'
+                                        }`}
+                                      >
+                                        <div
+                                          className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all shadow ${
+                                            isOn ? 'left-4' : 'left-0.5'
+                                          }`}
+                                        />
+                                      </button>
+                                    </div>
+
+                                    {/* Expanded fixture controls */}
+                                    {isFixtureExpanded && (
+                                      <div className="px-3 pb-3 pt-2 border-t border-[#2a2a2f] space-y-2">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] text-[#636366] w-14">Brightness</span>
+                                          <input
+                                            type="range"
+                                            min={0}
+                                            max={100}
+                                            value={brightness}
+                                            className="flex-1 h-1 rounded-full appearance-none bg-[#2a2a2f] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-500"
+                                            onChange={(e) => handleFixtureBrightness(fixture.id, parseInt(e.target.value) / 100)}
+                                          />
+                                          <span className="font-mono text-[10px] text-[#a1a1a6] w-8 text-right">{brightness}%</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] text-[#636366] w-14">CCT</span>
+                                          <input
+                                            type="range"
+                                            min={cctMin}
+                                            max={cctMax}
+                                            value={cct}
+                                            className="flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                                            style={{ background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})` }}
+                                            onChange={(e) => handleFixtureCCT(fixture.id, parseInt(e.target.value))}
+                                          />
+                                          <span className="font-mono text-[10px] text-[#a1a1a6] w-8 text-right">{cct}K</span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {fixturesInGroup.length === 0 && (
+                            <div className="px-4 py-3 text-[11px] text-[#636366] italic">
+                              No fixtures in this group
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
                   );
                 })}
 
-              {/* Fixtures Section */}
-              {fixtures.map(fixture => {
-                const state = fixtureStates.get(fixture.id);
-                const model = fixtureModels.get(fixture.fixture_model_id);
-                const isExpanded = expandedFixtures.has(fixture.id);
-                const brightness = state ? Math.round(state.goal_brightness / 10) : 0;
-                const cct = state?.goal_cct ?? 2700;
-                const cctMin = model?.cct_min_kelvin ?? 2700;
-                const cctMax = model?.cct_max_kelvin ?? 6500;
-                const isOn = state?.is_on ?? false;
+              {/* Ungrouped Fixtures Section */}
+              {(() => {
+                const ungroupedFixtures = getUngroupedFixtures();
+                if (ungroupedFixtures.length === 0) return null;
 
                 return (
-                  <div key={`fixture-${fixture.id}`} className="bg-[#111113] rounded-xl overflow-hidden">
-                    <div className="flex items-center gap-3 px-4 py-3">
-                      {/* Expand button */}
-                      <button
-                        onClick={() => toggleFixtureExpand(fixture.id)}
-                        className="p-0.5 hover:bg-white/10 rounded transition-colors"
-                      >
-                        <svg
-                          className={`w-4 h-4 stroke-[#636366] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                          fill="none"
-                          strokeWidth="2"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M9 18l6-6-6-6" />
-                        </svg>
-                      </button>
-
-                      {/* Status indicator */}
-                      <div
-                        className={`w-2.5 h-2.5 rounded-full transition-all ${
-                          isOn ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : 'bg-[#3a3a3f]'
-                        }`}
-                      />
-
-                      {/* Name */}
-                      <span className="flex-1 text-sm font-medium truncate">{fixture.name}</span>
-
-                      {/* DMX channel */}
-                      <span className="font-mono text-[10px] text-[#636366] px-2 py-0.5 bg-[#1a1a1d] rounded">
-                        CH {fixture.dmx_channel_start}
-                      </span>
-
-                      {/* Brightness indicator */}
-                      <div className="w-[80px] h-1.5 bg-[#2a2a2f] rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-amber-700 to-amber-500 rounded-full transition-all"
-                          style={{ width: `${brightness}%` }}
-                        />
-                      </div>
-
-                      {/* Percentage */}
-                      <span className="font-mono text-[11px] text-[#a1a1a6] w-[36px] text-right">
-                        {brightness}%
-                      </span>
-
-                      {/* On/Off Toggle */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleFixtureToggle(fixture.id);
-                        }}
-                        className={`w-10 h-5 rounded-full transition-all relative ${
-                          isOn ? 'bg-amber-500' : 'bg-[#3a3a3f]'
-                        }`}
-                      >
-                        <div
-                          className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow ${
-                            isOn ? 'left-5' : 'left-0.5'
-                          }`}
-                        />
-                      </button>
+                  <>
+                    <div className="flex items-center gap-2 mt-4 mb-2">
+                      <div className="h-px flex-1 bg-[#2a2a2f]" />
+                      <span className="text-[10px] uppercase tracking-wider text-[#636366]">Ungrouped Fixtures</span>
+                      <div className="h-px flex-1 bg-[#2a2a2f]" />
                     </div>
+                    {ungroupedFixtures.map(fixture => {
+                      const state = fixtureStates.get(fixture.id);
+                      const model = fixtureModels.get(fixture.fixture_model_id);
+                      const isExpanded = expandedFixtures.has(fixture.id);
+                      const brightness = state ? Math.round(state.goal_brightness / 10) : 0;
+                      const cct = state?.goal_cct ?? 2700;
+                      const cctMin = model?.cct_min_kelvin ?? 2700;
+                      const cctMax = model?.cct_max_kelvin ?? 6500;
+                      const isOn = state?.is_on ?? false;
 
-                    {/* Expanded controls */}
-                    {isExpanded && (
-                      <div className="px-4 pb-4 pt-2 border-t border-[#2a2a2f] space-y-3">
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] text-[#636366] w-16">Brightness</span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={brightness}
-                            className="flex-1 h-1.5 rounded-full appearance-none bg-[#2a2a2f] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-500"
-                            onChange={(e) => handleFixtureBrightness(fixture.id, parseInt(e.target.value) / 100)}
-                          />
-                          <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{brightness}%</span>
+                      return (
+                        <div key={`ungrouped-fixture-${fixture.id}`} className="bg-[#111113] rounded-xl overflow-hidden">
+                          <div className="flex items-center gap-3 px-4 py-3">
+                            {/* Expand button */}
+                            <button
+                              onClick={() => toggleFixtureExpand(fixture.id)}
+                              className="p-0.5 hover:bg-white/10 rounded transition-colors"
+                            >
+                              <svg
+                                className={`w-4 h-4 stroke-[#636366] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                fill="none"
+                                strokeWidth="2"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="M9 18l6-6-6-6" />
+                              </svg>
+                            </button>
+
+                            {/* Status indicator */}
+                            <div
+                              className={`w-2.5 h-2.5 rounded-full transition-all ${
+                                isOn ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]' : 'bg-[#3a3a3f]'
+                              }`}
+                            />
+
+                            {/* Name */}
+                            <span className="flex-1 text-sm font-medium truncate">{fixture.name}</span>
+
+                            {/* DMX channel */}
+                            <span className="font-mono text-[10px] text-[#636366] px-2 py-0.5 bg-[#1a1a1d] rounded">
+                              CH {fixture.dmx_channel_start}
+                            </span>
+
+                            {/* Brightness indicator */}
+                            <div className="w-[80px] h-1.5 bg-[#2a2a2f] rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-amber-700 to-amber-500 rounded-full transition-all"
+                                style={{ width: `${brightness}%` }}
+                              />
+                            </div>
+
+                            {/* Editable brightness percentage */}
+                            {editingBrightness?.type === 'fixture' && editingBrightness.id === fixture.id ? (
+                              <input
+                                type="text"
+                                autoFocus
+                                className="font-mono text-[11px] text-[#a1a1a6] w-[40px] text-right bg-[#1a1a1d] border border-amber-500/50 rounded px-1 py-0.5 outline-none"
+                                value={brightnessInputValue}
+                                onChange={(e) => setBrightnessInputValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleBrightnessInputSubmit('fixture', fixture.id, brightnessInputValue);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingBrightness(null);
+                                    setBrightnessInputValue('');
+                                  }
+                                }}
+                                onBlur={() => {
+                                  setEditingBrightness(null);
+                                  setBrightnessInputValue('');
+                                }}
+                              />
+                            ) : (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingBrightness({ type: 'fixture', id: fixture.id });
+                                  setBrightnessInputValue(String(brightness));
+                                }}
+                                className="font-mono text-[11px] text-[#a1a1a6] w-[36px] text-right hover:text-white transition-colors"
+                              >
+                                {brightness}%
+                              </button>
+                            )}
+
+                            {/* On/Off Toggle */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleFixtureToggle(fixture.id);
+                              }}
+                              className={`w-10 h-5 rounded-full transition-all relative ${
+                                isOn ? 'bg-amber-500' : 'bg-[#3a3a3f]'
+                              }`}
+                            >
+                              <div
+                                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow ${
+                                  isOn ? 'left-5' : 'left-0.5'
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          {/* Expanded controls */}
+                          {isExpanded && (
+                            <div className="px-4 pb-4 pt-2 border-t border-[#2a2a2f] space-y-3">
+                              <div className="flex items-center gap-3">
+                                <span className="text-[11px] text-[#636366] w-16">Brightness</span>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={100}
+                                  value={brightness}
+                                  className="flex-1 h-1.5 rounded-full appearance-none bg-[#2a2a2f] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-500"
+                                  onChange={(e) => handleFixtureBrightness(fixture.id, parseInt(e.target.value) / 100)}
+                                />
+                                <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{brightness}%</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="text-[11px] text-[#636366] w-16">CCT</span>
+                                <input
+                                  type="range"
+                                  min={cctMin}
+                                  max={cctMax}
+                                  value={cct}
+                                  className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                                  style={{ background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})` }}
+                                  onChange={(e) => handleFixtureCCT(fixture.id, parseInt(e.target.value))}
+                                />
+                                <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{cct}K</span>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-[11px] text-[#636366] w-16">CCT</span>
-                          <input
-                            type="range"
-                            min={cctMin}
-                            max={cctMax}
-                            value={cct}
-                            className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-                            style={{ background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})` }}
-                            onChange={(e) => handleFixtureCCT(fixture.id, parseInt(e.target.value))}
-                          />
-                          <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{cct}K</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                      );
+                    })}
+                  </>
                 );
-              })}
+              })()}
             </div>
           </div>
 
