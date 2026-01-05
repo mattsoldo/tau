@@ -43,10 +43,12 @@ def upgrade() -> None:
     )
 
     # Insert initial installation record with placeholder version
+    # Use ON CONFLICT to handle re-runs gracefully
     op.execute(
         """
         INSERT INTO installation (id, current_version, install_method)
         VALUES (1, '0.0.0', 'fresh')
+        ON CONFLICT (id) DO NOTHING
         """
     )
 
@@ -141,22 +143,31 @@ def upgrade() -> None:
     )
 
     # Insert default configuration values
-    op.execute(
-        """
-        INSERT INTO update_config (key, value, description) VALUES
-            ('auto_check_enabled', 'true', 'Enable automatic update checks'),
-            ('check_interval_hours', '24', 'Hours between automatic update checks'),
-            ('include_prereleases', 'false', 'Include pre-release versions in update checks'),
-            ('max_backups', '3', 'Maximum number of version backups to retain'),
-            ('github_repo', '', 'GitHub repository in owner/repo format'),
-            ('github_token', '', 'GitHub API token for private repos or higher rate limits'),
-            ('backup_location', '/var/lib/tau-lighting/backup', 'Directory for version backups'),
-            ('min_free_space_mb', '500', 'Minimum free disk space required for updates (MB)'),
-            ('download_timeout_seconds', '300', 'Timeout for downloading update assets'),
-            ('verify_after_install', 'true', 'Verify installation after applying updates'),
-            ('rollback_on_service_failure', 'true', 'Automatically rollback if services fail to start')
-        """
-    )
+    # Use ON CONFLICT to handle re-runs gracefully and preserve existing config
+    default_configs = [
+        ("auto_check_enabled", "true", "Enable automatic update checks"),
+        ("check_interval_hours", "24", "Hours between automatic update checks"),
+        ("include_prereleases", "false", "Include pre-release versions in update checks"),
+        ("max_backups", "3", "Maximum number of version backups to retain"),
+        ("github_repo", "", "GitHub repository in owner/repo format"),
+        ("github_token", "", "GitHub API token for private repos or higher rate limits"),
+        ("backup_location", "/var/lib/tau-lighting/backup", "Directory for version backups"),
+        ("min_free_space_mb", "500", "Minimum free disk space required for updates (MB)"),
+        ("download_timeout_seconds", "300", "Timeout for downloading update assets"),
+        ("verify_after_install", "true", "Verify installation after applying updates"),
+        ("rollback_on_service_failure", "true", "Automatically rollback if services fail to start"),
+    ]
+
+    for key, value, description in default_configs:
+        # Escape single quotes in description
+        safe_desc = description.replace("'", "''")
+        op.execute(
+            f"""
+            INSERT INTO update_config (key, value, description)
+            VALUES ('{key}', '{value}', '{safe_desc}')
+            ON CONFLICT (key) DO NOTHING
+            """
+        )
 
 
 def downgrade() -> None:

@@ -55,7 +55,15 @@ UPDATE_STATES = [
 ]
 
 # Services to manage during updates
-SERVICES = ["tau-daemon", "tau-frontend"]
+# Note: Only tau-daemon needs to be restarted - frontend is served via nginx/static build
+SERVICES = ["tau-daemon"]
+
+# Operation timeouts (in seconds)
+SERVICE_STOP_TIMEOUT = 30.0
+SERVICE_START_TIMEOUT = 30.0
+PACKAGE_INSTALL_TIMEOUT = 120.0
+MIGRATION_TIMEOUT = 60.0
+SERVICE_HEALTH_CHECK_TIMEOUT = 10.0
 
 
 class UpdateError(Exception):
@@ -122,6 +130,19 @@ class SoftwareUpdateService:
             return DEFAULT_UPDATE_CONFIG[key][0]
         return ""
 
+    async def _get_config_bool(self, key: str) -> bool:
+        """Get a boolean configuration value from the database"""
+        value = await self._get_config(key)
+        return value.lower() in ("true", "1", "yes", "on")
+
+    async def _get_config_int(self, key: str, default: int = 0) -> int:
+        """Get an integer configuration value from the database"""
+        value = await self._get_config(key)
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+
     async def _set_config(self, key: str, value: str):
         """Set a configuration value in the database"""
         result = await self.db_session.execute(
@@ -156,8 +177,8 @@ class SoftwareUpdateService:
         """Get or create backup manager"""
         if self._backup_manager is None:
             backup_location = await self._get_config("backup_location")
-            max_backups = int(await self._get_config("max_backups"))
-            min_free_space = int(await self._get_config("min_free_space_mb"))
+            max_backups = await self._get_config_int("max_backups", default=3)
+            min_free_space = await self._get_config_int("min_free_space_mb", default=500)
             self._backup_manager = BackupManager(
                 backup_location=backup_location,
                 app_root=str(self.app_root),
@@ -235,7 +256,7 @@ class SoftwareUpdateService:
 
         try:
             github = await self._get_github_client()
-            include_prereleases = (await self._get_config("include_prereleases")).lower() == "true"
+            include_prereleases = await self._get_config_bool("include_prereleases")
 
             # Fetch releases from GitHub
             releases = await github.get_releases(include_prereleases=include_prereleases)
@@ -544,7 +565,7 @@ class SoftwareUpdateService:
             if progress_callback:
                 progress_callback("verifying_install", 0, "Verifying installation...")
 
-            verify_after = (await self._get_config("verify_after_install")).lower() == "true"
+            verify_after = await self._get_config_bool("verify_after_install")
             if verify_after:
                 if not await self._verify_installation(target_version):
                     raise InstallationError("Installation verification failed")
@@ -688,10 +709,10 @@ class SoftwareUpdateService:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await asyncio.wait_for(process.communicate(), timeout=30.0)
+                await asyncio.wait_for(process.communicate(), timeout=SERVICE_STOP_TIMEOUT)
                 logger.info("service_stopped", service=service)
             except asyncio.TimeoutError:
-                logger.warning("service_stop_timeout", service=service)
+                logger.warning("service_stop_timeout", service=service, timeout=SERVICE_STOP_TIMEOUT)
             except Exception as e:
                 logger.warning("service_stop_failed", service=service, error=str(e))
 
@@ -706,14 +727,16 @@ class SoftwareUpdateService:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30.0)
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=SERVICE_START_TIMEOUT
+                )
 
                 if process.returncode != 0:
                     raise InstallationError(f"Failed to start {service}: {stderr.decode()}")
 
                 logger.info("service_started", service=service)
             except asyncio.TimeoutError:
-                raise InstallationError(f"Timeout starting {service}")
+                raise InstallationError(f"Timeout starting {service} after {SERVICE_START_TIMEOUT}s")
 
     async def _install_package(self, package_path: Path):
         """Install a .deb package"""
@@ -725,7 +748,9 @@ class SoftwareUpdateService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120.0)
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT
+            )
 
             if process.returncode != 0:
                 # Try to fix dependencies
@@ -737,7 +762,7 @@ class SoftwareUpdateService:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await fix_process.communicate()
+                await asyncio.wait_for(fix_process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT)
 
                 if process.returncode != 0:
                     raise InstallationError(f"Package installation failed: {stderr.decode()}")
@@ -745,7 +770,7 @@ class SoftwareUpdateService:
             logger.info("package_installed", path=str(package_path))
 
         except asyncio.TimeoutError:
-            raise InstallationError("Package installation timed out")
+            raise InstallationError(f"Package installation timed out after {PACKAGE_INSTALL_TIMEOUT}s")
 
     async def _run_migrations(self):
         """Run database migrations"""
@@ -758,7 +783,9 @@ class SoftwareUpdateService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60.0)
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=MIGRATION_TIMEOUT
+            )
 
             if process.returncode != 0:
                 logger.warning("migration_warning", stderr=stderr.decode())
@@ -790,6 +817,98 @@ class SoftwareUpdateService:
                 return False
 
         return True
+
+    async def recover_from_interrupted_update(self) -> Dict[str, Any]:
+        """
+        Recover from an interrupted update on daemon startup.
+
+        Called when the daemon starts to handle cases where an update was in progress
+        when the daemon crashed or was restarted. This method:
+        1. Checks if an update was in progress
+        2. Attempts to complete or rollback the update
+        3. Cleans up any partial state
+
+        Returns:
+            Dict with recovery status and actions taken
+        """
+        logger.info("checking_for_interrupted_update")
+
+        # Check if we were in the middle of an update
+        if self._current_state not in ["idle", "complete", "failed"]:
+            # State was persisted - we were interrupted
+            interrupted_state = self._current_state
+            logger.warning("interrupted_update_detected", state=interrupted_state)
+
+            recovery_actions = []
+
+            try:
+                # Clean up any partial downloads
+                download_dir = Path("/tmp/tau-updates")
+                if download_dir.exists():
+                    import shutil
+                    shutil.rmtree(download_dir, ignore_errors=True)
+                    recovery_actions.append("cleaned_partial_downloads")
+
+                # If we were past the backup stage but before completion,
+                # check if we need to rollback
+                if interrupted_state in [
+                    "stopping_services",
+                    "installing",
+                    "migrating",
+                    "starting_services",
+                    "verifying_install",
+                ]:
+                    # Check if services are running
+                    services_healthy = await self._verify_installation("")
+
+                    if not services_healthy:
+                        # Attempt to start services
+                        logger.info("attempting_service_recovery")
+                        try:
+                            await self._start_services()
+                            recovery_actions.append("restarted_services")
+                        except Exception as e:
+                            logger.error("service_recovery_failed", error=str(e))
+
+                            # Check if we should auto-rollback
+                            should_rollback = await self._get_config_bool("rollback_on_service_failure")
+                            if should_rollback:
+                                # Find the most recent backup
+                                backup_manager = await self._get_backup_manager()
+                                backups = await backup_manager.list_backups()
+                                valid_backup = next((b for b in backups if b.valid), None)
+
+                                if valid_backup:
+                                    logger.warning(
+                                        "auto_rollback_triggered",
+                                        target_version=valid_backup.version,
+                                    )
+                                    await self._perform_rollback(valid_backup.backup_path)
+                                    recovery_actions.append(f"rolled_back_to_{valid_backup.version}")
+
+                # Reset state
+                self._current_state = "idle"
+                self._update_progress = {}
+                recovery_actions.append("reset_state")
+
+                return {
+                    "recovered": True,
+                    "interrupted_state": interrupted_state,
+                    "actions": recovery_actions,
+                }
+
+            except Exception as e:
+                logger.error("update_recovery_failed", error=str(e))
+                self._current_state = "failed"
+                return {
+                    "recovered": False,
+                    "interrupted_state": interrupted_state,
+                    "error": str(e),
+                }
+
+        # No interrupted update
+        self._current_state = "idle"
+        return {"recovered": False, "message": "No interrupted update detected"}
 
     async def get_version_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         """

@@ -61,6 +61,10 @@ async def async_engine():
         CircadianProfile, Scene, SceneValue,
         FixtureState, GroupState,
     )
+    from tau.models.software_update import (
+        Installation, VersionHistory, AvailableRelease,
+        UpdateCheck, UpdateConfig,
+    )
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

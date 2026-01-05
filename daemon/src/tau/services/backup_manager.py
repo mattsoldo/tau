@@ -295,7 +295,7 @@ class BackupManager:
                 commit_sha=commit_sha,
                 files=files_manifest,
                 database_backed_up=False,  # Database backup handled separately
-                services=["tau-daemon", "tau-frontend"],
+                services=["tau-daemon"],
                 backup_size_bytes=total_size,
                 app_root=str(self.app_root),
             )
