@@ -43,10 +43,10 @@ The script will interactively install:
    - Systemd service
 
 After installation:
-- **Web UI**: `http://<pi-ip>:3000` (if frontend installed)
-- **API**: `http://<pi-ip>:8000`
+- **Web UI**: `http://<pi-ip>` (if nginx and frontend installed)
+- **API**: `http://<pi-ip>/api/` (proxied via nginx) or `http://<pi-ip>:8000` (direct)
 - **API Docs**: `http://<pi-ip>:8000/docs`
-- **OLA**: `http://<pi-ip>:9090`
+- **OLA Web UI**: `http://<pi-ip>/ola/` (proxied via nginx) or `http://<pi-ip>:9090` (direct)
 
 ## Manual Installation
 
@@ -84,6 +84,36 @@ ola_dev_info
 
 # Access web UI at http://<pi-ip>:9090
 ```
+
+#### ENTTEC DMX USB PRO Configuration
+
+If using an ENTTEC DMX USB PRO device (VID: 0403, PID: 6001), additional configuration is required:
+
+```bash
+# 1. Create udev rule for USB permissions
+sudo tee /etc/udev/rules.d/30-ftdi-usb-dmx.rules > /dev/null <<EOF
+# FTDI USB DMX devices - grant access to plugdev group
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", GROUP="plugdev", MODE="0666"
+EOF
+
+# 2. Reload udev rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+# 3. Enable Serial USB plugin (required for ENTTEC DMX USB PRO)
+sudo sed -i 's/enabled = false/enabled = true/' /etc/ola/ola-usbserial.conf
+
+# 4. Restart OLA daemon
+sudo systemctl restart olad
+
+# 5. Verify ENTTEC device is detected
+ola_dev_info | grep -i "enttec"
+# Should show: Enttec Usb Pro Device, Serial #: XXXXXXXX, firmware X.X
+
+# Device should appear in OLA web UI at http://<pi-ip>:9090
+```
+
+**Important:** The ENTTEC DMX USB PRO uses the Serial USB plugin (ID 5), not the FTDI USB DMX plugin (ID 13) or USB plugin (ID 12). The Serial USB plugin handles FTDI-based serial devices that implement the Enttec USB Pro protocol.
 
 ### 3. Configure LabJack USB Permissions
 
@@ -313,9 +343,10 @@ hostname -I
 
 From any device on your network:
 
-- **API**: `http://<pi-ip>:8000`
+- **Web UI**: `http://<pi-ip>` (if nginx and frontend installed)
+- **API**: `http://<pi-ip>/api/` (proxied via nginx) or `http://<pi-ip>:8000` (direct)
 - **API Docs**: `http://<pi-ip>:8000/docs`
-- **OLA Web UI**: `http://<pi-ip>:9090`
+- **OLA Web UI**: `http://<pi-ip>/ola/` (proxied via nginx) or `http://<pi-ip>:9090` (direct)
 
 ### Firewall (Optional)
 
