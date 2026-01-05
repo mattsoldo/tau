@@ -68,6 +68,10 @@ echo
 echo -e "${YELLOW}🔄 Step 2: Checking for updates...${NC}"
 cd /opt/tau-daemon
 
+# Fix ownership to prevent git permission issues
+echo "  Ensuring correct file ownership..."
+chown -R $ACTUAL_USER:$ACTUAL_USER /opt/tau-daemon
+
 # Ensure git doesn't complain about ownership
 if ! sudo -u $ACTUAL_USER git config --get safe.directory | grep -q "/opt/tau-daemon"; then
     sudo -u $ACTUAL_USER git config --global --add safe.directory /opt/tau-daemon
