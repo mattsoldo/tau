@@ -99,6 +99,11 @@ class SwitchHandler:
 
         Args:
             dim_speed_ms: Time in ms for full brightness range (0-100%)
+
+        Note:
+            Thread-safe due to Python's GIL - simple integer assignment is atomic.
+            The control loop reading this value will see either the old or new value,
+            never a partial/corrupted state.
         """
         old_value = self.dim_speed_ms
         self.dim_speed_ms = dim_speed_ms

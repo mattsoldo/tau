@@ -208,6 +208,13 @@ async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
                     detail=f"Invalid value for type {setting.value_type}: {str(e)}"
                 )
 
+            # Additional validation for specific settings
+            if key == "dim_speed_ms" and int(update.value) <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="dim_speed_ms must be a positive value"
+                )
+
             # Update the setting
             old_value = setting.value
             setting.value = update.value
@@ -225,8 +232,12 @@ async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
             if key == "dim_speed_ms":
                 daemon = get_daemon_instance()
                 if daemon and daemon.lighting_controller:
-                    daemon.lighting_controller.set_dim_speed_ms(int(update.value))
-                    logger.info("dim_speed_hot_reloaded", new_value=update.value)
+                    try:
+                        daemon.lighting_controller.set_dim_speed_ms(int(update.value))
+                        logger.info("dim_speed_hot_reloaded", new_value=update.value)
+                    except Exception as e:
+                        # Don't fail the request - setting is saved, will take effect on restart
+                        logger.error("dim_speed_hot_reload_failed", error=str(e), exc_info=True)
 
             return SystemSettingResponse.model_validate(setting)
 
