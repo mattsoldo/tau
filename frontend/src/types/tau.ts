@@ -96,9 +96,9 @@ export interface SwitchCreate {
 export interface Group {
   id: number;
   name: string;
-  description?: string;
+  description: string | null;
   circadian_enabled: boolean;
-  circadian_profile_id?: number;
+  circadian_profile_id: number | null;
   created_at: string;
 }
 
