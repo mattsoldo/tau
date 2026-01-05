@@ -20,12 +20,16 @@ interface SwitchModel {
   requires_analog_pin: boolean;
 }
 
+type SwitchType = 'normally-open' | 'normally-closed';
+
 interface Switch {
   id: number;
   name: string | null;
   switch_model_id: number;
   labjack_digital_pin: number | null;
   labjack_analog_pin: number | null;
+  switch_type: SwitchType;
+  invert_reading: boolean;
   target_group_id: number | null;
   target_fixture_id: number | null;
   photo_url: string | null;
@@ -50,6 +54,8 @@ interface FormData {
   switch_model_id: string;
   labjack_digital_pin: string;
   labjack_analog_pin: string;
+  switch_type: SwitchType;
+  invert_reading: boolean;
   target_type: TargetType;
   target_group_id: string;
   target_fixture_id: string;
@@ -60,6 +66,8 @@ const emptyFormData: FormData = {
   switch_model_id: '',
   labjack_digital_pin: '',
   labjack_analog_pin: '',
+  switch_type: 'normally-closed',
+  invert_reading: false,
   target_type: 'group',
   target_group_id: '',
   target_fixture_id: '',
@@ -329,6 +337,8 @@ export default function SwitchesPage() {
       switch_model_id: sw.switch_model_id.toString(),
       labjack_digital_pin: sw.labjack_digital_pin?.toString() || '',
       labjack_analog_pin: sw.labjack_analog_pin?.toString() || '',
+      switch_type: sw.switch_type || 'normally-closed',
+      invert_reading: sw.invert_reading || false,
       target_type: sw.target_group_id !== null ? 'group' : 'fixture',
       target_group_id: sw.target_group_id?.toString() || '',
       target_fixture_id: sw.target_fixture_id?.toString() || '',
@@ -339,6 +349,13 @@ export default function SwitchesPage() {
   const handleSave = async () => {
     if (!formData.switch_model_id) {
       setError('Please select a switch model');
+      return;
+    }
+
+    // Validate switch_type is a valid value
+    const validSwitchTypes: SwitchType[] = ['normally-open', 'normally-closed'];
+    if (!validSwitchTypes.includes(formData.switch_type)) {
+      setError('Invalid switch type. Must be "normally-open" or "normally-closed"');
       return;
     }
 
@@ -363,6 +380,8 @@ export default function SwitchesPage() {
         switch_model_id: parseInt(formData.switch_model_id),
         labjack_digital_pin: formData.labjack_digital_pin ? parseInt(formData.labjack_digital_pin) : null,
         labjack_analog_pin: formData.labjack_analog_pin ? parseInt(formData.labjack_analog_pin) : null,
+        switch_type: formData.switch_type,
+        invert_reading: formData.invert_reading,
         target_group_id: targetGroupId,
         target_fixture_id: targetFixtureId,
       };
@@ -541,21 +560,41 @@ export default function SwitchesPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex gap-2">
-                        {sw.labjack_digital_pin !== null && (
-                          <span className="px-2 py-0.5 text-xs bg-blue-500/10 text-blue-400 rounded font-mono">
-                            D{sw.labjack_digital_pin}
+                    <td className="px-6 py-4 align-middle">
+                      <div className="flex flex-col gap-1 min-h-[40px] justify-center">
+                        <div className="flex gap-2">
+                          {sw.labjack_digital_pin !== null && (
+                            <span className="px-2 py-0.5 text-xs bg-blue-500/10 text-blue-400 rounded font-mono">
+                              D{sw.labjack_digital_pin}
+                            </span>
+                          )}
+                          {sw.labjack_analog_pin !== null && (
+                            <span className="px-2 py-0.5 text-xs bg-purple-500/10 text-purple-400 rounded font-mono">
+                              A{sw.labjack_analog_pin}
+                            </span>
+                          )}
+                          {sw.labjack_digital_pin === null && sw.labjack_analog_pin === null && (
+                            <span className="text-[#636366] text-sm">None</span>
+                          )}
+                        </div>
+                        <div className="flex gap-1 items-center">
+                          <span
+                            className="text-xs text-[#636366] cursor-help"
+                            title={(!sw.switch_type || sw.switch_type === 'normally-closed')
+                              ? 'Normally Closed: Circuit is closed when switch is not pressed'
+                              : 'Normally Open: Circuit is open when switch is not pressed'}
+                          >
+                            {(!sw.switch_type || sw.switch_type === 'normally-closed') ? 'NC' : 'NO'}
                           </span>
-                        )}
-                        {sw.labjack_analog_pin !== null && (
-                          <span className="px-2 py-0.5 text-xs bg-purple-500/10 text-purple-400 rounded font-mono">
-                            A{sw.labjack_analog_pin}
-                          </span>
-                        )}
-                        {sw.labjack_digital_pin === null && sw.labjack_analog_pin === null && (
-                          <span className="text-[#636366] text-sm">None</span>
-                        )}
+                          {sw.invert_reading && (
+                            <span
+                              className="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-400 rounded cursor-help"
+                              title="Invert Logic: Switch reading is flipped in software"
+                            >
+                              INV
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -710,6 +749,38 @@ export default function SwitchesPage() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Switch Type Configuration */}
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-[#a1a1a6]">Hardware Configuration</label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-[#636366] mb-2">Switch Type</label>
+                    <select
+                      value={formData.switch_type}
+                      onChange={(e) => setFormData({ ...formData, switch_type: e.target.value as SwitchType })}
+                      className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                    >
+                      <option value="normally-closed">Normally Closed (NC)</option>
+                      <option value="normally-open">Normally Open (NO)</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end pb-1">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.invert_reading}
+                        onChange={(e) => setFormData({ ...formData, invert_reading: e.target.checked })}
+                        className="w-5 h-5 rounded border-[#3a3a3f] bg-[#111113] text-amber-500 focus:ring-amber-500/30 focus:ring-offset-0"
+                      />
+                      <span className="text-sm text-[#a1a1a6]">Invert Logic</span>
+                    </label>
+                  </div>
+                </div>
+                <p className="text-xs text-[#636366]">
+                  NC: Circuit closed when not pressed. NO: Circuit open when not pressed. Invert Logic flips the reading in software.
+                </p>
               </div>
 
               {/* Target Selection */}
