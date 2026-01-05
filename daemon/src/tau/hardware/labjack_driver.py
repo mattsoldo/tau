@@ -13,8 +13,12 @@ Docker USB Access:
 from typing import Dict, List, Optional, Any
 import structlog
 import asyncio
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tau.hardware.base import LabJackInterface
+from tau.models.switches import Switch
+from tau.database import get_session
 
 logger = structlog.get_logger(__name__)
 
@@ -46,8 +50,7 @@ class LabJackDriver(LabJackInterface):
         # Track channel modes
         self.channel_modes = {i: 'analog' for i in range(16)}
 
-        # Track channels that need logic inversion (for switches without pull-ups)
-        # FIO0 has a normally-closed switch - no inversion needed
+        # Track channels that need logic inversion (loaded from database switch config)
         self.inverted_channels = set()
 
         # Track our intended FIOAnalog bitmask (all analog by default)
@@ -107,6 +110,10 @@ class LabJackDriver(LabJackInterface):
                 model=self.model,
                 serial=self.serial_number
             )
+
+            # Load switch configuration from database
+            await self.load_switch_config()
+
             return True
 
         except ImportError:
@@ -132,6 +139,43 @@ class LabJackDriver(LabJackInterface):
             finally:
                 self.device = None
                 self._connected = False
+
+    async def load_switch_config(self) -> None:
+        """
+        Load switch configuration from database
+
+        Reads switch settings to determine which channels need logic inversion
+        """
+        try:
+            async for session in get_session():
+                result = await session.execute(
+                    select(Switch).where(Switch.labjack_digital_pin.isnot(None))
+                )
+                switches = result.scalars().all()
+
+                # Clear and rebuild inverted channels set
+                self.inverted_channels.clear()
+
+                for switch in switches:
+                    if switch.invert_reading and switch.labjack_digital_pin is not None:
+                        self.inverted_channels.add(switch.labjack_digital_pin)
+                        logger.info(
+                            "labjack_switch_config_loaded",
+                            channel=switch.labjack_digital_pin,
+                            switch_type=switch.switch_type,
+                            invert_reading=switch.invert_reading,
+                            switch_name=switch.name
+                        )
+
+                logger.info(
+                    "labjack_switch_config_complete",
+                    inverted_channels=list(self.inverted_channels),
+                    total_switches=len(switches)
+                )
+                break  # Only need one iteration
+
+        except Exception as e:
+            logger.error("labjack_switch_config_failed", error=str(e))
 
     async def read_analog_input(self, channel: int) -> float:
         """

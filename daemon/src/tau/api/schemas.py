@@ -297,6 +297,8 @@ class SwitchBase(BaseModel):
     switch_model_id: int = Field(..., gt=0)
     labjack_digital_pin: Optional[int] = Field(None, ge=0, le=15)
     labjack_analog_pin: Optional[int] = Field(None, ge=0, le=15)
+    switch_type: str = Field(default="normally-closed", pattern="^(normally-open|normally-closed)$")
+    invert_reading: bool = Field(default=False)
     target_group_id: Optional[int] = None
     target_fixture_id: Optional[int] = None
     photo_url: Optional[str] = None
@@ -311,6 +313,8 @@ class SwitchUpdate(BaseModel):
     switch_model_id: Optional[int] = Field(None, gt=0)
     labjack_digital_pin: Optional[int] = Field(None, ge=0, le=15)
     labjack_analog_pin: Optional[int] = Field(None, ge=0, le=15)
+    switch_type: Optional[str] = Field(None, pattern="^(normally-open|normally-closed)$")
+    invert_reading: Optional[bool] = None
     target_group_id: Optional[int] = None
     target_fixture_id: Optional[int] = None
     photo_url: Optional[str] = None

@@ -105,6 +105,18 @@ class Switch(Base):
     labjack_digital_pin: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     labjack_analog_pin: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # Hardware Configuration
+    switch_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="normally-closed"
+    )  # 'normally-open' or 'normally-closed'
+    invert_reading: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false"
+    )  # Whether to invert the digital reading in software
+
     # Polymorphic Target (either group OR fixture, not both)
     target_group_id: Mapped[Optional[int]] = mapped_column(
         Integer,
