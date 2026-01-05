@@ -269,7 +269,8 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:8000';
+        // Use relative API URL for nginx proxy (or detect current host)
+        const API_URL = window.location.protocol + '//' + window.location.host;
         let isConnected = false;
 
         // Brightness simulation state (PRD Section 10.1)
@@ -277,7 +278,7 @@
         let lightOn = false;
 
         // FIO0 switch input tracking
-        let lastSwitchState = false;
+        let lastSwitchState = true;  // Start as released (true after inversion)
         let switchPressTime = null;
         let holdInterval = null;
         let rampDirection = 1;  // 1 = up, -1 = down
@@ -414,16 +415,17 @@
         }
 
         // Handle FIO0 input (PRD Section 10.1 - Retractive Switch)
-        // Note: HIGH = switch pressed, LOW = switch released
-        function handleSwitchInput(switchPressed) {
+        // Note: Driver inverts logic for hardware without pull-ups
+        // So: HIGH (true) = switch released, LOW (false) = switch pressed
+        function handleSwitchInput(switchReleased) {
             const fioIndicator = document.getElementById('fio0-indicator');
             const actionIndicator = document.getElementById('action-indicator');
 
-            fioIndicator.textContent = `FIO0: ${switchPressed ? 'PRESSED' : 'RELEASED'}`;
-            fioIndicator.className = switchPressed ? 'active' : '';
+            fioIndicator.textContent = `FIO0: ${switchReleased ? 'RELEASED' : 'PRESSED'}`;
+            fioIndicator.className = switchReleased ? '' : 'active';
 
-            // Detect press (rising edge - HIGH means switch pressed)
-            if (switchPressed && !lastSwitchState) {
+            // Detect press (falling edge - LOW means switch pressed after inversion)
+            if (!switchReleased && lastSwitchState) {
                 switchPressTime = Date.now();
                 actionIndicator.textContent = 'PRESSED';
 
@@ -457,8 +459,8 @@
                 }, TAP_WINDOW_MS);
             }
 
-            // Detect release (falling edge - LOW means switch released)
-            if (!switchPressed && lastSwitchState) {
+            // Detect release (rising edge - HIGH means switch released after inversion)
+            if (switchReleased && !lastSwitchState) {
                 const pressDuration = Date.now() - switchPressTime;
 
                 // Clear any hold interval
@@ -492,7 +494,7 @@
                 }
             }
 
-            lastSwitchState = switchPressed;
+            lastSwitchState = switchReleased;
         }
 
         // Poll status
