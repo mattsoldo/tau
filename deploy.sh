@@ -82,6 +82,12 @@ cd /opt/tau-daemon
 echo "  Ensuring correct file ownership..."
 chown -R $ACTUAL_USER:$ACTUAL_USER /opt/tau-daemon
 
+# Ensure .env file is readable by tau user (critical for daemon startup)
+if [ -f /opt/tau-daemon/daemon/.env ]; then
+    chmod 644 /opt/tau-daemon/daemon/.env
+    chown $ACTUAL_USER:$ACTUAL_USER /opt/tau-daemon/daemon/.env
+fi
+
 # Ensure git doesn't complain about ownership
 if ! sudo -u $ACTUAL_USER git config --get safe.directory | grep -q "/opt/tau-daemon"; then
     sudo -u $ACTUAL_USER git config --global --add safe.directory /opt/tau-daemon
