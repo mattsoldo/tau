@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     Float,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     UniqueConstraint,
@@ -123,6 +124,17 @@ class Fixture(Base):
     # DMX Configuration
     dmx_channel_start: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     secondary_dmx_channel: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, unique=True)
+
+    # Dim-to-Warm Configuration
+    dtw_ignore: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True, server_default="false"
+    )
+    dtw_min_cct_override: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    dtw_max_cct_override: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

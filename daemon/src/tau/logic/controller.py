@@ -15,6 +15,7 @@ from tau.hardware import HardwareManager
 from tau.logic.circadian import CircadianEngine
 from tau.logic.scenes import SceneEngine
 from tau.logic.switches import SwitchHandler
+from tau.logic.dtw_engine import DTWEngine
 from tau.logic.color_mixing import (
     calculate_led_mix,
     calculate_led_mix_simple,
@@ -63,6 +64,7 @@ class LightingController:
             hardware_manager,
             dim_speed_ms=dim_speed_ms
         )
+        self.dtw = DTWEngine()
 
         # Group to circadian profile mapping {group_id: profile_id}
         self.group_circadian_profiles: Dict[int, int] = {}
@@ -94,6 +96,11 @@ class LightingController:
 
             # Load group-to-circadian-profile mappings
             await self._load_circadian_mappings()
+
+            # Initialize DTW engine
+            await self.dtw.initialize()
+            await self._load_dtw_fixture_configs()
+            logger.info("dtw_engine_initialized", enabled=self.dtw.is_enabled)
 
             logger.info("lighting_controller_ready")
             return True
@@ -142,6 +149,74 @@ class LightingController:
         except Exception as e:
             logger.error(
                 "circadian_mappings_load_failed",
+                error=str(e),
+                exc_info=True,
+            )
+
+    async def _load_dtw_fixture_configs(self) -> None:
+        """Load DTW configuration for all fixtures"""
+        try:
+            async with get_db_session() as session:
+                from sqlalchemy import select
+                from sqlalchemy.orm import selectinload
+                from tau.models.fixtures import Fixture
+                from tau.models.groups import GroupFixture
+
+                # Load all fixtures with their models
+                query = select(Fixture).options(selectinload(Fixture.fixture_model))
+                result = await session.execute(query)
+                fixtures = result.scalars().all()
+
+                for fixture in fixtures:
+                    # Get primary group info (first group the fixture belongs to)
+                    group_query = select(GroupFixture).where(
+                        GroupFixture.fixture_id == fixture.id
+                    ).limit(1)
+                    group_result = await session.execute(group_query)
+                    group_membership = group_result.scalar_one_or_none()
+
+                    group_id = None
+                    group_dtw_ignore = False
+                    group_dtw_min_cct = None
+                    group_dtw_max_cct = None
+
+                    if group_membership:
+                        from tau.models.groups import Group
+                        group_query = select(Group).where(Group.id == group_membership.group_id)
+                        group_result = await session.execute(group_query)
+                        group = group_result.scalar_one_or_none()
+                        if group:
+                            group_id = group.id
+                            group_dtw_ignore = group.dtw_ignore or False
+                            group_dtw_min_cct = group.dtw_min_cct_override
+                            group_dtw_max_cct = group.dtw_max_cct_override
+
+                    # Get default CCT from fixture model
+                    default_cct = None
+                    if fixture.fixture_model:
+                        default_cct = fixture.fixture_model.cct_max_kelvin
+
+                    # Register fixture with DTW engine
+                    self.dtw.register_fixture(
+                        fixture_id=fixture.id,
+                        dtw_ignore=fixture.dtw_ignore or False,
+                        dtw_min_cct_override=fixture.dtw_min_cct_override,
+                        dtw_max_cct_override=fixture.dtw_max_cct_override,
+                        default_cct=default_cct,
+                        group_id=group_id,
+                        group_dtw_ignore=group_dtw_ignore,
+                        group_dtw_min_cct_override=group_dtw_min_cct,
+                        group_dtw_max_cct_override=group_dtw_max_cct
+                    )
+
+                logger.info(
+                    "dtw_fixture_configs_loaded",
+                    fixture_count=len(fixtures)
+                )
+
+        except Exception as e:
+            logger.error(
+                "dtw_fixture_configs_load_failed",
                 error=str(e),
                 exc_info=True,
             )
@@ -204,8 +279,14 @@ class LightingController:
         """
         Calculate final fixture states and send to hardware
 
-        This is where we merge fixture state + group state + circadian
+        This is where we merge fixture state + group state + circadian + DTW
         and output to physical hardware.
+
+        CCT priority (highest to lowest):
+        1. Active CCT override
+        2. Circadian CCT (if circadian is active for fixture's group)
+        3. DTW automatic CCT (if DTW is enabled)
+        4. Fixture default CCT
 
         Uses the Planckian locus color mixing algorithm for tunable white
         fixtures when chromaticity parameters are available. Falls back to
@@ -223,11 +304,22 @@ class LightingController:
             universe = fixture_state.dmx_universe
             start_channel = fixture_state.dmx_channel_start
             secondary_channel = fixture_state.secondary_dmx_channel
+            brightness = effective_state.brightness
+
+            # Determine CCT for tunable white fixtures
+            # Apply DTW if no explicit CCT is set and DTW is enabled
+            cct = effective_state.color_temp
+            if secondary_channel is not None:
+                if cct is None and self.dtw.is_enabled:
+                    # No circadian or manual CCT set - use DTW
+                    dtw_result = self.dtw.calculate_cct(fixture_id, brightness)
+                    cct = dtw_result.cct
+                elif cct is None:
+                    # DTW disabled and no CCT - use fixture model max CCT
+                    cct = fixture_state.cct_max or 4000
 
             # For tunable white fixtures, calculate warm/cool channel values
-            if secondary_channel is not None and effective_state.color_temp is not None:
-                cct = effective_state.color_temp
-                brightness = effective_state.brightness
+            if secondary_channel is not None and cct is not None:
 
                 # Get CCT range from fixture model (with defaults)
                 cct_min = fixture_state.cct_min or 2700
@@ -392,4 +484,5 @@ class LightingController:
             "circadian": self.circadian.get_statistics(),
             "scenes": self.scenes.get_statistics(),
             "switches": self.switches.get_statistics(),
+            "dtw": self.dtw.get_statistics(),
         }
