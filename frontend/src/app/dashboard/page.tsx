@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { filterMergedFixtures } from '@/utils/fixtures';
+import { useWebSocket, FixtureStateChangedEvent, GroupStateChangedEvent } from '@/hooks/useWebSocket';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -148,6 +149,71 @@ export default function DashboardPage() {
   // Request version refs for race condition handling
   const requestVersionRef = useRef<Map<string, number>>(new Map());
   const mountedRef = useRef(true);
+
+  // Track last user interaction time to avoid overwriting optimistic updates
+  const lastUserInteractionRef = useRef<Map<string, number>>(new Map());
+  const USER_INTERACTION_GRACE_MS = 500; // Don't overwrite user changes for 500ms
+
+  // WebSocket integration for real-time updates from switch actions
+  const handleFixtureStateChanged = useCallback((event: FixtureStateChangedEvent) => {
+    const key = `fixture-brightness-${event.fixture_id}`;
+    const lastInteraction = lastUserInteractionRef.current.get(key) || 0;
+    const now = Date.now();
+
+    // Don't overwrite if user just interacted with this fixture
+    if (now - lastInteraction < USER_INTERACTION_GRACE_MS) {
+      return;
+    }
+
+    setFixtureStates(prev => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(event.fixture_id);
+      if (existing) {
+        newMap.set(event.fixture_id, {
+          ...existing,
+          goal_brightness: event.brightness * BRIGHTNESS_SCALE,
+          goal_cct: event.color_temp ?? existing.goal_cct,
+          is_on: event.brightness > 0
+        });
+      }
+      return newMap;
+    });
+  }, []);
+
+  const handleGroupStateChanged = useCallback((event: GroupStateChangedEvent) => {
+    const key = `group-brightness-${event.group_id}`;
+    const lastInteraction = lastUserInteractionRef.current.get(key) || 0;
+    const now = Date.now();
+
+    // Don't overwrite if user just interacted with this group
+    if (now - lastInteraction < USER_INTERACTION_GRACE_MS) {
+      return;
+    }
+
+    // Update all fixtures in the affected group
+    const fixturesInGroup = groupFixtures.get(event.group_id) || [];
+    setFixtureStates(prev => {
+      const newMap = new Map(prev);
+      fixturesInGroup.forEach(fixture => {
+        const existing = newMap.get(fixture.id);
+        if (existing) {
+          newMap.set(fixture.id, {
+            ...existing,
+            goal_brightness: event.brightness * BRIGHTNESS_SCALE,
+            goal_cct: event.color_temp ?? existing.goal_cct,
+            is_on: event.brightness > 0
+          });
+        }
+      });
+      return newMap;
+    });
+  }, [groupFixtures]);
+
+  // Connect to WebSocket for real-time updates
+  useWebSocket({
+    onFixtureStateChanged: handleFixtureStateChanged,
+    onGroupStateChanged: handleGroupStateChanged,
+  });
 
   // Auto-dismiss control errors
   useEffect(() => {
@@ -526,6 +592,9 @@ export default function DashboardPage() {
   const handleFixtureBrightness = useCallback((fixtureId: number, brightness: number) => {
     const key = `fixture-brightness-${fixtureId}`;
 
+    // Track user interaction to prevent WebSocket from overwriting
+    lastUserInteractionRef.current.set(key, Date.now());
+
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
     requestVersionRef.current.set(key, currentVersion);
@@ -573,6 +642,11 @@ export default function DashboardPage() {
   // Control fixture CCT (debounced with race condition handling)
   const handleFixtureCCT = useCallback((fixtureId: number, cct: number) => {
     const key = `fixture-cct-${fixtureId}`;
+    const brightnessKey = `fixture-brightness-${fixtureId}`;
+
+    // Track user interaction to prevent WebSocket from overwriting
+    lastUserInteractionRef.current.set(key, Date.now());
+    lastUserInteractionRef.current.set(brightnessKey, Date.now());
 
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
@@ -621,6 +695,9 @@ export default function DashboardPage() {
   // Control group brightness (debounced with optimistic update and race condition handling)
   const handleGroupBrightness = useCallback((groupId: number, brightness: number) => {
     const key = `group-brightness-${groupId}`;
+
+    // Track user interaction to prevent WebSocket from overwriting
+    lastUserInteractionRef.current.set(key, Date.now());
 
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
@@ -672,6 +749,11 @@ export default function DashboardPage() {
   // Control group CCT (debounced with optimistic update and race condition handling)
   const handleGroupCCT = useCallback((groupId: number, cct: number) => {
     const key = `group-cct-${groupId}`;
+    const brightnessKey = `group-brightness-${groupId}`;
+
+    // Track user interaction to prevent WebSocket from overwriting
+    lastUserInteractionRef.current.set(key, Date.now());
+    lastUserInteractionRef.current.set(brightnessKey, Date.now());
 
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { filterMergedFixtures } from '@/utils/fixtures';
+import { useWebSocket, FixtureStateChangedEvent, GroupStateChangedEvent } from '@/hooks/useWebSocket';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -119,6 +120,72 @@ export default function LightTestPage() {
   const groupDebounceTimers = useRef<Map<number, NodeJS.Timeout>>(new Map());
   const userGoalState = useRef<Map<number, { brightness: number; cct: number; timestamp: number }>>(new Map());
   const userGroupGoalState = useRef<Map<number, { brightness?: number; cct?: number; timestamp: number }>>(new Map());
+
+  // Track last user interaction time to avoid overwriting optimistic updates
+  const lastUserInteractionRef = useRef<Map<string, number>>(new Map());
+  const USER_INTERACTION_GRACE_MS = 500;
+
+  // WebSocket integration for real-time updates from switch actions
+  const handleFixtureStateChanged = useCallback((event: FixtureStateChangedEvent) => {
+    const key = `fixture-${event.fixture_id}`;
+    const lastInteraction = lastUserInteractionRef.current.get(key) || 0;
+    const now = Date.now();
+
+    // Don't overwrite if user just interacted with this fixture
+    if (now - lastInteraction < USER_INTERACTION_GRACE_MS) {
+      return;
+    }
+
+    setGroupsWithFixtures(prev => prev.map(group => ({
+      ...group,
+      fixtures: group.fixtures.map(f => {
+        if (f.id !== event.fixture_id) return f;
+        return {
+          ...f,
+          state: f.state ? {
+            ...f.state,
+            goal_brightness: event.brightness * 1000,
+            goal_cct: event.color_temp ?? f.state.goal_cct,
+            is_on: event.brightness > 0,
+          } : undefined,
+        };
+      }),
+    })));
+  }, []);
+
+  const handleGroupStateChanged = useCallback((event: GroupStateChangedEvent) => {
+    const key = `group-${event.group_id}`;
+    const lastInteraction = lastUserInteractionRef.current.get(key) || 0;
+    const now = Date.now();
+
+    // Don't overwrite if user just interacted with this group
+    if (now - lastInteraction < USER_INTERACTION_GRACE_MS) {
+      return;
+    }
+
+    // Update all fixtures in the affected group
+    setGroupsWithFixtures(prev => prev.map(group => {
+      if (group.id !== event.group_id) return group;
+      return {
+        ...group,
+        fixtures: group.fixtures.map(f => ({
+          ...f,
+          state: f.state ? {
+            ...f.state,
+            goal_brightness: event.brightness * 1000,
+            goal_cct: event.color_temp ?? f.state.goal_cct,
+            is_on: event.brightness > 0,
+          } : undefined,
+        })),
+      };
+    }));
+  }, []);
+
+  // Connect to WebSocket for real-time updates
+  useWebSocket({
+    onFixtureStateChanged: handleFixtureStateChanged,
+    onGroupStateChanged: handleGroupStateChanged,
+  });
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -267,6 +334,9 @@ export default function LightTestPage() {
 
   // Send group brightness control command
   const sendGroupControl = useCallback(async (groupId: number, brightness: number) => {
+    // Track user interaction to prevent WebSocket from overwriting
+    lastUserInteractionRef.current.set(`group-${groupId}`, Date.now());
+
     const existingTimer = groupDebounceTimers.current.get(groupId);
     if (existingTimer) clearTimeout(existingTimer);
 
@@ -298,6 +368,9 @@ export default function LightTestPage() {
 
   // Send group CCT control command
   const sendGroupCctControl = useCallback(async (groupId: number, colorTemp: number) => {
+    // Track user interaction to prevent WebSocket from overwriting
+    lastUserInteractionRef.current.set(`group-${groupId}`, Date.now());
+
     const timerKey = groupId + 10000; // Offset to avoid collisions with brightness timers
     const existingTimer = groupDebounceTimers.current.get(timerKey);
     if (existingTimer) clearTimeout(existingTimer);
@@ -330,6 +403,9 @@ export default function LightTestPage() {
 
   // Update fixture state locally
   const updateFixtureState = useCallback((fixtureId: number, brightness?: number, cct?: number) => {
+    // Track user interaction to prevent WebSocket from overwriting
+    lastUserInteractionRef.current.set(`fixture-${fixtureId}`, Date.now());
+
     const existing = userGoalState.current.get(fixtureId);
     userGoalState.current.set(fixtureId, {
       brightness: brightness ?? (existing?.brightness ?? 0),
