@@ -540,7 +540,38 @@ The system will:
 - Restart both services automatically
 - Refresh the web interface when complete
 
-**Manual Update (if web interface unavailable):**
+**Recommended: Deployment Script (CLI)**
+
+The robust deployment script handles all update and restart operations safely:
+
+```bash
+# Navigate to tau directory
+cd /opt/tau-daemon
+
+# Run deployment script (interactive - asks before rebuilding if up to date)
+sudo ./deploy.sh
+
+# Or force rebuild without asking
+sudo ./deploy.sh --force
+```
+
+The deployment script will:
+1. **Stop existing processes** - Kills any running dev servers or orphaned Node.js processes
+2. **Check for updates** - Fetches from git and shows what changed
+3. **Apply updates** - Pulls latest code and shows current commit
+4. **Update backend** - Installs Python dependencies and runs database migrations
+5. **Build frontend** - Cleans cache, installs dependencies, builds static export
+6. **Restart services** - Restarts tau-daemon and reloads nginx
+7. **Verify deployment** - Tests that backend and frontend are responding correctly
+
+The script handles all edge cases including:
+- Port conflicts from dev servers
+- Git permission issues
+- Stale Next.js build caches
+- Database migration failures
+- Service restart failures
+
+**Manual Update (if deployment script unavailable):**
 
 ```bash
 # Pull latest code
