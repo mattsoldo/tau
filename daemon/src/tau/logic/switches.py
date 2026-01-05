@@ -319,7 +319,7 @@ class SwitchHandler:
 
                 # Also set CCT if group has a default
                 if cct is not None:
-                    self.state_manager.set_group_cct(
+                    self.state_manager.set_group_color_temp(
                         switch.target_group_id,
                         cct,
                         transition_duration=0.5,
@@ -584,7 +584,7 @@ class SwitchHandler:
 
                     # Also set CCT if group has a default
                     if cct is not None:
-                        self.state_manager.set_group_cct(
+                        self.state_manager.set_group_color_temp(
                             switch.target_group_id,
                             cct,
                             timestamp=current_time
