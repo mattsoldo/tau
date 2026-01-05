@@ -28,41 +28,59 @@ async def get_system_setting(
     Returns:
         The setting value as a string, or default_value if not found
     """
-    close_session = False
+    # If no session provided, create our own
     if session is None:
-        close_session = True
         async for sess in get_session():
-            session = sess
-            break
+            try:
+                result = await sess.execute(
+                    select(SystemSetting).where(SystemSetting.key == key)
+                )
+                setting = result.scalar_one_or_none()
 
-    try:
-        result = await session.execute(
-            select(SystemSetting).where(SystemSetting.key == key)
-        )
-        setting = result.scalar_one_or_none()
+                if setting is None:
+                    logger.warning(
+                        "system_setting_not_found",
+                        key=key,
+                        using_default=default_value
+                    )
+                    return default_value
 
-        if setting is None:
-            logger.warning(
-                "system_setting_not_found",
+                return setting.value
+
+            except Exception as e:
+                logger.error(
+                    "system_setting_fetch_error",
+                    key=key,
+                    error=str(e),
+                    using_default=default_value
+                )
+                return default_value
+    else:
+        # Use provided session
+        try:
+            result = await session.execute(
+                select(SystemSetting).where(SystemSetting.key == key)
+            )
+            setting = result.scalar_one_or_none()
+
+            if setting is None:
+                logger.warning(
+                    "system_setting_not_found",
+                    key=key,
+                    using_default=default_value
+                )
+                return default_value
+
+            return setting.value
+
+        except Exception as e:
+            logger.error(
+                "system_setting_fetch_error",
                 key=key,
+                error=str(e),
                 using_default=default_value
             )
             return default_value
-
-        return setting.value
-
-    except Exception as e:
-        logger.error(
-            "system_setting_fetch_error",
-            key=key,
-            error=str(e),
-            using_default=default_value
-        )
-        return default_value
-
-    finally:
-        if close_session and session:
-            await session.close()
 
 
 async def get_system_setting_typed(
@@ -83,53 +101,83 @@ async def get_system_setting_typed(
     Returns:
         The setting value converted to the appropriate type, or default_value if not found
     """
-    close_session = False
+    # If no session provided, create our own
     if session is None:
-        close_session = True
         async for sess in get_session():
-            session = sess
-            break
+            try:
+                result = await sess.execute(
+                    select(SystemSetting).where(SystemSetting.key == key)
+                )
+                setting = result.scalar_one_or_none()
 
-    try:
-        result = await session.execute(
-            select(SystemSetting).where(SystemSetting.key == key)
-        )
-        setting = result.scalar_one_or_none()
+                if setting is None:
+                    logger.warning(
+                        "system_setting_not_found",
+                        key=key,
+                        using_default=default_value
+                    )
+                    return default_value
 
-        if setting is None:
-            logger.warning(
-                "system_setting_not_found",
-                key=key,
-                using_default=default_value
-            )
-            return default_value
+                # Convert to the appropriate type
+                try:
+                    return setting.get_typed_value()
+                except (ValueError, TypeError) as e:
+                    logger.error(
+                        "system_setting_conversion_error",
+                        key=key,
+                        value=setting.value,
+                        target_type=value_type,
+                        error=str(e),
+                        using_default=default_value
+                    )
+                    return default_value
 
-        # Convert to the appropriate type
+            except Exception as e:
+                logger.error(
+                    "system_setting_fetch_error",
+                    key=key,
+                    error=str(e),
+                    using_default=default_value
+                )
+                return default_value
+    else:
+        # Use provided session
         try:
-            return setting.get_typed_value()
-        except (ValueError, TypeError) as e:
+            result = await session.execute(
+                select(SystemSetting).where(SystemSetting.key == key)
+            )
+            setting = result.scalar_one_or_none()
+
+            if setting is None:
+                logger.warning(
+                    "system_setting_not_found",
+                    key=key,
+                    using_default=default_value
+                )
+                return default_value
+
+            # Convert to the appropriate type
+            try:
+                return setting.get_typed_value()
+            except (ValueError, TypeError) as e:
+                logger.error(
+                    "system_setting_conversion_error",
+                    key=key,
+                    value=setting.value,
+                    target_type=value_type,
+                    error=str(e),
+                    using_default=default_value
+                )
+                return default_value
+
+        except Exception as e:
             logger.error(
-                "system_setting_conversion_error",
+                "system_setting_fetch_error",
                 key=key,
-                value=setting.value,
-                target_type=value_type,
                 error=str(e),
                 using_default=default_value
             )
             return default_value
-
-    except Exception as e:
-        logger.error(
-            "system_setting_fetch_error",
-            key=key,
-            error=str(e),
-            using_default=default_value
-        )
-        return default_value
-
-    finally:
-        if close_session and session:
-            await session.close()
 
 
 async def set_system_setting(
@@ -148,47 +196,72 @@ async def set_system_setting(
     Returns:
         True if successful, False otherwise
     """
-    close_session = False
+    # If no session provided, create our own
     if session is None:
-        close_session = True
         async for sess in get_session():
-            session = sess
-            break
+            try:
+                result = await sess.execute(
+                    select(SystemSetting).where(SystemSetting.key == key)
+                )
+                setting = result.scalar_one_or_none()
 
-    try:
-        result = await session.execute(
-            select(SystemSetting).where(SystemSetting.key == key)
-        )
-        setting = result.scalar_one_or_none()
+                if setting is None:
+                    logger.error(
+                        "system_setting_update_failed",
+                        key=key,
+                        reason="Setting not found"
+                    )
+                    return False
 
-        if setting is None:
-            logger.error(
-                "system_setting_update_failed",
-                key=key,
-                reason="Setting not found"
+                setting.value = value
+                await sess.commit()
+
+                logger.info(
+                    "system_setting_updated",
+                    key=key,
+                    new_value=value
+                )
+                return True
+
+            except Exception as e:
+                logger.error(
+                    "system_setting_update_error",
+                    key=key,
+                    error=str(e)
+                )
+                await sess.rollback()
+                return False
+    else:
+        # Use provided session
+        try:
+            result = await session.execute(
+                select(SystemSetting).where(SystemSetting.key == key)
             )
-            return False
+            setting = result.scalar_one_or_none()
 
-        setting.value = value
-        await session.commit()
+            if setting is None:
+                logger.error(
+                    "system_setting_update_failed",
+                    key=key,
+                    reason="Setting not found"
+                )
+                return False
 
-        logger.info(
-            "system_setting_updated",
-            key=key,
-            new_value=value
-        )
-        return True
+            setting.value = value
+            await session.commit()
 
-    except Exception as e:
-        logger.error(
-            "system_setting_update_error",
-            key=key,
-            error=str(e)
-        )
-        if session:
+            logger.info(
+                "system_setting_updated",
+                key=key,
+                new_value=value
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "system_setting_update_error",
+                key=key,
+                error=str(e)
+            )
             await session.rollback()
-        return False
-
-    finally:
-        if close_session and session:
-            await session.close()
+            return False
