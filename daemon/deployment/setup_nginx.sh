@@ -51,7 +51,7 @@ mkdir -p /var/log/nginx
 # Copy nginx configuration
 echo
 echo "📋 Installing nginx configuration..."
-cp /opt/tau-daemon/deployment/tau-nginx.conf /etc/nginx/sites-available/tau
+cp /opt/tau-daemon/daemon/deployment/tau-nginx.conf /etc/nginx/sites-available/tau
 
 # Remove default nginx site if it exists
 if [ -L /etc/nginx/sites-enabled/default ]; then
