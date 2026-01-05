@@ -130,6 +130,15 @@ export default function DashboardPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [editingBrightness, setEditingBrightness] = useState<{ type: 'fixture' | 'group'; id: number } | null>(null);
   const [brightnessInputValue, setBrightnessInputValue] = useState('');
+  const [controlError, setControlError] = useState<string | null>(null);
+
+  // Auto-dismiss control errors after 3 seconds
+  useEffect(() => {
+    if (controlError) {
+      const timeout = setTimeout(() => setControlError(null), 3000);
+      return () => clearTimeout(timeout);
+    }
+  }, [controlError]);
 
   // Light simulator state for each FIO channel
   const [lightStates, setLightStates] = useState<LightState[]>(
@@ -442,11 +451,14 @@ export default function DashboardPage() {
     const state = fixtureStates.get(fixtureId);
     const newBrightness = state?.is_on ? 0.0 : 1.0;
     try {
-      await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+      const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brightness: newBrightness }),
       });
+      if (!response.ok) {
+        throw new Error(`Failed to toggle fixture: ${response.statusText}`);
+      }
       // Optimistic update
       setFixtureStates(prev => {
         const newMap = new Map(prev);
@@ -456,19 +468,23 @@ export default function DashboardPage() {
         }
         return newMap;
       });
-    } catch {
-      // Ignore errors
+    } catch (err) {
+      const fixtureName = getFixtureName(fixtureId);
+      setControlError(`Failed to toggle ${fixtureName}`);
     }
   };
 
   // Control fixture brightness
   const handleFixtureBrightness = async (fixtureId: number, brightness: number) => {
     try {
-      await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+      const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brightness }),
       });
+      if (!response.ok) {
+        throw new Error(`Failed to set brightness: ${response.statusText}`);
+      }
       setFixtureStates(prev => {
         const newMap = new Map(prev);
         const existing = newMap.get(fixtureId);
@@ -477,19 +493,23 @@ export default function DashboardPage() {
         }
         return newMap;
       });
-    } catch {
-      // Ignore errors
+    } catch (err) {
+      const fixtureName = getFixtureName(fixtureId);
+      setControlError(`Failed to set brightness for ${fixtureName}`);
     }
   };
 
   // Control fixture CCT
   const handleFixtureCCT = async (fixtureId: number, cct: number) => {
     try {
-      await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+      const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ color_temp: cct }),
       });
+      if (!response.ok) {
+        throw new Error(`Failed to set CCT: ${response.statusText}`);
+      }
       setFixtureStates(prev => {
         const newMap = new Map(prev);
         const existing = newMap.get(fixtureId);
@@ -498,47 +518,60 @@ export default function DashboardPage() {
         }
         return newMap;
       });
-    } catch {
-      // Ignore errors
+    } catch (err) {
+      const fixtureName = getFixtureName(fixtureId);
+      setControlError(`Failed to set color temperature for ${fixtureName}`);
     }
   };
 
   // Control group brightness
   const handleGroupBrightness = async (groupId: number, brightness: number) => {
     try {
-      await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+      const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brightness }),
       });
-    } catch {
-      // Ignore errors
+      if (!response.ok) {
+        throw new Error(`Failed to set group brightness: ${response.statusText}`);
+      }
+    } catch (err) {
+      const group = groups.find(g => g.id === groupId);
+      setControlError(`Failed to set brightness for ${group?.name || 'group'}`);
     }
   };
 
   // Control group CCT
   const handleGroupCCT = async (groupId: number, cct: number) => {
     try {
-      await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+      const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ color_temp: cct }),
       });
-    } catch {
-      // Ignore errors
+      if (!response.ok) {
+        throw new Error(`Failed to set group CCT: ${response.statusText}`);
+      }
+    } catch (err) {
+      const group = groups.find(g => g.id === groupId);
+      setControlError(`Failed to set color temperature for ${group?.name || 'group'}`);
     }
   };
 
   // Toggle group on/off
   const handleGroupToggle = async (groupId: number, turnOn: boolean) => {
     try {
-      await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+      const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brightness: turnOn ? 1.0 : 0.0 }),
       });
-    } catch {
-      // Ignore errors
+      if (!response.ok) {
+        throw new Error(`Failed to toggle group: ${response.statusText}`);
+      }
+    } catch (err) {
+      const group = groups.find(g => g.id === groupId);
+      setControlError(`Failed to toggle ${group?.name || 'group'}`);
     }
   };
 
@@ -904,6 +937,27 @@ export default function DashboardPage() {
                 </span>
               </div>
             </div>
+
+            {/* Control Error Toast */}
+            {controlError && (
+              <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2">
+                <svg className="w-4 h-4 stroke-red-400 flex-shrink-0" fill="none" strokeWidth="2" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span className="text-[12px] text-red-400 flex-1">{controlError}</span>
+                <button
+                  onClick={() => setControlError(null)}
+                  className="p-1 hover:bg-red-500/20 rounded transition-colors"
+                >
+                  <svg className="w-3 h-3 stroke-red-400" fill="none" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
             <div className="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
               {/* Groups Section */}
               {groups
