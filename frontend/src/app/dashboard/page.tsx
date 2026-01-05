@@ -1,11 +1,6 @@
 'use client';
 
-<<<<<<< claude/fix-lighting-control-display-xaJsH
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import Link from 'next/link';
-=======
-import { useEffect, useState, useRef } from 'react';
->>>>>>> main
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
