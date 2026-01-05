@@ -60,6 +60,17 @@ class Group(Base):
         Integer, nullable=True
     )
 
+    # Dim-to-Warm Configuration
+    dtw_ignore: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True, server_default="false"
+    )
+    dtw_min_cct_override: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    dtw_max_cct_override: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,
