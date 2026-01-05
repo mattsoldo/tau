@@ -8,6 +8,7 @@ const API_URL = ''; // Use relative paths for nginx proxy
 // Timing constants (PRD Section 10.1-10.2)
 const TAP_WINDOW_MS = 500;
 const RAMP_INTERVAL_MS = 50;
+const SLIDER_DEBOUNCE_MS = 150; // Debounce slider API calls
 const RAMP_STEP = 2;
 const SCENE_1_BRIGHTNESS = 75;
 const SCENE_2_BRIGHTNESS = 25;
@@ -154,6 +155,9 @@ export default function DashboardPage() {
     tapTimeout: Array(8).fill(null) as (ReturnType<typeof setTimeout> | null)[],
     rampDirection: Array(8).fill(1) as number[],
   });
+
+  // Refs for debouncing slider API calls
+  const sliderDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   // Get current light state for a channel (for use in callbacks)
   const lightStatesRef = useRef(lightStates);
@@ -474,102 +478,175 @@ export default function DashboardPage() {
     }
   };
 
-  // Control fixture brightness
-  const handleFixtureBrightness = async (fixtureId: number, brightness: number) => {
-    try {
-      const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brightness }),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to set brightness: ${response.statusText}`);
+  // Control fixture brightness (debounced)
+  const handleFixtureBrightness = (fixtureId: number, brightness: number) => {
+    // Optimistic UI update immediately
+    setFixtureStates(prev => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(fixtureId);
+      if (existing) {
+        newMap.set(fixtureId, { ...existing, goal_brightness: brightness * 1000, is_on: brightness > 0 });
       }
-      setFixtureStates(prev => {
-        const newMap = new Map(prev);
-        const existing = newMap.get(fixtureId);
-        if (existing) {
-          newMap.set(fixtureId, { ...existing, goal_brightness: brightness * 1000, is_on: brightness > 0 });
+      return newMap;
+    });
+
+    // Debounce API call
+    const key = `fixture-brightness-${fixtureId}`;
+    const existing = sliderDebounceRef.current.get(key);
+    if (existing) clearTimeout(existing);
+
+    sliderDebounceRef.current.set(key, setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brightness }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to set brightness: ${response.statusText}`);
         }
-        return newMap;
-      });
-    } catch (err) {
-      const fixtureName = getFixtureName(fixtureId);
-      setControlError(`Failed to set brightness for ${fixtureName}`);
-    }
+      } catch {
+        const fixtureName = getFixtureName(fixtureId);
+        setControlError(`Failed to set brightness for ${fixtureName}`);
+      }
+    }, SLIDER_DEBOUNCE_MS));
   };
 
-  // Control fixture CCT
-  const handleFixtureCCT = async (fixtureId: number, cct: number) => {
-    try {
-      const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ color_temp: cct }),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to set CCT: ${response.statusText}`);
+  // Control fixture CCT (debounced)
+  const handleFixtureCCT = (fixtureId: number, cct: number) => {
+    // Optimistic UI update immediately
+    setFixtureStates(prev => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(fixtureId);
+      if (existing) {
+        newMap.set(fixtureId, { ...existing, goal_cct: cct });
       }
-      setFixtureStates(prev => {
-        const newMap = new Map(prev);
-        const existing = newMap.get(fixtureId);
-        if (existing) {
-          newMap.set(fixtureId, { ...existing, goal_cct: cct });
+      return newMap;
+    });
+
+    // Debounce API call
+    const key = `fixture-cct-${fixtureId}`;
+    const existingTimeout = sliderDebounceRef.current.get(key);
+    if (existingTimeout) clearTimeout(existingTimeout);
+
+    sliderDebounceRef.current.set(key, setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ color_temp: cct }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to set CCT: ${response.statusText}`);
         }
-        return newMap;
-      });
-    } catch (err) {
-      const fixtureName = getFixtureName(fixtureId);
-      setControlError(`Failed to set color temperature for ${fixtureName}`);
-    }
-  };
-
-  // Control group brightness
-  const handleGroupBrightness = async (groupId: number, brightness: number) => {
-    try {
-      const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brightness }),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to set group brightness: ${response.statusText}`);
+      } catch {
+        const fixtureName = getFixtureName(fixtureId);
+        setControlError(`Failed to set color temperature for ${fixtureName}`);
       }
-    } catch (err) {
-      const group = groups.find(g => g.id === groupId);
-      setControlError(`Failed to set brightness for ${group?.name || 'group'}`);
-    }
+    }, SLIDER_DEBOUNCE_MS));
   };
 
-  // Control group CCT
-  const handleGroupCCT = async (groupId: number, cct: number) => {
-    try {
-      const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ color_temp: cct }),
+  // Control group brightness (debounced with optimistic update)
+  const handleGroupBrightness = (groupId: number, brightness: number) => {
+    // Optimistic UI update for all fixtures in group
+    const fixturesInGroup = groupFixtures.get(groupId) || [];
+    setFixtureStates(prev => {
+      const newMap = new Map(prev);
+      fixturesInGroup.forEach(fixture => {
+        const existing = newMap.get(fixture.id);
+        if (existing) {
+          newMap.set(fixture.id, { ...existing, goal_brightness: brightness * 1000, is_on: brightness > 0 });
+        }
       });
-      if (!response.ok) {
-        throw new Error(`Failed to set group CCT: ${response.statusText}`);
+      return newMap;
+    });
+
+    // Debounce API call
+    const key = `group-brightness-${groupId}`;
+    const existingTimeout = sliderDebounceRef.current.get(key);
+    if (existingTimeout) clearTimeout(existingTimeout);
+
+    sliderDebounceRef.current.set(key, setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ brightness }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to set group brightness: ${response.statusText}`);
+        }
+      } catch {
+        const group = groups.find(g => g.id === groupId);
+        setControlError(`Failed to set brightness for ${group?.name || 'group'}`);
       }
-    } catch (err) {
-      const group = groups.find(g => g.id === groupId);
-      setControlError(`Failed to set color temperature for ${group?.name || 'group'}`);
-    }
+    }, SLIDER_DEBOUNCE_MS));
   };
 
-  // Toggle group on/off
+  // Control group CCT (debounced with optimistic update)
+  const handleGroupCCT = (groupId: number, cct: number) => {
+    // Optimistic UI update for all fixtures in group
+    const fixturesInGroup = groupFixtures.get(groupId) || [];
+    setFixtureStates(prev => {
+      const newMap = new Map(prev);
+      fixturesInGroup.forEach(fixture => {
+        const existing = newMap.get(fixture.id);
+        if (existing) {
+          newMap.set(fixture.id, { ...existing, goal_cct: cct });
+        }
+      });
+      return newMap;
+    });
+
+    // Debounce API call
+    const key = `group-cct-${groupId}`;
+    const existingTimeout = sliderDebounceRef.current.get(key);
+    if (existingTimeout) clearTimeout(existingTimeout);
+
+    sliderDebounceRef.current.set(key, setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ color_temp: cct }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to set group CCT: ${response.statusText}`);
+        }
+      } catch {
+        const group = groups.find(g => g.id === groupId);
+        setControlError(`Failed to set color temperature for ${group?.name || 'group'}`);
+      }
+    }, SLIDER_DEBOUNCE_MS));
+  };
+
+  // Toggle group on/off (with optimistic update)
   const handleGroupToggle = async (groupId: number, turnOn: boolean) => {
+    const newBrightness = turnOn ? 1.0 : 0.0;
+
+    // Optimistic UI update for all fixtures in group
+    const fixturesInGroup = groupFixtures.get(groupId) || [];
+    setFixtureStates(prev => {
+      const newMap = new Map(prev);
+      fixturesInGroup.forEach(fixture => {
+        const existing = newMap.get(fixture.id);
+        if (existing) {
+          newMap.set(fixture.id, { ...existing, goal_brightness: newBrightness * 1000, is_on: turnOn });
+        }
+      });
+      return newMap;
+    });
+
     try {
       const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brightness: turnOn ? 1.0 : 0.0 }),
+        body: JSON.stringify({ brightness: newBrightness }),
       });
       if (!response.ok) {
         throw new Error(`Failed to toggle group: ${response.statusText}`);
       }
-    } catch (err) {
+    } catch {
       const group = groups.find(g => g.id === groupId);
       setControlError(`Failed to toggle ${group?.name || 'group'}`);
     }
