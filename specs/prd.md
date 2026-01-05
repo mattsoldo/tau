@@ -53,18 +53,24 @@ All fixtures inherit behavior exclusively from their fixture model.
 
 ### 3.2 USB-to-DMX Adapter
 
-- The system must detect presence of the DMX adapter.
-- If disconnected:
-  - A blocking alert is shown
-  - The system waits and retries until reconnection
+- The system automatically detects the presence of the DMX adapter.
+- The system starts successfully even if the adapter is not connected.
+- If disconnected or not present at startup:
+  - A non-blocking warning is shown
+  - Software-based control remains fully available
+  - The system automatically polls for reconnection every 10 seconds
+  - When the adapter is reconnected, DMX output resumes automatically
 
-### 3.3 LabJack U3-UV
+### 3.3 LabJack U3-HV
 
 - The system supports an arbitrary number of inputs.
-- If the LabJack disconnects:
-  - The system alerts the user
-  - Software-based control remains available
-  - The system polls for reconnection
+- The system starts successfully even if the LabJack is not connected.
+- If the LabJack disconnects or is not present at startup:
+  - A non-blocking warning is shown
+  - Software-based control remains fully available
+  - The system automatically polls for reconnection every 10 seconds
+  - When the LabJack is reconnected, physical switch control resumes automatically
+- Note: Requires LabJack Exodriver library installation and proper USB permissions
 
 ---
 

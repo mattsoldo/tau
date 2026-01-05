@@ -84,16 +84,22 @@ Out of scope (v1)
 
 4.2 LabJack U3-HV
 	•	Daemon reads configured pins (analog and/or digital) for each switch instance.
-	•	On disconnect:
+	•	LabJack connection is optional - daemon starts successfully even if not connected.
+	•	On disconnect or initial startup without hardware:
 	•	Surface alert
 	•	Continue software control via API
-	•	Poll for reconnect
+	•	Automatically poll for (re)connect every 10 seconds via health check loop
+	•	When device is connected, automatically initialize and resume hardware control
+	•	Note: Requires LabJack Exodriver library and tau user in 'adm' group for USB access
 
 4.3 USB-to-DMX adapter
 	•	Treated as an OLA dependency.
-	•	If missing:
+	•	OLA connection is optional - daemon starts successfully even if not connected.
+	•	If missing or on initial startup without hardware:
 	•	Surface alert instructing user to reconnect
 	•	Continue accepting software commands and updating state
+	•	Automatically poll for (re)connect every 10 seconds via health check loop
+	•	When OLA/ENTTEC device is connected, automatically initialize and resume DMX output
 
 ⸻
 
