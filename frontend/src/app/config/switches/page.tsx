@@ -560,8 +560,8 @@ export default function SwitchesPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col gap-1">
+                    <td className="px-6 py-4 align-middle">
+                      <div className="flex flex-col gap-1 min-h-[40px] justify-center">
                         <div className="flex gap-2">
                           {sw.labjack_digital_pin !== null && (
                             <span className="px-2 py-0.5 text-xs bg-blue-500/10 text-blue-400 rounded font-mono">
@@ -578,11 +578,19 @@ export default function SwitchesPage() {
                           )}
                         </div>
                         <div className="flex gap-1 items-center">
-                          <span className="text-xs text-[#636366]">
+                          <span
+                            className="text-xs text-[#636366] cursor-help"
+                            title={(!sw.switch_type || sw.switch_type === 'normally-closed')
+                              ? 'Normally Closed: Circuit is closed when switch is not pressed'
+                              : 'Normally Open: Circuit is open when switch is not pressed'}
+                          >
                             {(!sw.switch_type || sw.switch_type === 'normally-closed') ? 'NC' : 'NO'}
                           </span>
                           {sw.invert_reading && (
-                            <span className="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-400 rounded">
+                            <span
+                              className="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-400 rounded cursor-help"
+                              title="Invert Logic: Switch reading is flipped in software"
+                            >
                               INV
                             </span>
                           )}
