@@ -1,0 +1,32 @@
+# Tau Lighting Control - Custom Raspberry Pi Image Configuration
+# https://github.com/RPi-Distro/pi-gen
+
+# Image name prefix
+IMG_NAME="tau-lighting"
+
+# Target architecture (arm64 for Pi 4/5, armhf for older Pis)
+TARGET_HOSTNAME="tau-controller"
+
+# Default locale
+LOCALE_DEFAULT="en_US.UTF-8"
+KEYBOARD_KEYMAP="us"
+KEYBOARD_LAYOUT="English (US)"
+TIMEZONE_DEFAULT="America/New_York"
+
+# Enable SSH by default
+ENABLE_SSH=1
+
+# Skip stages we don't need for a headless controller
+# We use stage0 (bootstrap), stage1 (minimal), stage2 (lite), then our custom stages
+STAGE_LIST="stage0 stage1 stage2 stage3-tau stage4-tau"
+
+# Create lite image (no desktop environment)
+DEPLOY_COMPRESSION="xz"
+
+# First boot behavior - expand filesystem
+FIRST_USER_NAME="tau"
+FIRST_USER_PASS="tau-lighting"
+WPA_COUNTRY="US"
+
+# Disable interactive first boot
+DISABLE_FIRST_BOOT_USER_RENAME=1

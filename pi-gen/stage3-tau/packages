@@ -1,0 +1,23 @@
+# System dependencies for Tau Lighting Control
+postgresql
+postgresql-contrib
+python3
+python3-venv
+python3-pip
+python3-dev
+gcc
+g++
+make
+libusb-1.0-0-dev
+libudev-dev
+git
+curl
+wget
+ola
+ola-python
+
+# Network and system utilities
+avahi-daemon
+libnss-mdns
+htop
+vim-tiny
