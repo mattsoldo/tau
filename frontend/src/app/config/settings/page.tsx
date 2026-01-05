@@ -37,6 +37,26 @@ interface SystemSetting {
   value_type: string;
 }
 
+interface DTWSettings {
+  enabled: boolean;
+  min_cct: number;
+  max_cct: number;
+  min_brightness: number;
+  curve: string;
+  override_timeout: number;
+}
+
+interface DTWExampleValue {
+  brightness: number;
+  cct: number;
+}
+
+interface DTWCurveInfo {
+  available_curves: string[];
+  current_curve: string;
+  example_values: DTWExampleValue[];
+}
+
 export default function SettingsPage() {
   // State
   const [hardware, setHardware] = useState<HardwareAvailability | null>(null);
@@ -47,13 +67,20 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // DTW State
+  const [dtwSettings, setDtwSettings] = useState<DTWSettings | null>(null);
+  const [dtwCurveInfo, setDtwCurveInfo] = useState<DTWCurveInfo | null>(null);
+  const [dtwSaving, setDtwSaving] = useState(false);
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
-      const [hardwareRes, statusRes, settingsRes] = await Promise.all([
+      const [hardwareRes, statusRes, settingsRes, dtwRes, dtwCurvesRes] = await Promise.all([
         fetch(`${API_URL}/api/config/hardware-availability`),
         fetch(`${API_URL}/status`),
         fetch(`${API_URL}/api/config/settings`),
+        fetch(`${API_URL}/api/dtw/settings`),
+        fetch(`${API_URL}/api/dtw/curves`),
       ]);
 
       if (!hardwareRes.ok) throw new Error('Failed to fetch hardware availability');
@@ -69,6 +96,17 @@ export default function SettingsPage() {
       setHardware(hardwareData);
       setStatus(statusData);
       setSettings(settingsData);
+
+      // DTW settings (optional - don't fail if not available)
+      if (dtwRes.ok) {
+        const dtwData = await dtwRes.json();
+        setDtwSettings(dtwData);
+      }
+      if (dtwCurvesRes.ok) {
+        const dtwCurvesData = await dtwCurvesRes.json();
+        setDtwCurveInfo(dtwCurvesData);
+      }
+
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -132,6 +170,32 @@ export default function SettingsPage() {
   const handleCancelEdit = () => {
     setEditingKey(null);
     setEditValue('');
+  };
+
+  // Update DTW settings
+  const handleUpdateDTW = async (updates: Partial<DTWSettings>) => {
+    setDtwSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/dtw/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updates),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || 'Failed to update DTW settings');
+      }
+
+      // Refresh data
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update DTW settings');
+    } finally {
+      setDtwSaving(false);
+    }
   };
 
   // Format value for display
@@ -208,6 +272,156 @@ export default function SettingsPage() {
               <SwitchConfigPanel />
             </div>
           </div>
+
+          {/* Dim-to-Warm Settings Section */}
+          {dtwSettings && (
+            <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">
+              <div className="px-6 py-4 border-b border-[#2a2a2f]">
+                <h2 className="text-lg font-semibold">Dim-to-Warm</h2>
+                <p className="text-sm text-[#636366] mt-1">
+                  Automatic color temperature adjustment based on brightness for natural dimming
+                </p>
+              </div>
+              <div className="p-6 space-y-6">
+                {/* Enable/Disable Toggle */}
+                <div className="flex items-center justify-between p-4 bg-[#0f0f14] rounded-lg border border-[#2a2a2f]">
+                  <div>
+                    <h3 className="font-medium text-white">Enable Dim-to-Warm</h3>
+                    <p className="text-sm text-[#636366] mt-1">
+                      Automatically adjust CCT based on brightness level
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleUpdateDTW({ enabled: !dtwSettings.enabled })}
+                    disabled={dtwSaving}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      dtwSettings.enabled ? 'bg-amber-500' : 'bg-[#3a3a3f]'
+                    } ${dtwSaving ? 'opacity-50' : ''}`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        dtwSettings.enabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {dtwSettings.enabled && (
+                  <>
+                    {/* Curve Type Selector */}
+                    <div className="p-4 bg-[#0f0f14] rounded-lg border border-[#2a2a2f]">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="font-medium text-white">Curve Type</h3>
+                          <p className="text-sm text-[#636366] mt-1">
+                            How CCT changes as brightness decreases
+                          </p>
+                        </div>
+                        <select
+                          value={dtwSettings.curve}
+                          onChange={(e) => handleUpdateDTW({ curve: e.target.value })}
+                          disabled={dtwSaving}
+                          className="px-4 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white focus:outline-none focus:border-amber-500"
+                        >
+                          {dtwCurveInfo?.available_curves.map((curve) => (
+                            <option key={curve} value={curve}>
+                              {curve.charAt(0).toUpperCase() + curve.slice(1)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Curve Description */}
+                      <div className="text-sm text-[#8e8e93] mb-4">
+                        {dtwSettings.curve === 'linear' && 'Even CCT change per brightness step. Simple and predictable.'}
+                        {dtwSettings.curve === 'log' && 'Logarithmic curve. More CCT change at low brightness (recommended).'}
+                        {dtwSettings.curve === 'square' && 'Quadratic curve. Gentle warm-up, aggressive at low end.'}
+                        {dtwSettings.curve === 'incandescent' && 'Models actual filament behavior. Most natural appearance.'}
+                      </div>
+
+                      {/* Example Values */}
+                      {dtwCurveInfo?.example_values && (
+                        <div className="grid grid-cols-7 gap-2 text-center">
+                          {dtwCurveInfo.example_values.map((ex) => (
+                            <div key={ex.brightness} className="p-2 bg-[#1a1a1f] rounded">
+                              <div className="text-xs text-[#636366] mb-1">{Math.round(ex.brightness * 100)}%</div>
+                              <div className="text-sm font-mono text-amber-400">{ex.cct}K</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* CCT Range */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-[#0f0f14] rounded-lg border border-[#2a2a2f]">
+                        <h3 className="font-medium text-white mb-2">Warm CCT (at lowest brightness)</h3>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={dtwSettings.min_cct}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              if (val >= 1000 && val <= 10000) {
+                                handleUpdateDTW({ min_cct: val });
+                              }
+                            }}
+                            min={1000}
+                            max={10000}
+                            step={100}
+                            className="flex-1 px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                          />
+                          <span className="text-[#636366]">K</span>
+                        </div>
+                      </div>
+                      <div className="p-4 bg-[#0f0f14] rounded-lg border border-[#2a2a2f]">
+                        <h3 className="font-medium text-white mb-2">Cool CCT (at full brightness)</h3>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={dtwSettings.max_cct}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value);
+                              if (val >= 1000 && val <= 10000) {
+                                handleUpdateDTW({ max_cct: val });
+                              }
+                            }}
+                            min={1000}
+                            max={10000}
+                            step={100}
+                            className="flex-1 px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                          />
+                          <span className="text-[#636366]">K</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Override Timeout */}
+                    <div className="p-4 bg-[#0f0f14] rounded-lg border border-[#2a2a2f]">
+                      <h3 className="font-medium text-white mb-2">Override Timeout</h3>
+                      <p className="text-sm text-[#636366] mb-3">
+                        How long manual CCT adjustments persist before returning to automatic DTW
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          value={Math.round(dtwSettings.override_timeout / 3600)}
+                          onChange={(e) => {
+                            const hours = parseInt(e.target.value) || 0;
+                            handleUpdateDTW({ override_timeout: hours * 3600 });
+                          }}
+                          min={1}
+                          max={24}
+                          className="w-24 px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-[#636366]">hours</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Global Settings Section */}
           <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">

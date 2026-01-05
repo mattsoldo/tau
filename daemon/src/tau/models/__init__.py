@@ -23,6 +23,7 @@ from tau.models.software_update import (
     UpdateConfig,
     DEFAULT_UPDATE_CONFIG,
 )
+from tau.models.override import Override, TargetType, OverrideType, OverrideSource
 
 __all__ = [
     "Base",
@@ -47,4 +48,8 @@ __all__ = [
     "UpdateCheck",
     "UpdateConfig",
     "DEFAULT_UPDATE_CONFIG",
+    "Override",
+    "TargetType",
+    "OverrideType",
+    "OverrideSource",
 ]
