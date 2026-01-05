@@ -6,12 +6,13 @@ This guide covers deployment options for the Tau lighting control daemon in prod
 
 1. [Docker Deployment](#docker-deployment)
 2. [Systemd Service](#systemd-service)
-3. [Database Setup](#database-setup)
-4. [Configuration](#configuration)
-5. [Hardware Setup](#hardware-setup)
-6. [Security](#security)
-7. [Monitoring](#monitoring)
-8. [Troubleshooting](#troubleshooting)
+3. [Nginx Reverse Proxy (Recommended)](#nginx-reverse-proxy-recommended)
+4. [Database Setup](#database-setup)
+5. [Configuration](#configuration)
+6. [Hardware Setup](#hardware-setup)
+7. [Security](#security)
+8. [Monitoring](#monitoring)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -236,6 +237,131 @@ sudo -u tau .venv/bin/alembic upgrade head
 
 # Start service
 sudo systemctl start tau-daemon
+```
+
+---
+
+## Nginx Reverse Proxy (Recommended)
+
+For production deployments, use nginx as a reverse proxy to serve both the frontend and backend on port 80.
+
+### Benefits
+
+- **Single port**: Both frontend and backend accessible on port 80
+- **Simplified URLs**: No port numbers needed (`http://192.168.1.100` instead of `http://192.168.1.100:3000`)
+- **Better performance**: nginx serves static files efficiently
+- **Production-ready**: Standard web server architecture
+
+### Quick Setup
+
+Run the automated setup script:
+
+```bash
+cd /opt/tau-daemon
+sudo ./daemon/deployment/setup_nginx.sh
+```
+
+This script will:
+1. Install nginx if not already installed
+2. Build the frontend static files
+3. Stop and disable the old tau-frontend service
+4. Install nginx configuration
+5. Enable and start nginx
+
+### Manual Setup
+
+If you prefer manual configuration:
+
+```bash
+# Install nginx
+sudo apt-get update
+sudo apt-get install -y nginx
+
+# Build frontend
+cd /opt/tau-daemon/frontend
+sudo -u tau npm run build
+
+# Install nginx configuration
+sudo cp /opt/tau-daemon/daemon/deployment/tau-nginx.conf /etc/nginx/sites-available/tau
+
+# Remove default site
+sudo rm /etc/nginx/sites-enabled/default
+
+# Enable Tau site
+sudo ln -s /etc/nginx/sites-available/tau /etc/nginx/sites-enabled/tau
+
+# Test configuration
+sudo nginx -t
+
+# Restart nginx
+sudo systemctl restart nginx
+sudo systemctl enable nginx
+
+# Disable old frontend service
+sudo systemctl stop tau-frontend
+sudo systemctl disable tau-frontend
+```
+
+### Architecture
+
+With nginx reverse proxy:
+
+- **Frontend**: Static files served by nginx from `/opt/tau-daemon/frontend/out`
+- **Backend API**: Proxied to `localhost:8000` for `/api/*` routes
+- **WebSocket**: Proxied to `localhost:8000/ws` for `/api/ws`
+- **Health/Status**: Proxied to `localhost:8000` for `/health` and `/status`
+
+### URL Structure
+
+Before (without nginx):
+- Frontend: `http://192.168.1.100:3000`
+- Backend: `http://192.168.1.100:8000/api/fixtures/`
+
+After (with nginx):
+- Frontend: `http://192.168.1.100/`
+- Backend: `http://192.168.1.100/api/fixtures/`
+
+### Updating Frontend
+
+After making frontend changes:
+
+```bash
+# Rebuild static files
+cd /opt/tau-daemon/frontend
+sudo -u tau npm run build
+
+# Nginx will automatically serve the new files (no restart needed)
+```
+
+### Troubleshooting Nginx
+
+**Check nginx status**:
+```bash
+sudo systemctl status nginx
+```
+
+**View nginx logs**:
+```bash
+# Access log
+sudo tail -f /var/log/nginx/tau-access.log
+
+# Error log
+sudo tail -f /var/log/nginx/tau-error.log
+```
+
+**Test configuration**:
+```bash
+sudo nginx -t
+```
+
+**Reload configuration** (without dropping connections):
+```bash
+sudo systemctl reload nginx
+```
+
+**Check which process is using port 80**:
+```bash
+sudo lsof -i :80
 ```
 
 ---

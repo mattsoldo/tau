@@ -5,34 +5,28 @@
  */
 
 /**
- * Get API URL dynamically based on environment
- * - In browser: uses current hostname from window.location
- * - On server: uses environment variable or localhost fallback
- * This allows the frontend to work with any IP address without rebuilding
+ * Get API URL for reverse proxy setup
+ * - Uses empty string for relative paths (nginx handles routing)
+ * - All API endpoints are proxied via /api/*
  */
 const getApiUrl = (): string => {
-  if (typeof window !== 'undefined') {
-    // Client-side: use current hostname from browser
-    const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-    return `${protocol}://${window.location.hostname}:8000`;
-  }
-  // Server-side: use env var or localhost
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  // Use relative paths - nginx will proxy /api/* to backend on port 8000
+  return '';
 };
 
 /**
- * Get WebSocket URL dynamically based on environment
- * - In browser: uses current hostname from window.location
- * - On server: uses environment variable or localhost fallback
+ * Get WebSocket URL for reverse proxy setup
+ * - In browser: uses current origin with /api/ws path
+ * - WebSocket connections are proxied via /api/ws
  */
 export const getWsUrl = (): string => {
   if (typeof window !== 'undefined') {
-    // Client-side: use current hostname from browser
+    // Client-side: use current origin for WebSocket (proxied by nginx)
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${protocol}://${window.location.hostname}:8000`;
+    return `${protocol}://${window.location.host}/api/ws`;
   }
-  // Server-side: use env var or localhost
-  return process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
+  // Server-side: use localhost (not used in production)
+  return 'ws://localhost:8000/ws';
 };
 
 export const API_URL = getApiUrl();
