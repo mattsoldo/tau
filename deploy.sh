@@ -68,6 +68,11 @@ echo
 echo -e "${YELLOW}🔄 Step 2: Checking for updates...${NC}"
 cd /opt/tau-daemon
 
+# Ensure git doesn't complain about ownership
+if ! sudo -u $ACTUAL_USER git config --get safe.directory | grep -q "/opt/tau-daemon"; then
+    sudo -u $ACTUAL_USER git config --global --add safe.directory /opt/tau-daemon
+fi
+
 # Fetch latest changes
 sudo -u $ACTUAL_USER git fetch origin
 BEHIND=$(sudo -u $ACTUAL_USER git rev-list HEAD..origin/main --count)
@@ -95,7 +100,7 @@ echo -e "${YELLOW}📥 Step 3: Applying updates...${NC}"
 # Pull latest code
 echo "  Pulling latest code..."
 sudo -u $ACTUAL_USER git pull origin main
-CURRENT_COMMIT=$(git rev-parse --short HEAD)
+CURRENT_COMMIT=$(sudo -u $ACTUAL_USER git rev-parse --short HEAD)
 echo -e "${GREEN}✓ Updated to commit $CURRENT_COMMIT${NC}"
 echo
 
