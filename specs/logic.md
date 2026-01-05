@@ -127,3 +127,60 @@ Standard tunable white fixtures use consecutive DMX channels (e.g., CH 1 for war
   - Cool channel (CH 5): ~64 (0.5 × 0.5 × 255)
 
 The mixing algorithm output is the same; only the DMX address mapping differs.
+
+## Switch Action Broadcasting and Real-Time Updates
+
+Physical switch actions trigger WebSocket broadcasts to connected clients for responsive UI updates. This enables the frontend to reflect hardware changes without polling.
+
+### Broadcast Trigger Conditions
+
+| Switch Type | Action | Broadcast Timing | Throttling |
+| :--- | :--- | :--- | :--- |
+| Momentary | Press (toggle) | Immediate after state change | None (single event) |
+| Latching | State change | Immediate after state change | None (single event) |
+| Retractive | Press and release | Once at release | None (final state only) |
+| Retractive | Hold (dimming) | Continuous during hold | Throttled to 100ms intervals |
+
+### Broadcast Event Flow
+
+1. **Switch Input Detected**: Hardware polling detects switch state change
+2. **State Update Applied**: Switch handler updates fixture or group state in state manager
+3. **Broadcast Triggered**: WebSocket broadcast sent to all connected clients
+4. **Error Handling**: If broadcast fails, error is logged but switch handler continues
+
+### Hold Event Throttling
+
+During retractive switch dimming (hold events), broadcasts are throttled to prevent overwhelming WebSocket clients:
+
+- **Throttle Interval**: 100ms minimum between broadcasts per fixture/group
+- **Throttle Scope**: Independent per target (fixture or group)
+- **Visual Result**: ~10 fps update rate for smooth dimming visualization
+- **Implementation**: Track last broadcast timestamp per `fixture:{id}` or `group:{id}` key
+
+### Frontend Race Condition Prevention
+
+The frontend implements pending request tracking to avoid race conditions where WebSocket updates could overwrite user actions:
+
+| Scenario | Frontend Behavior | Reason |
+| :--- | :--- | :--- |
+| User adjusts slider | Mark request as pending | Prevents WebSocket from overwriting optimistic UI update |
+| API request in flight | Ignore WebSocket updates for that fixture/group | Waits for user's request to complete |
+| API request completes | Clear pending flag | Allows WebSocket updates to resume |
+| WebSocket arrives during grace period | Ignored | Prevents overwriting just-completed user action |
+
+### State Update Optimization
+
+The frontend optimizes re-renders by comparing incoming WebSocket state with current state:
+
+```typescript
+// Early return if state unchanged (avoid unnecessary re-renders)
+if (
+  existing.goal_brightness === newBrightness &&
+  existing.goal_cct === newCct &&
+  existing.is_on === newIsOn
+) {
+  return prev; // Same reference = no re-render
+}
+```
+
+This pattern is critical during high-frequency dimming updates where multiple consecutive broadcasts may contain identical values due to throttling or state resolution timing.

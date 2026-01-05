@@ -121,64 +121,109 @@ export default function LightTestPage() {
   const userGoalState = useRef<Map<number, { brightness: number; cct: number; timestamp: number }>>(new Map());
   const userGroupGoalState = useRef<Map<number, { brightness?: number; cct?: number; timestamp: number }>>(new Map());
 
-  // Track last user interaction time to avoid overwriting optimistic updates
-  const lastUserInteractionRef = useRef<Map<string, number>>(new Map());
-  const USER_INTERACTION_GRACE_MS = 500;
+  // Track pending API requests to avoid WebSocket race conditions
+  // (replaces timestamp-based grace period - more robust)
+  const pendingRequestsRef = useRef<Set<string>>(new Set());
 
   // WebSocket integration for real-time updates from switch actions
   const handleFixtureStateChanged = useCallback((event: FixtureStateChangedEvent) => {
     const key = `fixture-${event.fixture_id}`;
-    const lastInteraction = lastUserInteractionRef.current.get(key) || 0;
-    const now = Date.now();
 
-    // Don't overwrite if user just interacted with this fixture
-    if (now - lastInteraction < USER_INTERACTION_GRACE_MS) {
+    // Don't overwrite if there's a pending API request for this fixture
+    // This prevents race conditions where WebSocket updates arrive while
+    // user-initiated API calls are still in flight
+    if (pendingRequestsRef.current.has(key)) {
       return;
     }
 
-    setGroupsWithFixtures(prev => prev.map(group => ({
-      ...group,
-      fixtures: group.fixtures.map(f => {
-        if (f.id !== event.fixture_id) return f;
-        return {
-          ...f,
-          state: f.state ? {
-            ...f.state,
-            goal_brightness: event.brightness * 1000,
-            goal_cct: event.color_temp ?? f.state.goal_cct,
-            is_on: event.brightness > 0,
-          } : undefined,
-        };
-      }),
-    })));
+    setGroupsWithFixtures(prev => {
+      let hasChanges = false;
+
+      const updated = prev.map(group => ({
+        ...group,
+        fixtures: group.fixtures.map(f => {
+          if (f.id !== event.fixture_id || !f.state) return f;
+
+          const newBrightness = event.brightness * 1000;
+          const newCct = event.color_temp ?? f.state.goal_cct;
+          const newIsOn = event.brightness > 0;
+
+          // Early return if state hasn't actually changed
+          if (
+            f.state.goal_brightness === newBrightness &&
+            f.state.goal_cct === newCct &&
+            f.state.is_on === newIsOn
+          ) {
+            return f;
+          }
+
+          hasChanges = true;
+          return {
+            ...f,
+            state: {
+              ...f.state,
+              goal_brightness: newBrightness,
+              goal_cct: newCct,
+              is_on: newIsOn,
+            },
+          };
+        }),
+      }));
+
+      // Avoid unnecessary re-renders if nothing changed
+      return hasChanges ? updated : prev;
+    });
   }, []);
 
   const handleGroupStateChanged = useCallback((event: GroupStateChangedEvent) => {
     const key = `group-${event.group_id}`;
-    const lastInteraction = lastUserInteractionRef.current.get(key) || 0;
-    const now = Date.now();
 
-    // Don't overwrite if user just interacted with this group
-    if (now - lastInteraction < USER_INTERACTION_GRACE_MS) {
+    // Don't overwrite if there's a pending API request for this group
+    if (pendingRequestsRef.current.has(key)) {
       return;
     }
 
     // Update all fixtures in the affected group
-    setGroupsWithFixtures(prev => prev.map(group => {
-      if (group.id !== event.group_id) return group;
-      return {
-        ...group,
-        fixtures: group.fixtures.map(f => ({
-          ...f,
-          state: f.state ? {
-            ...f.state,
-            goal_brightness: event.brightness * 1000,
-            goal_cct: event.color_temp ?? f.state.goal_cct,
-            is_on: event.brightness > 0,
-          } : undefined,
-        })),
-      };
-    }));
+    setGroupsWithFixtures(prev => {
+      let hasChanges = false;
+
+      const updated = prev.map(group => {
+        if (group.id !== event.group_id) return group;
+
+        const updatedFixtures = group.fixtures.map(f => {
+          if (!f.state) return f;
+
+          const newBrightness = event.brightness * 1000;
+          const newCct = event.color_temp ?? f.state.goal_cct;
+          const newIsOn = event.brightness > 0;
+
+          // Early return if state hasn't actually changed
+          if (
+            f.state.goal_brightness === newBrightness &&
+            f.state.goal_cct === newCct &&
+            f.state.is_on === newIsOn
+          ) {
+            return f;
+          }
+
+          hasChanges = true;
+          return {
+            ...f,
+            state: {
+              ...f.state,
+              goal_brightness: newBrightness,
+              goal_cct: newCct,
+              is_on: newIsOn,
+            },
+          };
+        });
+
+        return { ...group, fixtures: updatedFixtures };
+      });
+
+      // Avoid unnecessary re-renders if nothing changed
+      return hasChanges ? updated : prev;
+    });
   }, []);
 
   // Connect to WebSocket for real-time updates
@@ -300,6 +345,8 @@ export default function LightTestPage() {
 
   // Send fixture control command
   const sendFixtureControl = useCallback(async (fixtureId: number, brightness?: number, colorTemp?: number) => {
+    const key = `fixture-${fixtureId}`;
+
     const existingTimer = debounceTimers.current.get(fixtureId);
     if (existingTimer) clearTimeout(existingTimer);
 
@@ -310,7 +357,10 @@ export default function LightTestPage() {
 
     const timer = setTimeout(async () => {
       const changes = pendingChanges.current.get(fixtureId);
-      if (!changes) return;
+      if (!changes) {
+        pendingRequestsRef.current.delete(key);
+        return;
+      }
 
       try {
         const body: Record<string, number> = {};
@@ -326,6 +376,9 @@ export default function LightTestPage() {
         pendingChanges.current.delete(fixtureId);
       } catch (err) {
         console.error('Fixture control error:', err);
+      } finally {
+        // Always remove pending request marker when request completes
+        pendingRequestsRef.current.delete(key);
       }
     }, 50);
 
@@ -334,8 +387,10 @@ export default function LightTestPage() {
 
   // Send group brightness control command
   const sendGroupControl = useCallback(async (groupId: number, brightness: number) => {
-    // Track user interaction to prevent WebSocket from overwriting
-    lastUserInteractionRef.current.set(`group-${groupId}`, Date.now());
+    const key = `group-${groupId}`;
+
+    // Mark this group as having a pending request
+    pendingRequestsRef.current.add(key);
 
     const existingTimer = groupDebounceTimers.current.get(groupId);
     if (existingTimer) clearTimeout(existingTimer);
@@ -360,6 +415,9 @@ export default function LightTestPage() {
         });
       } catch (err) {
         console.error('Group control error:', err);
+      } finally {
+        // Always remove pending request marker when request completes
+        pendingRequestsRef.current.delete(key);
       }
     }, 50);
 
@@ -368,8 +426,10 @@ export default function LightTestPage() {
 
   // Send group CCT control command
   const sendGroupCctControl = useCallback(async (groupId: number, colorTemp: number) => {
-    // Track user interaction to prevent WebSocket from overwriting
-    lastUserInteractionRef.current.set(`group-${groupId}`, Date.now());
+    const key = `group-${groupId}`;
+
+    // Mark this group as having a pending request
+    pendingRequestsRef.current.add(key);
 
     const timerKey = groupId + 10000; // Offset to avoid collisions with brightness timers
     const existingTimer = groupDebounceTimers.current.get(timerKey);
@@ -395,6 +455,9 @@ export default function LightTestPage() {
         });
       } catch (err) {
         console.error('Group CCT control error:', err);
+      } finally {
+        // Always remove pending request marker when request completes
+        pendingRequestsRef.current.delete(key);
       }
     }, 50);
 
@@ -403,8 +466,10 @@ export default function LightTestPage() {
 
   // Update fixture state locally
   const updateFixtureState = useCallback((fixtureId: number, brightness?: number, cct?: number) => {
-    // Track user interaction to prevent WebSocket from overwriting
-    lastUserInteractionRef.current.set(`fixture-${fixtureId}`, Date.now());
+    const key = `fixture-${fixtureId}`;
+
+    // Mark this fixture as having a pending request
+    pendingRequestsRef.current.add(key);
 
     const existing = userGoalState.current.get(fixtureId);
     userGoalState.current.set(fixtureId, {
