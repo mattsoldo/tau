@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { filterMergedFixtures } from '@/utils/fixtures';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -356,7 +357,11 @@ export default function DashboardPage() {
 
         setStatus(await statusRes.json());
         const fixturesData = await fixturesRes.json();
-        setFixtures(fixturesData);
+
+        // Filter out fixtures that are merged into other fixtures
+        const visibleFixtures = filterMergedFixtures(fixturesData);
+        setFixtures(visibleFixtures);
+
         const groupsData = await groupsRes.json();
         setGroups(groupsData);
 
@@ -390,7 +395,7 @@ export default function DashboardPage() {
         // Fetch fixture states
         const statesMap = new Map<number, FixtureState>();
         const statesResults = await Promise.allSettled(
-          fixturesData.map(async (f: Fixture) => {
+          visibleFixtures.map(async (f: Fixture) => {
             const stateRes = await fetch(`${API_URL}/api/fixtures/${f.id}/state`);
             if (stateRes.ok) {
               const state = await stateRes.json();

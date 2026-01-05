@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { filterMergedFixtures } from '@/utils/fixtures';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -141,15 +142,7 @@ export default function LightTestPage() {
       setFixtureModels(modelsData);
 
       // Filter out fixtures that are merged into other fixtures
-      // A fixture is "merged into" another if its dmx_channel_start matches another fixture's secondary_dmx_channel
-      const mergedChannels = new Set(
-        fixturesData
-          .filter((f: Fixture) => f.secondary_dmx_channel !== null)
-          .map((f: Fixture) => f.secondary_dmx_channel)
-      );
-      const visibleFixtures = fixturesData.filter(
-        (f: Fixture) => !mergedChannels.has(f.dmx_channel_start)
-      );
+      const visibleFixtures = filterMergedFixtures(fixturesData);
 
       // Fetch state for all visible fixtures
       const now = Date.now();
