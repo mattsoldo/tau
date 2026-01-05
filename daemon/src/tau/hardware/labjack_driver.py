@@ -104,9 +104,9 @@ class LabJackDriver(LabJackInterface):
             # Timer1 for PWM channel 1
             self.device.configTimerClock(TimerClockBase=6, TimerClockDivisor=1)
 
-            self._connected = True
+            self.connected = True
             logger.info(
-                "labjack_connected",
+                "labjackconnected",
                 model=self.model,
                 serial=self.serial_number
             )
@@ -138,7 +138,7 @@ class LabJackDriver(LabJackInterface):
                 logger.error("labjack_disconnect_error", error=str(e))
             finally:
                 self.device = None
-                self._connected = False
+                self.connected = False
 
     async def load_switch_config(self) -> None:
         """
@@ -187,7 +187,7 @@ class LabJackDriver(LabJackInterface):
         Returns:
             Voltage reading
         """
-        if not self._connected or not self.device:
+        if not self.connected or not self.device:
             return 0.0
 
         try:
@@ -235,7 +235,7 @@ class LabJackDriver(LabJackInterface):
             channel: PWM channel (0-1)
             duty_cycle: Duty cycle (0.0 to 1.0)
         """
-        if not self._connected or not self.device:
+        if not self.connected or not self.device:
             return
 
         try:
@@ -291,7 +291,7 @@ class LabJackDriver(LabJackInterface):
     def get_statistics(self) -> Dict[str, Any]:
         """Get driver statistics"""
         return {
-            "connected": self._connected,
+            "connected": self.connected,
             "model": self.model,
             "serial_number": self.serial_number,
             "read_count": self.read_count,
@@ -314,7 +314,7 @@ class LabJackDriver(LabJackInterface):
         Returns:
             True for HIGH, False for LOW
         """
-        if not self._connected or not self.device:
+        if not self.connected or not self.device:
             return False
 
         try:
@@ -366,7 +366,7 @@ class LabJackDriver(LabJackInterface):
             channel: Channel number (0-15)
             state: True for HIGH, False for LOW
         """
-        if not self._connected or not self.device:
+        if not self.connected or not self.device:
             return
 
         try:
@@ -404,7 +404,7 @@ class LabJackDriver(LabJackInterface):
             channel: Channel number (0-15)
             mode: 'analog', 'digital-in', or 'digital-out'
         """
-        if not self._connected or not self.device:
+        if not self.connected or not self.device:
             return
 
         try:
@@ -467,14 +467,14 @@ class LabJackDriver(LabJackInterface):
         """Check if this is a mock driver"""
         return False
 
-    def is_connected(self) -> bool:
+    def isconnected(self) -> bool:
         """
         Check if hardware is connected
 
         Returns:
             True if connected, False otherwise
         """
-        return self._connected
+        return self.connected
 
     async def health_check(self) -> bool:
         """
@@ -483,7 +483,7 @@ class LabJackDriver(LabJackInterface):
         Returns:
             True if hardware is healthy, False otherwise
         """
-        if not self._connected or not self.device:
+        if not self.connected or not self.device:
             return False
 
         try:
