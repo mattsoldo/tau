@@ -1,8 +1,18 @@
 #!/bin/bash
 # Tau Lighting Control - Robust Deployment Script
 # This script safely updates and restarts the Tau system on Raspberry Pi
+#
+# Usage:
+#   sudo ./deploy.sh          # Interactive mode - ask before rebuilding if up to date
+#   sudo ./deploy.sh --force  # Force rebuild even if up to date
 
 set -e  # Exit on error
+
+# Parse command line arguments
+FORCE_REBUILD=false
+if [[ "$1" == "--force" ]]; then
+    FORCE_REBUILD=true
+fi
 
 echo "========================================="
 echo "Tau Deployment Script"
@@ -84,12 +94,16 @@ BEHIND=$(sudo -u $ACTUAL_USER git rev-list HEAD..origin/main --count)
 if [ "$BEHIND" -eq 0 ]; then
     echo -e "${GREEN}✓ Already up to date${NC}"
     echo
-    # Ask if user wants to rebuild anyway
-    read -p "Rebuild and restart anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Deployment cancelled"
-        exit 0
+    # Ask if user wants to rebuild anyway (unless --force flag is used)
+    if [ "$FORCE_REBUILD" = false ]; then
+        read -p "Rebuild and restart anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Deployment cancelled"
+            exit 0
+        fi
+    else
+        echo "  Force rebuild requested via --force flag"
     fi
 else
     echo "  $BEHIND commit(s) behind origin/main"
