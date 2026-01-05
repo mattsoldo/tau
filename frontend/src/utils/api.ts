@@ -5,15 +5,9 @@
  */
 
 import type {
-  Fixture,
-  FixtureModel,
-  FixtureState,
-  Group,
-  GroupState,
   Switch,
   SwitchModel,
   SwitchCreate,
-  CircadianProfile,
 } from '../types/tau';
 
 /**
