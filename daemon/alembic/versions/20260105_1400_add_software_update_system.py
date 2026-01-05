@@ -143,7 +143,8 @@ def upgrade() -> None:
     )
 
     # Insert default configuration values
-    # Use ON CONFLICT to handle re-runs gracefully and preserve existing config
+    # Use parameterized queries to prevent SQL injection
+    # ON CONFLICT handles re-runs gracefully and preserves existing config
     default_configs = [
         ("auto_check_enabled", "true", "Enable automatic update checks"),
         ("check_interval_hours", "24", "Hours between automatic update checks"),
@@ -158,16 +159,17 @@ def upgrade() -> None:
         ("rollback_on_service_failure", "true", "Automatically rollback if services fail to start"),
     ]
 
+    # Use SQLAlchemy text with bound parameters for safe SQL execution
+    insert_stmt = sa.text(
+        """
+        INSERT INTO update_config (key, value, description)
+        VALUES (:key, :value, :description)
+        ON CONFLICT (key) DO NOTHING
+        """
+    )
+
     for key, value, description in default_configs:
-        # Escape single quotes in description
-        safe_desc = description.replace("'", "''")
-        op.execute(
-            f"""
-            INSERT INTO update_config (key, value, description)
-            VALUES ('{key}', '{value}', '{safe_desc}')
-            ON CONFLICT (key) DO NOTHING
-            """
-        )
+        op.execute(insert_stmt.bindparams(key=key, value=value, description=description))
 
 
 def downgrade() -> None:

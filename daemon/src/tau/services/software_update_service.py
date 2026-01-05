@@ -10,7 +10,8 @@ Coordinates the entire update workflow including:
 """
 import asyncio
 import subprocess
-from datetime import datetime
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from packaging import version as pkg_version
@@ -27,7 +28,7 @@ from tau.models.software_update import (
     UpdateConfig,
     DEFAULT_UPDATE_CONFIG,
 )
-from tau.services.github_client import GitHubClient, GitHubRelease, GitHubAPIError
+from tau.services.github_client import GitHubClient, GitHubRelease, GitHubAPIError, RateLimitError
 from tau.services.backup_manager import (
     BackupManager,
     BackupInfo,
@@ -151,14 +152,14 @@ class SoftwareUpdateService:
         config = result.scalar_one_or_none()
         if config:
             config.value = value
-            config.updated_at = datetime.utcnow()
+            config.updated_at = datetime.now(timezone.utc)
         else:
             description = DEFAULT_UPDATE_CONFIG.get(key, (None, None))[1]
             new_config = UpdateConfig(
                 key=key,
                 value=value,
                 description=description,
-                updated_at=datetime.utcnow(),
+                updated_at=datetime.now(timezone.utc),
             )
             self.db_session.add(new_config)
         await self.db_session.commit()
@@ -306,6 +307,17 @@ class SoftwareUpdateService:
             logger.info("update_check_complete", **result)
             return result
 
+        except RateLimitError as e:
+            await self._log_update_check(
+                source=source,
+                result="rate_limited",
+                error_message=f"Rate limited until {e.reset_at.isoformat()}",
+            )
+            self._current_state = "idle"
+            raise UpdateError(
+                f"GitHub API rate limit exceeded. Try again after {e.reset_at.strftime('%H:%M:%S')}"
+            ) from e
+
         except GitHubAPIError as e:
             await self._log_update_check(
                 source=source,
@@ -333,7 +345,7 @@ class SoftwareUpdateService:
                 asset_checksum=release.asset_checksum,
                 prerelease=release.prerelease,
                 draft=release.draft,
-                checked_at=datetime.utcnow(),
+                checked_at=datetime.now(timezone.utc),
             )
             self.db_session.add(available_release)
 
@@ -470,7 +482,7 @@ class SoftwareUpdateService:
                 progress_callback("downloading", 0, "Downloading update package...")
 
             github = await self._get_github_client()
-            download_dir = Path("/tmp/tau-updates")
+            download_dir = Path(tempfile.gettempdir()) / "tau-updates"
             download_dir.mkdir(parents=True, exist_ok=True)
             download_path = download_dir / (release.asset_name or f"{target_version}.deb")
 
@@ -519,7 +531,7 @@ class SoftwareUpdateService:
                 version=current_version,
                 commit_sha=installation.commit_sha,
                 installed_at=installation.installed_at,
-                uninstalled_at=datetime.utcnow(),
+                uninstalled_at=datetime.now(timezone.utc),
                 backup_path=backup_info.backup_path,
                 backup_valid=True,
                 release_notes=None,
@@ -572,7 +584,7 @@ class SoftwareUpdateService:
 
             # Step 9: Update installation record
             installation.current_version = target_version
-            installation.installed_at = datetime.utcnow()
+            installation.installed_at = datetime.now(timezone.utc)
             installation.install_method = "update"
             await self.db_session.commit()
 
@@ -664,7 +676,7 @@ class SoftwareUpdateService:
             # Update installation record
             installation = await self._get_installation()
             installation.current_version = backup_info.version
-            installation.installed_at = datetime.utcnow()
+            installation.installed_at = datetime.now(timezone.utc)
             installation.install_method = "rollback"
             await self.db_session.commit()
 
@@ -762,10 +774,15 @@ class SoftwareUpdateService:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await asyncio.wait_for(fix_process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT)
+                fix_stdout, fix_stderr = await asyncio.wait_for(
+                    fix_process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT
+                )
 
-                if process.returncode != 0:
-                    raise InstallationError(f"Package installation failed: {stderr.decode()}")
+                if fix_process.returncode != 0:
+                    raise InstallationError(
+                        f"Package installation failed: {stderr.decode()}. "
+                        f"Dependency fix also failed: {fix_stderr.decode()}"
+                    )
 
             logger.info("package_installed", path=str(package_path))
 
@@ -843,7 +860,7 @@ class SoftwareUpdateService:
 
             try:
                 # Clean up any partial downloads
-                download_dir = Path("/tmp/tau-updates")
+                download_dir = Path(tempfile.gettempdir()) / "tau-updates"
                 if download_dir.exists():
                     import shutil
                     shutil.rmtree(download_dir, ignore_errors=True)

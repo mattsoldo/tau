@@ -12,7 +12,7 @@ import json
 import hashlib
 import shutil
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, asdict
@@ -128,7 +128,7 @@ class BackupManager:
 
     def _get_backup_dir(self, version: str) -> Path:
         """Get the backup directory path for a version"""
-        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         safe_version = version.replace("/", "_").replace("\\", "_")
         return self.backup_location / f"{safe_version}_{timestamp}"
 
@@ -291,7 +291,7 @@ class BackupManager:
             # Create manifest
             manifest = BackupManifest(
                 version=version,
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now(timezone.utc).isoformat(),
                 commit_sha=commit_sha,
                 files=files_manifest,
                 database_backed_up=False,  # Database backup handled separately
@@ -319,7 +319,7 @@ class BackupManager:
             return BackupInfo(
                 version=version,
                 backup_path=str(backup_dir),
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
                 size_bytes=total_size,
                 valid=True,
                 manifest=manifest,
