@@ -13,6 +13,18 @@ const RAMP_STEP = 2;
 const SCENE_1_BRIGHTNESS = 75;
 const SCENE_2_BRIGHTNESS = 25;
 
+// Error dismiss timeouts
+const ERROR_DISMISS_MS = 3000;
+const VALIDATION_ERROR_DISMISS_MS = 2000;
+
+// Data polling intervals
+const STATUS_POLL_INTERVAL_MS = 2000;
+const OVERRIDES_POLL_INTERVAL_MS = 2000;
+
+// Brightness scaling constants
+const BRIGHTNESS_SCALE = 1000; // API uses 0-1000 scale
+const BRIGHTNESS_DISPLAY_SCALE = 10; // Display uses 0-100, state uses 0-1000
+
 interface SystemStatus {
   status: string;
   version: string;
@@ -137,18 +149,18 @@ export default function DashboardPage() {
   // Request version refs for race condition handling
   const requestVersionRef = useRef<Map<string, number>>(new Map());
 
-  // Auto-dismiss control errors after 3 seconds
+  // Auto-dismiss control errors
   useEffect(() => {
     if (controlError) {
-      const timeout = setTimeout(() => setControlError(null), 3000);
+      const timeout = setTimeout(() => setControlError(null), ERROR_DISMISS_MS);
       return () => clearTimeout(timeout);
     }
   }, [controlError]);
 
-  // Auto-dismiss validation errors after 2 seconds
+  // Auto-dismiss validation errors
   useEffect(() => {
     if (validationError) {
-      const timeout = setTimeout(() => setValidationError(null), 2000);
+      const timeout = setTimeout(() => setValidationError(null), VALIDATION_ERROR_DISMISS_MS);
       return () => clearTimeout(timeout);
     }
   }, [validationError]);
@@ -403,7 +415,7 @@ export default function DashboardPage() {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 2000); // Slower poll for larger data set
+    const interval = setInterval(fetchData, STATUS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
 
@@ -422,7 +434,7 @@ export default function DashboardPage() {
     };
 
     fetchOverrides();
-    const interval = setInterval(fetchOverrides, 2000);
+    const interval = setInterval(fetchOverrides, OVERRIDES_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
 
@@ -434,9 +446,13 @@ export default function DashboardPage() {
       });
       if (response.ok) {
         setActiveOverrides(prev => prev.filter(o => o.fixture_id !== fixtureId));
+      } else {
+        const fixtureName = getFixtureName(fixtureId);
+        setControlError(`Failed to remove override for ${fixtureName}`);
       }
-    } catch {
-      // Ignore errors
+    } catch (error) {
+      const fixtureName = getFixtureName(fixtureId);
+      setControlError(`Failed to remove override for ${fixtureName}`);
     }
   };
 
@@ -448,9 +464,11 @@ export default function DashboardPage() {
       });
       if (response.ok) {
         setActiveOverrides([]);
+      } else {
+        setControlError('Failed to remove all overrides');
       }
-    } catch {
-      // Ignore errors
+    } catch (error) {
+      setControlError('Failed to remove all overrides');
     }
   };
 
@@ -489,7 +507,7 @@ export default function DashboardPage() {
         const newMap = new Map(prev);
         const existing = newMap.get(fixtureId);
         if (existing) {
-          newMap.set(fixtureId, { ...existing, goal_brightness: newBrightness * 1000, is_on: newBrightness > 0 });
+          newMap.set(fixtureId, { ...existing, goal_brightness: newBrightness * BRIGHTNESS_SCALE, is_on: newBrightness > 0 });
         }
         return newMap;
       });
@@ -512,7 +530,7 @@ export default function DashboardPage() {
       const newMap = new Map(prev);
       const existing = newMap.get(fixtureId);
       if (existing) {
-        newMap.set(fixtureId, { ...existing, goal_brightness: brightness * 1000, is_on: brightness > 0 });
+        newMap.set(fixtureId, { ...existing, goal_brightness: brightness * BRIGHTNESS_SCALE, is_on: brightness > 0 });
       }
       return newMap;
     });
@@ -602,7 +620,7 @@ export default function DashboardPage() {
       fixturesInGroup.forEach(fixture => {
         const existing = newMap.get(fixture.id);
         if (existing) {
-          newMap.set(fixture.id, { ...existing, goal_brightness: brightness * 1000, is_on: brightness > 0 });
+          newMap.set(fixture.id, { ...existing, goal_brightness: brightness * BRIGHTNESS_SCALE, is_on: brightness > 0 });
         }
       });
       return newMap;
@@ -692,7 +710,7 @@ export default function DashboardPage() {
       fixturesInGroup.forEach(fixture => {
         const existing = newMap.get(fixture.id);
         if (existing) {
-          newMap.set(fixture.id, { ...existing, goal_brightness: newBrightness * 1000, is_on: turnOn });
+          newMap.set(fixture.id, { ...existing, goal_brightness: newBrightness * BRIGHTNESS_SCALE, is_on: turnOn });
         }
       });
       return newMap;
@@ -729,7 +747,7 @@ export default function DashboardPage() {
       }
       const total = fixtures.reduce((sum, f) => {
         const state = fixtureStates.get(f.id);
-        return sum + (state ? state.goal_brightness / 10 : 0);
+        return sum + (state ? state.goal_brightness / BRIGHTNESS_DISPLAY_SCALE : 0);
       }, 0);
       cache.set(groupId, Math.round(total / fixtures.length));
     });
@@ -1295,7 +1313,7 @@ export default function DashboardPage() {
                                 const state = fixtureStates.get(fixture.id);
                                 const model = fixtureModels.get(fixture.fixture_model_id);
                                 const isFixtureExpanded = expandedFixtures.has(fixture.id);
-                                const brightness = state ? Math.round(state.goal_brightness / 10) : 0;
+                                const brightness = state ? Math.round(state.goal_brightness / BRIGHTNESS_DISPLAY_SCALE) : 0;
                                 const cct = state?.goal_cct ?? 2700;
                                 const cctMin = model?.cct_min_kelvin ?? 2700;
                                 const cctMax = model?.cct_max_kelvin ?? 6500;
@@ -1457,7 +1475,7 @@ export default function DashboardPage() {
                       const state = fixtureStates.get(fixture.id);
                       const model = fixtureModels.get(fixture.fixture_model_id);
                       const isExpanded = expandedFixtures.has(fixture.id);
-                      const brightness = state ? Math.round(state.goal_brightness / 10) : 0;
+                      const brightness = state ? Math.round(state.goal_brightness / BRIGHTNESS_DISPLAY_SCALE) : 0;
                       const cct = state?.goal_cct ?? 2700;
                       const cctMin = model?.cct_min_kelvin ?? 2700;
                       const cctMax = model?.cct_max_kelvin ?? 6500;
