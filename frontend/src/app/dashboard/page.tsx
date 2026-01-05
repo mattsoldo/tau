@@ -146,6 +146,7 @@ export default function DashboardPage() {
 
   // Request version refs for race condition handling
   const requestVersionRef = useRef<Map<string, number>>(new Map());
+  const mountedRef = useRef(true);
 
   // Auto-dismiss control errors
   useEffect(() => {
@@ -165,8 +166,10 @@ export default function DashboardPage() {
 
   // Cleanup debounce timeouts on unmount
   useEffect(() => {
+    mountedRef.current = true;
     const debounceRef = sliderDebounceRef.current;
     return () => {
+      mountedRef.current = false;
       debounceRef.forEach(timeout => clearTimeout(timeout));
       debounceRef.clear();
     };
@@ -365,36 +368,44 @@ export default function DashboardPage() {
 
         // Fetch fixtures for each group
         const groupFixturesMap = new Map<number, Fixture[]>();
-        await Promise.all(
+        const groupFixturesResults = await Promise.allSettled(
           groupsData.map(async (g: Group) => {
-            try {
-              const groupFixturesRes = await fetch(`${API_URL}/api/groups/${g.id}/fixtures`);
-              if (groupFixturesRes.ok) {
-                const groupFixturesData = await groupFixturesRes.json();
-                groupFixturesMap.set(g.id, groupFixturesData);
-              }
-            } catch {
-              // Ignore individual group fixture fetch errors
+            const groupFixturesRes = await fetch(`${API_URL}/api/groups/${g.id}/fixtures`);
+            if (groupFixturesRes.ok) {
+              const groupFixturesData = await groupFixturesRes.json();
+              return { groupId: g.id, fixtures: groupFixturesData };
             }
+            return null;
           })
         );
+
+        // Process successful fetches
+        groupFixturesResults.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value) {
+            groupFixturesMap.set(result.value.groupId, result.value.fixtures);
+          }
+        });
         setGroupFixtures(groupFixturesMap);
 
         // Fetch fixture states
         const statesMap = new Map<number, FixtureState>();
-        await Promise.all(
+        const statesResults = await Promise.allSettled(
           fixturesData.map(async (f: Fixture) => {
-            try {
-              const stateRes = await fetch(`${API_URL}/api/fixtures/${f.id}/state`);
-              if (stateRes.ok) {
-                const state = await stateRes.json();
-                statesMap.set(f.id, state);
-              }
-            } catch {
-              // Ignore individual state fetch errors
+            const stateRes = await fetch(`${API_URL}/api/fixtures/${f.id}/state`);
+            if (stateRes.ok) {
+              const state = await stateRes.json();
+              return { fixtureId: f.id, state };
             }
+            return null;
           })
         );
+
+        // Process successful fetches
+        statesResults.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value) {
+            statesMap.set(result.value.fixtureId, result.value.state);
+          }
+        });
         setFixtureStates(statesMap);
 
         setError(null);
@@ -529,6 +540,9 @@ export default function DashboardPage() {
     if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if component is still mounted
+      if (!mountedRef.current) return;
+
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
         return; // A newer request superseded this one
@@ -544,6 +558,7 @@ export default function DashboardPage() {
           throw new Error(`Failed to set brightness: ${response.statusText}`);
         }
       } catch {
+        if (!mountedRef.current) return;
         const fixtureName = getFixtureName(fixtureId);
         setControlError(`Failed to set brightness for ${fixtureName}`);
       }
@@ -573,6 +588,9 @@ export default function DashboardPage() {
     if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if component is still mounted
+      if (!mountedRef.current) return;
+
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
         return; // A newer request superseded this one
@@ -588,6 +606,7 @@ export default function DashboardPage() {
           throw new Error(`Failed to set CCT: ${response.statusText}`);
         }
       } catch {
+        if (!mountedRef.current) return;
         const fixtureName = getFixtureName(fixtureId);
         setControlError(`Failed to set color temperature for ${fixtureName}`);
       }
@@ -620,6 +639,9 @@ export default function DashboardPage() {
     if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if component is still mounted
+      if (!mountedRef.current) return;
+
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
         return; // A newer request superseded this one
@@ -635,6 +657,7 @@ export default function DashboardPage() {
           throw new Error(`Failed to set group brightness: ${response.statusText}`);
         }
       } catch {
+        if (!mountedRef.current) return;
         const group = groups.find(g => g.id === groupId);
         setControlError(`Failed to set brightness for ${group?.name || 'group'}`);
       }
@@ -667,6 +690,9 @@ export default function DashboardPage() {
     if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if component is still mounted
+      if (!mountedRef.current) return;
+
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
         return; // A newer request superseded this one
@@ -682,6 +708,7 @@ export default function DashboardPage() {
           throw new Error(`Failed to set group CCT: ${response.statusText}`);
         }
       } catch {
+        if (!mountedRef.current) return;
         const group = groups.find(g => g.id === groupId);
         setControlError(`Failed to set color temperature for ${group?.name || 'group'}`);
       }
