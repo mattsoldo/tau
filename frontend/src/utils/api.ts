@@ -4,6 +4,18 @@
  * Provides type-safe API methods and consistent error handling
  */
 
+import type {
+  Fixture,
+  FixtureModel,
+  FixtureState,
+  Group,
+  GroupState,
+  Switch,
+  SwitchModel,
+  SwitchCreate,
+  CircadianProfile,
+} from '../types/tau';
+
 /**
  * Get API URL for reverse proxy setup
  * - Uses empty string for relative paths (nginx handles routing)
