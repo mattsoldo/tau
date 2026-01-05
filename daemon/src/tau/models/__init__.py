@@ -15,6 +15,14 @@ from tau.models.scenes import Scene, SceneValue
 from tau.models.state import FixtureState, GroupState
 from tau.models.update_log import UpdateLog, UpdateStatus
 from tau.models.system_settings import SystemSetting
+from tau.models.software_update import (
+    Installation,
+    VersionHistory,
+    AvailableRelease,
+    UpdateCheck,
+    UpdateConfig,
+    DEFAULT_UPDATE_CONFIG,
+)
 
 __all__ = [
     "Base",
@@ -33,4 +41,10 @@ __all__ = [
     "UpdateLog",
     "UpdateStatus",
     "SystemSetting",
+    "Installation",
+    "VersionHistory",
+    "AvailableRelease",
+    "UpdateCheck",
+    "UpdateConfig",
+    "DEFAULT_UPDATE_CONFIG",
 ]
