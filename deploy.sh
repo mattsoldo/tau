@@ -165,7 +165,7 @@ echo -e "${GREEN}✓ Cache cleared${NC}"
 
 # Install/update frontend dependencies
 echo "  Installing frontend dependencies..."
-sudo -u $ACTUAL_USER npm ci --production -q
+sudo -u $ACTUAL_USER npm ci -q
 echo -e "${GREEN}✓ Frontend dependencies installed${NC}"
 
 # Build frontend (static export)
