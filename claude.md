@@ -589,6 +589,261 @@ echo "Deployment complete!"
 
 ---
 
+## Software Update System
+
+This section defines practices for the OTA update system. All code changes must maintain compatibility with this system.
+
+### Versioning
+
+We use **semantic versioning** (semver) with GitHub Releases as the update source.
+
+- **MAJOR** (v2.0.0): Breaking changes, database schema changes requiring migration, API incompatibilities
+- **MINOR** (v1.2.0): New features, backward-compatible additions
+- **PATCH** (v1.2.3): Bug fixes, performance improvements, no new features
+
+Pre-release versions use suffixes: `v2.0.0-beta.1`, `v2.0.0-rc.1`
+
+**Never** reference git commits or branch state for versioning in user-facing code. Always use release tags.
+
+### Release Artifacts
+
+Every release must include:
+
+1. **Debian package**: `lighting-control-{version}-armhf.deb`
+2. **Checksum file**: `lighting-control-{version}-armhf.deb.sha256`
+3. **Release notes** in the GitHub release body (not a separate file)
+
+When modifying build scripts or CI workflows, ensure these artifacts are generated and attached to releases.
+
+### Release Notes Format
+
+GitHub release bodies must follow this structure for the update UI to parse correctly:
+
+```markdown
+## What's New
+- Feature description (user-facing benefit)
+
+## Bug Fixes
+- Fix description
+
+## Breaking Changes
+- Description of breaking change and migration path
+- Or "None" if no breaking changes
+
+## Upgrade Notes
+- Any manual steps required (or omit section if none)
+```
+
+When adding features or fixing bugs, draft release note entries in commit messages or PR descriptions.
+
+### Database Migrations for Updates
+
+The update system runs migrations automatically after package installation.
+
+**Migration file naming**:
+```
+migrations/
+  001_initial_schema.sql
+  002_add_scene_table.sql
+  003_dali_dt8_support.sql
+```
+
+**Migration requirements**:
+
+1. **Migrations must be idempotent** — Safe to run multiple times
+2. **Always provide down migrations** — Required for rollback support
+3. **Never modify existing migrations** — Create new ones instead
+4. **Test rollback** — Verify `down` migration restores previous state
+
+```sql
+-- Example: migrations/004_add_preset_colors.sql
+
+-- migrate:up
+ALTER TABLE scenes ADD COLUMN preset_colors JSON;
+
+-- migrate:down
+ALTER TABLE scenes DROP COLUMN preset_colors;
+```
+
+**Schema version tracking**: The `schema_version` table tracks applied migrations. The update system checks this during rollback to determine if database restoration is needed.
+
+When writing migration code:
+- Increment `DATABASE_SCHEMA_VERSION` constant in `config.py`
+- Update the version check in `verify_installation()`
+
+### Service Management
+
+The lighting system runs as systemd services. The update system stops services before installation and restarts them after.
+
+**Service names** (do not change without updating update system):
+- `lighting-control.service` — Main daemon
+- `lighting-web.service` — Web UI server
+
+**Health check endpoint**: The update system verifies installation by calling `GET /api/health`. This endpoint must:
+- Return HTTP 200 when services are operational
+- Return the current version in the response
+- Be available within 30 seconds of service start
+
+```python
+@app.get("/api/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "version": __version__,
+        "database": check_database_connection(),
+        "ola": check_ola_connection()
+    }
+```
+
+Do not modify the health check response structure without updating `verify_installation()` in the update system.
+
+### Backward Compatibility
+
+**Configuration files**: When adding new configuration options:
+- Always provide defaults in code
+- Never require new config keys to be present
+- Use `config.get('new_key', default_value)` pattern
+
+```python
+# Correct — works with old config files
+check_interval = config.get('updates', {}).get('check_interval_hours', 24)
+
+# Wrong — breaks if key missing
+check_interval = config['updates']['check_interval_hours']
+```
+
+**API endpoints**:
+- New endpoints: Add freely
+- Modified endpoints: Maintain backward compatibility or version the API
+- Removed endpoints: Deprecate for one minor version before removal
+
+**Database schema**:
+- Adding columns: Provide defaults, make nullable, or backfill
+- Removing columns: Keep for one minor version, ignore in code
+- Changing types: Create new column, migrate data, drop old
+
+### Update System Code Locations
+
+```
+src/
+  update/
+    __init__.py
+    daemon.py          # Scheduled check daemon
+    github_client.py   # GitHub API interactions
+    version.py         # Version comparison, semver parsing
+    backup.py          # Backup creation and restoration
+    installer.py       # Package installation logic
+    state.py           # State machine, database operations
+    cli.py             # CLI commands (lighting-ctl update ...)
+
+tests/
+  update/
+    test_version.py
+    test_backup.py
+    test_state_machine.py
+    fixtures/
+      mock_releases.json
+```
+
+When modifying update system code:
+- Maintain state machine transitions in `state.py`
+- Test interrupted update recovery scenarios
+- Verify rollback works after your changes
+
+### Update Error Handling
+
+Update operations must handle failures gracefully. Follow these patterns:
+
+**Recoverable errors** (retry):
+```python
+@retry(max_attempts=3, backoff=exponential)
+def download_asset(url: str) -> Path:
+    ...
+```
+
+**Non-recoverable errors** (rollback):
+```python
+def install_package(path: Path) -> None:
+    try:
+        run_dpkg_install(path)
+    except DpkgError as e:
+        raise InstallationError(f"Package installation failed: {e}")
+        # State machine catches this and triggers rollback
+```
+
+**Critical errors** (manual intervention):
+```python
+def restore_from_backup(backup_path: Path) -> None:
+    try:
+        ...
+    except Exception as e:
+        log_critical(f"ROLLBACK FAILED: {e}")
+        log_critical("Manual intervention required")
+        # Do not raise — system is in inconsistent state
+        # Alert mechanisms should fire here
+```
+
+### Update Testing Requirements
+
+Before merging changes that affect the update system:
+
+1. **Unit tests pass**: `pytest tests/update/`
+2. **State machine coverage**: All transitions have tests
+3. **Rollback tested**: Verify rollback works for your changes
+4. **Mock API tests**: GitHub API interactions use fixtures
+
+**Testing update flows locally**:
+
+```bash
+# Simulate update check
+lighting-ctl update check --dry-run
+
+# Test backup/restore cycle
+lighting-ctl update backup --test
+lighting-ctl update restore --test --version v2.1.0
+
+# Verify package installation
+lighting-ctl update apply --dry-run v2.2.0
+```
+
+### CI/CD Integration
+
+The GitHub Actions workflow (`.github/workflows/release.yml`) handles:
+- Building the Debian package
+- Generating checksums
+- Creating draft releases
+
+When modifying this workflow:
+- Maintain the artifact naming convention
+- Ensure checksums are generated with SHA256
+- Keep releases as drafts until manually published
+
+**Required secrets**:
+- `GITHUB_TOKEN` — Provided automatically
+- No other secrets required for public repo releases
+
+### Prohibited Practices
+
+1. **Never auto-install updates** — User must explicitly trigger installation
+2. **Never skip checksum verification** — Even in development
+3. **Never delete all backups** — Minimum 1 must remain during operations
+4. **Never modify the installation singleton** — Only update system writes to `installation` table
+5. **Never hardcode versions** — Use `__version__` from package metadata
+6. **Never bypass the state machine** — All update operations go through state transitions
+
+### Adding New Update Features
+
+When extending the update system:
+
+1. Update this documentation
+2. Add database migrations if schema changes
+3. Maintain CLI and Web UI parity
+4. Update the state diagram if adding states
+5. Add monitoring/logging for new failure modes
+6. Test on actual Raspberry Pi hardware before release
+
+---
+
 ## Documentation Standards
 
 ### Living Documentation

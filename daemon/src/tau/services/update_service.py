@@ -5,7 +5,7 @@ Handles checking for updates, executing updates, and tracking update history.
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -141,7 +141,7 @@ class UpdateService:
                     update_available=commits_behind > 0,
                     current_version=current_version,
                     available_version=latest_version if commits_behind > 0 else None,
-                    last_check_at=datetime.utcnow(),
+                    last_check_at=datetime.now(timezone.utc),
                 )
 
             result = {
@@ -235,7 +235,7 @@ class UpdateService:
             status="in_progress",
             changelog=check_result["changelog"],
             update_type="manual",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
         self.db_session.add(update_log)
 
@@ -426,12 +426,12 @@ class UpdateService:
         if current_version == in_progress.version_after:
             # Update succeeded
             in_progress.status = "completed"
-            in_progress.completed_at = datetime.utcnow()
+            in_progress.completed_at = datetime.now(timezone.utc)
             logger.info(f"Update {in_progress.id} completed successfully")
         else:
             # Update failed
             in_progress.status = "failed"
-            in_progress.completed_at = datetime.utcnow()
+            in_progress.completed_at = datetime.now(timezone.utc)
             in_progress.error_message = (
                 f"Update failed to reach target version. "
                 f"Expected {in_progress.version_after}, got {current_version}"

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import UpdatePanel from '../../../components/UpdatePanel';
+import SoftwareUpdatePanel from '../../../components/SoftwareUpdatePanel';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -251,11 +251,11 @@ export default function SettingsPage() {
             <div className="px-6 py-4 border-b border-[#2a2a2f]">
               <h2 className="text-lg font-semibold">Software Updates</h2>
               <p className="text-sm text-[#636366] mt-1">
-                Manage system software updates
+                Manage system software updates via GitHub Releases
               </p>
             </div>
             <div className="p-6">
-              <UpdatePanel />
+              <SoftwareUpdatePanel />
             </div>
           </div>
 

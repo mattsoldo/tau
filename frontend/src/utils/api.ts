@@ -256,7 +256,7 @@ export const api = {
     status: () => request<StatusResponse>('/status'),
   },
 
-  // Updates
+  // Updates (legacy git-based)
   updates: {
     getStatus: () => request<UpdateStatusResponse>('/api/updates/status'),
     check: () => request<UpdateCheckResponse>('/api/updates/check'),
@@ -267,6 +267,32 @@ export const api = {
       request<ChangelogResponse>(
         `/api/updates/changelog?from_commit=${fromCommit}&to_commit=${toCommit || 'HEAD'}`
       ),
+  },
+
+  // Software Updates (GitHub Releases-based)
+  softwareUpdate: {
+    getStatus: () => request<SoftwareUpdateStatusResponse>('/api/system/update/status'),
+    check: () => request<SoftwareUpdateCheckResponse>('/api/system/update/check'),
+    apply: (targetVersion: string) =>
+      request<SoftwareUpdateApplyResponse>('/api/system/update/apply', {
+        method: 'POST',
+        body: JSON.stringify({ target_version: targetVersion }),
+      }),
+    rollback: (targetVersion?: string) =>
+      request<SoftwareUpdateRollbackResponse>('/api/system/update/rollback', {
+        method: 'POST',
+        body: JSON.stringify({ target_version: targetVersion }),
+      }),
+    getReleases: () => request<SoftwareReleaseInfo[]>('/api/system/update/releases'),
+    getHistory: (limit?: number) =>
+      request<SoftwareVersionHistoryEntry[]>(`/api/system/update/history?limit=${limit || 10}`),
+    getBackups: () => request<SoftwareBackupInfo[]>('/api/system/update/backups'),
+    getConfig: () => request<SoftwareUpdateConfig>('/api/system/update/config'),
+    updateConfig: (key: string, value: string) =>
+      request<SoftwareUpdateConfig>('/api/system/update/config', {
+        method: 'PUT',
+        body: JSON.stringify({ key, value }),
+      }),
   },
 };
 
@@ -432,4 +458,86 @@ export interface ChangelogResponse {
   changelog: string;
   from_commit: string;
   to_commit: string;
+}
+
+// Software Update Types (GitHub Releases-based)
+export interface SoftwareUpdateStatusResponse {
+  current_version: string;
+  installed_at: string;
+  install_method: string | null;
+  update_available: boolean;
+  available_version: string | null;
+  release_notes: string | null;
+  last_check_at: string | null;
+  state: string;
+  progress: Record<string, unknown>;
+}
+
+export interface SoftwareUpdateCheckResponse {
+  update_available: boolean;
+  current_version: string;
+  latest_version: string;
+  release_notes: string;
+  published_at: string | null;
+  prerelease: boolean;
+}
+
+export interface SoftwareUpdateApplyResponse {
+  success: boolean;
+  from_version: string;
+  to_version: string;
+  message: string;
+}
+
+export interface SoftwareUpdateRollbackResponse {
+  success: boolean;
+  from_version: string;
+  to_version: string;
+  message: string;
+}
+
+export interface SoftwareReleaseInfo {
+  version: string;
+  tag_name: string;
+  published_at: string;
+  release_notes: string | null;
+  asset_url: string | null;
+  asset_name: string | null;
+  asset_size: number | null;
+  prerelease: boolean;
+  has_asset: boolean;
+}
+
+export interface SoftwareVersionHistoryEntry {
+  version: string;
+  installed_at: string;
+  uninstalled_at: string | null;
+  backup_path: string | null;
+  backup_valid: boolean;
+  can_rollback: boolean;
+  is_current: boolean;
+  release_notes: string | null;
+}
+
+export interface SoftwareBackupInfo {
+  version: string;
+  backup_path: string;
+  created_at: string;
+  size_bytes: number;
+  size_mb: number;
+  valid: boolean;
+}
+
+export interface SoftwareUpdateConfig {
+  auto_check_enabled: string;
+  check_interval_hours: string;
+  include_prereleases: string;
+  max_backups: string;
+  github_repo: string;
+  github_token: string;
+  backup_location: string;
+  min_free_space_mb: string;
+  download_timeout_seconds: string;
+  verify_after_install: string;
+  rollback_on_service_failure: string;
 }
