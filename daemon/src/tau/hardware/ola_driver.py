@@ -144,18 +144,129 @@ class OLADriver(OLAInterface):
     def _ola_thread_main(self) -> None:
         """Background thread running OLA event loop"""
         try:
-            # Test connection by fetching universe list
+            # Test connection and verify universe configuration
             def on_universe_info(status, universes):
-                if status.Succeeded():
-                    self._connect_result = True
-                    logger.info(
-                        "ola_universes_found",
-                        count=len(universes) if universes else 0
-                    )
-                else:
+                if not status.Succeeded():
                     self._connect_result = False
                     logger.error("ola_fetch_universes_failed", message=status.message)
-                self._connect_event.set()
+                    self._connect_event.set()
+                    return
+
+                logger.info(
+                    "ola_universes_found",
+                    count=len(universes) if universes else 0
+                )
+
+                # Check if Universe 0 exists
+                universe_0_exists = False
+                if universes:
+                    for universe in universes:
+                        if universe.id == 0:
+                            universe_0_exists = True
+                            logger.info("ola_universe_0_exists", name=universe.name)
+                            break
+
+                if not universe_0_exists:
+                    logger.warning("ola_universe_0_missing")
+
+                # Now fetch devices to verify patching
+                def on_device_info(status, devices):
+                    if not status.Succeeded():
+                        logger.error("ola_fetch_devices_failed", message=status.message)
+                        self._connect_result = True  # Still connected, just couldn't verify devices
+                        self._connect_event.set()
+                        return
+
+                    if not devices:
+                        logger.warning("ola_no_devices_found")
+                        self._connect_result = True
+                        self._connect_event.set()
+                        return
+
+                    # Find ENTTEC USB DMX Pro (or similar DMX output device)
+                    enttec_device = None
+                    for device in devices:
+                        device_name = device.name.lower()
+                        # Look for ENTTEC or common DMX output devices
+                        if 'enttec' in device_name or 'dmx' in device_name:
+                            enttec_device = device
+                            logger.info(
+                                "ola_dmx_device_found",
+                                device_id=device.id,
+                                device_name=device.name,
+                                device_alias=device.alias
+                            )
+                            break
+
+                    if not enttec_device:
+                        logger.warning("ola_no_dmx_device_found")
+                        self._connect_result = True
+                        self._connect_event.set()
+                        return
+
+                    # Check if device has output port patched to Universe 0
+                    output_port_patched = False
+                    output_port_id = None
+
+                    if hasattr(enttec_device, 'output_ports'):
+                        for port in enttec_device.output_ports:
+                            if port.universe == 0:
+                                output_port_patched = True
+                                logger.info(
+                                    "ola_device_already_patched",
+                                    device_id=enttec_device.id,
+                                    port_id=port.id,
+                                    universe=0
+                                )
+                                break
+                            if output_port_id is None:
+                                output_port_id = port.id  # Remember first output port
+
+                    # If not patched, patch the first output port to Universe 0
+                    if not output_port_patched and output_port_id is not None:
+                        logger.warning(
+                            "ola_auto_patching_device",
+                            device_id=enttec_device.id,
+                            device_alias=enttec_device.alias,
+                            port_id=output_port_id,
+                            universe=0
+                        )
+
+                        def on_patch_complete(status):
+                            if status.Succeeded():
+                                logger.info(
+                                    "ola_device_patched_successfully",
+                                    device_id=enttec_device.id,
+                                    port_id=output_port_id,
+                                    universe=0
+                                )
+                            else:
+                                logger.error(
+                                    "ola_device_patch_failed",
+                                    device_id=enttec_device.id,
+                                    message=status.message
+                                )
+                            self._connect_result = True
+                            self._connect_event.set()
+
+                        # Patch port to Universe 0
+                        # PatchPort(device_alias, port_id, is_output, action, universe, callback)
+                        # action: 0 = unpatch, 1 = patch
+                        self.client.PatchPort(
+                            enttec_device.alias,
+                            output_port_id,
+                            True,  # is_output
+                            1,     # action: patch
+                            0,     # universe
+                            on_patch_complete
+                        )
+                    else:
+                        # Already patched or no output ports
+                        self._connect_result = True
+                        self._connect_event.set()
+
+                # Fetch devices to check patching
+                self.client.FetchDevices(on_device_info)
 
             # Fetch universes to verify connection
             self.client.FetchUniverses(on_universe_info)
