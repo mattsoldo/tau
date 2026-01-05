@@ -467,7 +467,7 @@ class LabJackDriver(LabJackInterface):
         """Check if this is a mock driver"""
         return False
 
-    def isconnected(self) -> bool:
+    def is_connected(self) -> bool:
         """
         Check if hardware is connected
 
