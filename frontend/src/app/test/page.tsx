@@ -140,10 +140,21 @@ export default function LightTestPage() {
 
       setFixtureModels(modelsData);
 
-      // Fetch state for all fixtures
+      // Filter out fixtures that are merged into other fixtures
+      // A fixture is "merged into" another if its dmx_channel_start matches another fixture's secondary_dmx_channel
+      const mergedChannels = new Set(
+        fixturesData
+          .filter((f: Fixture) => f.secondary_dmx_channel !== null)
+          .map((f: Fixture) => f.secondary_dmx_channel)
+      );
+      const visibleFixtures = fixturesData.filter(
+        (f: Fixture) => !mergedChannels.has(f.dmx_channel_start)
+      );
+
+      // Fetch state for all visible fixtures
       const now = Date.now();
       const fixturesWithState: FixtureWithState[] = await Promise.all(
-        fixturesData.map(async (fixture: Fixture) => {
+        visibleFixtures.map(async (fixture: Fixture) => {
           const model = modelsData.find((m: FixtureModel) => m.id === fixture.fixture_model_id);
           let state: FixtureState | undefined;
 
