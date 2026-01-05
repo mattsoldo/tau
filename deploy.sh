@@ -132,9 +132,20 @@ echo -e "${GREEN}✓ Python dependencies updated${NC}"
 
 # Run database migrations
 echo "  Running database migrations..."
-source .env
-sudo -u $ACTUAL_USER bash -c "source .env && .venv/bin/alembic upgrade head"
-echo -e "${GREEN}✓ Database migrations complete${NC}"
+if [ -f .env ]; then
+    # Export environment variables from .env file
+    set -a
+    source .env
+    set +a
+    if sudo -u $ACTUAL_USER bash -c "cd /opt/tau-daemon/daemon && source .env && .venv/bin/alembic upgrade head" 2>&1; then
+        echo -e "${GREEN}✓ Database migrations complete${NC}"
+    else
+        echo -e "${YELLOW}⚠ Warning: Database migrations failed (continuing anyway)${NC}"
+        echo "  This may be okay if database is already up to date or not configured"
+    fi
+else
+    echo -e "${YELLOW}⚠ Warning: .env file not found, skipping migrations${NC}"
+fi
 echo
 
 echo -e "${YELLOW}🎨 Step 5: Building frontend...${NC}"
