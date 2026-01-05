@@ -40,6 +40,10 @@ upstream tau_frontend_dev {
     server 127.0.0.1:3000;
 }
 
+upstream ola_web {
+    server 127.0.0.1:9090;
+}
+
 server {
     listen 80;
     server_name _;
@@ -74,6 +78,20 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 86400;
+    }
+
+    # LabJack and OLA monitor HTML files (served by backend)
+    location ~ ^/(labjack_monitor\.html|ola_mock_interface\.html)$ {
+        proxy_pass http://tau_backend;
+        proxy_http_version 1.1;
+    }
+
+    # OLA Web UI (port 9090)
+    location /ola/ {
+        proxy_pass http://ola_web/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 
     # Next.js dev server (with hot reload)
