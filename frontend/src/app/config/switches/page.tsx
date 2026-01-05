@@ -352,6 +352,13 @@ export default function SwitchesPage() {
       return;
     }
 
+    // Validate switch_type is a valid value
+    const validSwitchTypes: SwitchType[] = ['normally-open', 'normally-closed'];
+    if (!validSwitchTypes.includes(formData.switch_type)) {
+      setError('Invalid switch type. Must be "normally-open" or "normally-closed"');
+      return;
+    }
+
     const targetGroupId = formData.target_type === 'group' && formData.target_group_id
       ? parseInt(formData.target_group_id)
       : null;
@@ -572,7 +579,7 @@ export default function SwitchesPage() {
                         </div>
                         <div className="flex gap-1 items-center">
                           <span className="text-xs text-[#636366]">
-                            {sw.switch_type === 'normally-closed' ? 'NC' : 'NO'}
+                            {(!sw.switch_type || sw.switch_type === 'normally-closed') ? 'NC' : 'NO'}
                           </span>
                           {sw.invert_reading && (
                             <span className="px-1.5 py-0.5 text-[10px] bg-amber-500/10 text-amber-400 rounded">
