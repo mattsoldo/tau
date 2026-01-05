@@ -15,6 +15,7 @@ from tau.models.scenes import Scene, SceneValue
 from tau.models.state import FixtureState, GroupState
 from tau.models.update_log import UpdateLog, UpdateStatus
 from tau.models.system_settings import SystemSetting
+from tau.models.override import Override, TargetType, OverrideType, OverrideSource
 
 __all__ = [
     "Base",
@@ -33,4 +34,8 @@ __all__ = [
     "UpdateLog",
     "UpdateStatus",
     "SystemSetting",
+    "Override",
+    "TargetType",
+    "OverrideType",
+    "OverrideSource",
 ]
