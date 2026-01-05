@@ -82,8 +82,10 @@ class TauDaemon:
         )
         hardware_ok = await self.hardware_manager.initialize()
         if not hardware_ok:
-            logger.error("hardware_initialization_failed")
-            raise RuntimeError("Failed to initialize hardware")
+            logger.warning(
+                "hardware_initialization_failed",
+                message="Hardware not available - daemon will start in software-only mode"
+            )
 
         # Initialize lighting controller
         logger.info("initializing_lighting_controller")
@@ -94,8 +96,10 @@ class TauDaemon:
         )
         controller_ok = await self.lighting_controller.initialize()
         if not controller_ok:
-            logger.error("lighting_controller_initialization_failed")
-            raise RuntimeError("Failed to initialize lighting controller")
+            logger.warning(
+                "lighting_controller_initialization_failed",
+                message="Lighting controller running in degraded mode without hardware"
+            )
 
         # Initialize switch auto-discovery
         logger.info("initializing_switch_discovery")

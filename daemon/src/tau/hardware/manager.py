@@ -137,29 +137,31 @@ class HardwareManager:
         Initialize all hardware
 
         Returns:
-            True if all hardware initialized successfully
+            True if at least one hardware device initialized successfully, False otherwise
         """
         logger.info("hardware_initializing")
 
         try:
-            # Connect to LabJack
+            # Try to connect to LabJack (non-fatal if it fails)
             labjack_ok = await self.labjack.connect()
             if not labjack_ok:
-                logger.error("labjack_connection_failed")
-                return False
+                logger.warning("labjack_connection_failed", message="LabJack not available - will retry in background")
 
-            # Connect to OLA
+            # Try to connect to OLA (non-fatal if it fails)
             ola_ok = await self.ola.connect()
             if not ola_ok:
-                logger.error("ola_connection_failed")
-                await self.labjack.disconnect()
-                return False
+                logger.warning("ola_connection_failed", message="OLA not available - will retry in background")
 
-            # Start health monitoring
+            # Start health monitoring even if hardware isn't connected yet
+            # The health check loop will attempt reconnection
             self.health_check_task = asyncio.create_task(self._health_check_loop())
 
-            logger.info("hardware_initialized")
-            return True
+            if labjack_ok or ola_ok:
+                logger.info("hardware_initialized", labjack_ok=labjack_ok, ola_ok=ola_ok)
+                return True
+            else:
+                logger.warning("hardware_initialization_incomplete", message="No hardware available - running in software-only mode")
+                return False
 
         except Exception as e:
             logger.error("hardware_initialization_failed", error=str(e), exc_info=True)
@@ -191,7 +193,12 @@ class HardwareManager:
         logger.info("hardware_shutdown_complete")
 
     async def _health_check_loop(self) -> None:
-        """Background task for periodic health checks"""
+        """
+        Background task for periodic health checks and automatic reconnection
+
+        This loop monitors hardware health and attempts to reconnect to devices
+        that become disconnected or are plugged in after startup.
+        """
         logger.info("health_check_loop_started", interval_s=self.health_check_interval)
 
         try:
@@ -200,15 +207,33 @@ class HardwareManager:
 
                 # Check LabJack health
                 labjack_ok = await self.labjack.health_check()
+
+                # If LabJack failed health check, try to reconnect
+                if not labjack_ok:
+                    logger.info("labjack_unhealthy_attempting_reconnect")
+                    reconnect_ok = await self.labjack.connect()
+                    if reconnect_ok:
+                        logger.info("labjack_reconnected_successfully")
+                        labjack_ok = True
+
+                # Check OLA health
                 ola_ok = await self.ola.health_check()
+
+                # If OLA failed health check, try to reconnect
+                if not ola_ok:
+                    logger.info("ola_unhealthy_attempting_reconnect")
+                    reconnect_ok = await self.ola.connect()
+                    if reconnect_ok:
+                        logger.info("ola_reconnected_successfully")
+                        ola_ok = True
 
                 if labjack_ok and ola_ok:
                     self.health_checks_passed += 1
-                    logger.debug("health_check_passed")
+                    logger.debug("health_check_passed", labjack_ok=True, ola_ok=True)
                 else:
                     self.health_checks_failed += 1
-                    logger.warning(
-                        "health_check_failed",
+                    logger.debug(
+                        "health_check_incomplete",
                         labjack_ok=labjack_ok,
                         ola_ok=ola_ok,
                     )

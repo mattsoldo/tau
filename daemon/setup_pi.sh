@@ -63,17 +63,30 @@ else
     echo "✓ OLA already installed"
 fi
 
-# 4. LabJack USB permissions (U3-HV support)
+# 4. Install LabJack Exodriver (U3-HV support)
 echo ""
-echo "4. Setting up LabJack USB permissions..."
-sudo tee /etc/udev/rules.d/99-labjack.rules > /dev/null <<EOF
-# LabJack U3-HV USB permissions
-SUBSYSTEM=="usb", ATTR{idVendor}=="0cd5", ATTR{idProduct}=="0009", MODE="0666", GROUP="plugdev"
-EOF
+echo "4. Installing LabJack Exodriver..."
 
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-echo "✓ LabJack udev rules installed"
+# Check if Exodriver is already installed
+if [ -f "/usr/local/lib/liblabjackusb.so" ]; then
+    echo "✓ LabJack Exodriver already installed"
+else
+    echo "Building and installing LabJack Exodriver..."
+
+    # Clone and build Exodriver
+    cd /tmp
+    rm -rf exodriver
+    git clone https://github.com/labjack/exodriver.git
+    cd exodriver
+    sudo ./install.sh
+
+    echo "✓ LabJack Exodriver installed"
+    echo "  Note: Unplug and replug LabJack devices for udev rules to take effect"
+fi
+
+# Also add tau user to adm group (required for LabJack access with Exodriver's default udev rules)
+sudo usermod -a -G adm tau
+echo "✓ Added tau user to adm group for LabJack access"
 
 # 5. Create tau user and add to necessary groups
 echo ""
