@@ -11,6 +11,7 @@ from tau.database import get_session
 from tau.models.groups import Group, GroupFixture
 from tau.models.fixtures import Fixture
 from tau.models.state import GroupState
+from tau.api import get_daemon_instance
 from tau.api.schemas import (
     GroupCreate,
     GroupUpdate,
@@ -58,6 +59,15 @@ async def create_group(
     )
     session.add(state)
     await session.commit()
+
+    # Register group with StateManager so it can be controlled immediately
+    daemon = get_daemon_instance()
+    if daemon and daemon.state_manager:
+        daemon.state_manager.register_group(group.id)
+        # Set circadian enabled flag
+        group_state = daemon.state_manager.groups.get(group.id)
+        if group_state:
+            group_state.circadian_enabled = group_data.circadian_enabled
 
     return group
 
@@ -115,6 +125,11 @@ async def delete_group(
 
     await session.delete(group)
     await session.commit()
+
+    # Unregister group from StateManager cache
+    daemon = get_daemon_instance()
+    if daemon and daemon.state_manager:
+        daemon.state_manager.unregister_group(group_id)
 
 
 @router.get("/{group_id}/state", response_model=GroupStateResponse)
@@ -184,6 +199,11 @@ async def add_fixture_to_group(
     session.add(membership)
     await session.commit()
 
+    # Update StateManager cache so the fixture responds to group controls immediately
+    daemon = get_daemon_instance()
+    if daemon and daemon.state_manager:
+        daemon.state_manager.add_fixture_to_group(fixture_data.fixture_id, group_id)
+
     return {"message": "Fixture added to group successfully"}
 
 
@@ -207,3 +227,8 @@ async def remove_fixture_from_group(
 
     await session.delete(membership)
     await session.commit()
+
+    # Update StateManager cache so removed fixtures no longer respond to group controls
+    daemon = get_daemon_instance()
+    if daemon and daemon.state_manager:
+        daemon.state_manager.remove_fixture_from_group(fixture_id, group_id)

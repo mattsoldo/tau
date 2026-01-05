@@ -204,6 +204,57 @@ class StateManager:
         self.fixture_group_memberships[fixture_id].add(group_id)
         logger.debug("fixture_added_to_group", fixture_id=fixture_id, group_id=group_id)
 
+    def remove_fixture_from_group(self, fixture_id: int, group_id: int) -> bool:
+        """
+        Remove a fixture from a group's membership.
+
+        This updates the in-memory cache so subsequent group operations
+        will not affect this fixture. Must be called when fixtures are
+        removed from groups via the API.
+
+        Args:
+            fixture_id: Fixture ID
+            group_id: Group ID
+
+        Returns:
+            True if the fixture was removed, False if it wasn't in the group
+        """
+        if fixture_id not in self.fixture_group_memberships:
+            return False
+
+        if group_id not in self.fixture_group_memberships[fixture_id]:
+            return False
+
+        self.fixture_group_memberships[fixture_id].discard(group_id)
+        logger.debug("fixture_removed_from_group", fixture_id=fixture_id, group_id=group_id)
+        return True
+
+    def unregister_group(self, group_id: int) -> bool:
+        """
+        Unregister a group from the state manager.
+
+        Removes the group from the groups dict and removes all fixture
+        memberships for this group. Must be called when groups are deleted
+        via the API.
+
+        Args:
+            group_id: Group ID to unregister
+
+        Returns:
+            True if the group was unregistered, False if it wasn't found
+        """
+        if group_id not in self.groups:
+            return False
+
+        # Remove the group from all fixture memberships
+        for fixture_id in self.fixture_group_memberships:
+            self.fixture_group_memberships[fixture_id].discard(group_id)
+
+        # Remove the group state
+        del self.groups[group_id]
+        logger.debug("group_unregistered", group_id=group_id)
+        return True
+
     def get_fixture_state(self, fixture_id: int) -> Optional[FixtureStateData]:
         """
         Get current state for a fixture

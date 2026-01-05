@@ -248,7 +248,8 @@ class TestStateManagerGroups:
 
         assert 1 in state_manager.groups
         assert state_manager.groups[1].group_id == 1
-        assert state_manager.groups[1].brightness == 0.0
+        # Default brightness is 1.0 (pass-through multiplier)
+        assert state_manager.groups[1].brightness == 1.0
 
     def test_add_fixture_to_group(self, state_manager):
         """Test adding a fixture to a group."""
@@ -273,18 +274,21 @@ class TestStateManagerGroups:
         assert 2 in memberships
 
     def test_set_group_brightness(self, state_manager):
-        """Test setting group brightness."""
+        """Test setting group brightness updates group state."""
         state_manager.register_group(1)
 
+        # Note: set_group_brightness returns count of fixtures updated (int)
         result = state_manager.set_group_brightness(1, 0.8)
 
-        assert result is True
+        # No fixtures in group, so 0 updated, but group state should still update
+        assert result == 0  # No fixtures to update
         assert state_manager.groups[1].brightness == 0.8
 
     def test_set_group_brightness_not_found(self, state_manager):
-        """Test setting brightness for non-existent group."""
+        """Test setting brightness for non-existent group returns 0."""
+        # set_group_brightness returns 0 when group not found
         result = state_manager.set_group_brightness(999, 0.5)
-        assert result is False
+        assert result == 0
 
     def test_set_group_circadian(self, state_manager):
         """Test setting circadian values for a group."""
@@ -295,6 +299,105 @@ class TestStateManagerGroups:
         assert result is True
         assert state_manager.groups[1].circadian_brightness == 0.8
         assert state_manager.groups[1].circadian_color_temp == 4000
+
+    def test_remove_fixture_from_group(self, state_manager):
+        """Test removing a fixture from a group."""
+        state_manager.register_fixture(1)
+        state_manager.register_group(1)
+        state_manager.add_fixture_to_group(1, 1)
+
+        result = state_manager.remove_fixture_from_group(1, 1)
+
+        assert result is True
+        assert 1 not in state_manager.fixture_group_memberships[1]
+
+    def test_remove_fixture_from_group_not_member(self, state_manager):
+        """Test removing fixture that's not in the group returns False."""
+        state_manager.register_fixture(1)
+        state_manager.register_group(1)
+        # Don't add fixture to group
+
+        result = state_manager.remove_fixture_from_group(1, 1)
+
+        assert result is False
+
+    def test_remove_fixture_from_group_fixture_not_registered(self, state_manager):
+        """Test removing unregistered fixture returns False."""
+        state_manager.register_group(1)
+
+        result = state_manager.remove_fixture_from_group(999, 1)
+
+        assert result is False
+
+    def test_remove_fixture_from_one_group_keeps_others(self, state_manager):
+        """Test removing from one group doesn't affect other memberships."""
+        state_manager.register_fixture(1)
+        state_manager.register_group(1)
+        state_manager.register_group(2)
+        state_manager.add_fixture_to_group(1, 1)
+        state_manager.add_fixture_to_group(1, 2)
+
+        state_manager.remove_fixture_from_group(1, 1)
+
+        # Should still be in group 2
+        assert 1 not in state_manager.fixture_group_memberships[1]
+        assert 2 in state_manager.fixture_group_memberships[1]
+
+    def test_unregister_group(self, state_manager):
+        """Test unregistering a group."""
+        state_manager.register_group(1)
+
+        result = state_manager.unregister_group(1)
+
+        assert result is True
+        assert 1 not in state_manager.groups
+
+    def test_unregister_group_not_found(self, state_manager):
+        """Test unregistering non-existent group returns False."""
+        result = state_manager.unregister_group(999)
+
+        assert result is False
+
+    def test_unregister_group_removes_memberships(self, state_manager):
+        """Test unregistering group removes it from all fixture memberships."""
+        state_manager.register_fixture(1)
+        state_manager.register_fixture(2)
+        state_manager.register_group(1)
+        state_manager.register_group(2)
+        state_manager.add_fixture_to_group(1, 1)
+        state_manager.add_fixture_to_group(2, 1)
+        state_manager.add_fixture_to_group(1, 2)
+
+        state_manager.unregister_group(1)
+
+        # Group 1 should be removed from all fixtures
+        assert 1 not in state_manager.fixture_group_memberships[1]
+        assert 1 not in state_manager.fixture_group_memberships[2]
+        # Group 2 membership should still exist
+        assert 2 in state_manager.fixture_group_memberships[1]
+
+    def test_removed_fixture_not_affected_by_group_brightness(self, state_manager):
+        """Test that a removed fixture is not affected by group brightness changes."""
+        state_manager.register_fixture(1)
+        state_manager.register_fixture(2)
+        state_manager.register_group(1)
+        state_manager.add_fixture_to_group(1, 1)
+        state_manager.add_fixture_to_group(2, 1)
+
+        # Set initial brightness
+        state_manager.set_fixture_brightness(1, 0.5)
+        state_manager.set_fixture_brightness(2, 0.5)
+
+        # Remove fixture 1 from group
+        state_manager.remove_fixture_from_group(1, 1)
+
+        # Change group brightness
+        state_manager.set_group_brightness(1, 1.0)
+
+        # Fixture 1 should not have changed (still 0.5)
+        assert state_manager.fixtures[1].goal_brightness == 0.5
+        # Fixture 2 should have changed
+        assert state_manager.fixtures[2].goal_brightness == 1.0
 
 
 class TestStateManagerEffectiveState:
