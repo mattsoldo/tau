@@ -19,6 +19,91 @@ The system operates in two modes:
 
 ---
 
+## Version Management and Semantic Versioning
+
+### Current Version: 1.0.0
+
+Tau follows **Semantic Versioning 2.0.0** (SemVer) standards. The version format is `MAJOR.MINOR.PATCH`:
+
+- **MAJOR** (1.x.x): Breaking changes, incompatible API changes, major architectural changes
+- **MINOR** (x.1.x): New features, backwards-compatible functionality additions
+- **PATCH** (x.x.1): Bug fixes, backwards-compatible bug fixes
+
+### Version Bumping Guidelines
+
+When committing code, automatically determine the appropriate version bump:
+
+#### MAJOR version (Breaking Changes):
+- Database schema changes that aren't backwards compatible
+- API endpoint removal or incompatible parameter changes
+- Configuration file format changes requiring manual intervention
+- Hardware interface changes breaking existing setups
+- **Example**: Changing `/api/fixtures/{id}` response structure
+
+#### MINOR version (New Features):
+- New API endpoints or features
+- New database tables/columns (backwards compatible)
+- New configuration options with sensible defaults
+- New UI components or pages
+- Significant enhancements to existing features
+- **Example**: Adding software update system, new DTW feature
+
+#### PATCH version (Bug Fixes):
+- Bug fixes that don't change functionality
+- Performance improvements
+- Documentation updates
+- UI tweaks and polish
+- Dependency updates (non-breaking)
+- **Example**: Fixing timezone bug, correcting HTTP method
+
+### Automatic Versioning Workflow
+
+When preparing to commit changes:
+
+1. **Analyze the changes** made in the commit
+2. **Determine version bump** based on SemVer guidelines above
+3. **Update version** in:
+   - Database: `UPDATE installation SET current_version='X.Y.Z' WHERE id=1;`
+   - Git tag: `git tag vX.Y.Z`
+4. **Include version** in commit message: `v1.2.3: Add feature description`
+
+Example commit workflow:
+```bash
+# After implementing new feature (MINOR bump 1.0.0 → 1.1.0)
+ssh soldo@tau "export PGPASSWORD='tau_password' && \
+  psql -h localhost -U tau_daemon -d tau_lighting -c \
+  \"UPDATE installation SET current_version='1.1.0', commit_sha='$(git rev-parse --short HEAD)' WHERE id=1;\""
+
+git tag v1.1.0
+git commit -m "v1.1.0: Add automated backup system
+
+- Implement backup scheduling
+- Add backup retention policies
+- Create backup management UI"
+git push origin main --tags
+```
+
+### GitHub Release Creation
+
+For MINOR and MAJOR versions, create a GitHub Release:
+
+1. **Tag the version**: `git tag vX.Y.Z`
+2. **Push tag**: `git push origin vX.Y.Z`
+3. **Create release** via GitHub API or web interface
+4. **Include changelog** with all changes since last version
+5. **Attach assets** if applicable (deployment packages, documentation)
+
+The software update system will automatically detect new releases and offer them to users.
+
+### Version Consistency Rules
+
+- **Never skip versions**: Always increment from current version
+- **Database version matches git tag**: Keep installation.current_version in sync
+- **Update on every merge to main**: Main branch should always have correct version
+- **Pre-release versions**: Use `1.2.0-beta.1` for testing (update system can filter these)
+
+---
+
 ## Development Environment
 
 ### Raspberry Pi Access
