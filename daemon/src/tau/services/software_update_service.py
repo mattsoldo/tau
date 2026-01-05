@@ -314,8 +314,13 @@ class SoftwareUpdateService:
                 error_message=f"Rate limited until {e.reset_at.isoformat()}",
             )
             self._current_state = "idle"
+
+            # Suggest adding GitHub token for higher rate limits
+            has_token = bool(await self._get_config("github_token"))
+            token_hint = "" if has_token else " Configure a GitHub token in settings for higher rate limits (5000 req/hour vs 60 req/hour)."
+
             raise UpdateError(
-                f"GitHub API rate limit exceeded. Try again after {e.reset_at.strftime('%H:%M:%S')}"
+                f"GitHub API rate limit exceeded. Try again after {e.reset_at.strftime('%H:%M:%S')}.{token_hint}"
             ) from e
 
         except GitHubAPIError as e:
