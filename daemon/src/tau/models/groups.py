@@ -52,6 +52,14 @@ class Group(Base):
         nullable=True,
     )
 
+    # Default Settings (used when switch turns group on)
+    default_max_brightness: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, server_default="1000"
+    )
+    default_cct_kelvin: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,

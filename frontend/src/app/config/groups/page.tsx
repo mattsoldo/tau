@@ -12,6 +12,8 @@ interface Group {
   description: string | null;
   circadian_enabled: boolean;
   circadian_profile_id: number | null;
+  default_max_brightness: number | null;
+  default_cct_kelvin: number | null;
   created_at: string;
 }
 
@@ -32,6 +34,8 @@ interface GroupFormData {
   description: string;
   circadian_enabled: boolean;
   circadian_profile_id: string;
+  default_max_brightness: string;
+  default_cct_kelvin: string;
 }
 
 const emptyGroupFormData: GroupFormData = {
@@ -39,6 +43,8 @@ const emptyGroupFormData: GroupFormData = {
   description: '',
   circadian_enabled: false,
   circadian_profile_id: '',
+  default_max_brightness: '1000',
+  default_cct_kelvin: '',
 };
 
 export default function GroupsPage() {
@@ -169,6 +175,8 @@ export default function GroupsPage() {
       description: group.description || '',
       circadian_enabled: group.circadian_enabled,
       circadian_profile_id: group.circadian_profile_id?.toString() || '',
+      default_max_brightness: group.default_max_brightness?.toString() || '1000',
+      default_cct_kelvin: group.default_cct_kelvin?.toString() || '',
     });
     setIsGroupModalOpen(true);
   };
@@ -187,6 +195,12 @@ export default function GroupsPage() {
         circadian_enabled: groupFormData.circadian_enabled,
         circadian_profile_id: groupFormData.circadian_profile_id
           ? parseInt(groupFormData.circadian_profile_id)
+          : null,
+        default_max_brightness: groupFormData.default_max_brightness
+          ? parseInt(groupFormData.default_max_brightness)
+          : 1000,
+        default_cct_kelvin: groupFormData.default_cct_kelvin
+          ? parseInt(groupFormData.default_cct_kelvin)
           : null,
       };
 
@@ -552,6 +566,70 @@ export default function GroupsPage() {
                   )}
                 </div>
               )}
+
+              {/* Default Settings Section */}
+              <div className="pt-4 border-t border-[#2a2a2f]">
+                <h3 className="text-sm font-medium text-white mb-3">Switch Default Settings</h3>
+                <p className="text-xs text-[#636366] mb-3">
+                  These settings will be used when a switch turns this group on
+                </p>
+
+                {/* Default Brightness */}
+                <div className="mb-3">
+                  <label className="block text-sm font-medium text-[#a1a1a6] mb-1.5">
+                    Default Brightness
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="1000"
+                      step="10"
+                      value={groupFormData.default_max_brightness}
+                      onChange={(e) => setGroupFormData({ ...groupFormData, default_max_brightness: e.target.value })}
+                      className="flex-1 h-2 bg-[#2a2a2f] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-amber-500"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="1000"
+                      step="10"
+                      value={groupFormData.default_max_brightness}
+                      onChange={(e) => setGroupFormData({ ...groupFormData, default_max_brightness: e.target.value })}
+                      className="w-20 px-3 py-2 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg text-white text-center focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-sm text-[#636366] w-8">
+                      {Math.round((parseInt(groupFormData.default_max_brightness) / 1000) * 100)}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Default CCT */}
+                <div>
+                  <label className="block text-sm font-medium text-[#a1a1a6] mb-1.5">
+                    Default Color Temperature (Optional)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min="1000"
+                      max="10000"
+                      step="100"
+                      value={groupFormData.default_cct_kelvin}
+                      onChange={(e) => setGroupFormData({ ...groupFormData, default_cct_kelvin: e.target.value })}
+                      placeholder="Leave empty to skip"
+                      className="flex-1 px-3 py-2 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg text-white placeholder:text-[#636366] focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-sm text-[#636366]">K</span>
+                  </div>
+                  <p className="text-xs text-[#636366] mt-1">
+                    {groupFormData.default_cct_kelvin
+                      ? `${parseInt(groupFormData.default_cct_kelvin)}K - ${parseInt(groupFormData.default_cct_kelvin) < 2700 ? 'Warm' : parseInt(groupFormData.default_cct_kelvin) < 4000 ? 'Neutral' : 'Cool'} white`
+                      : 'No color temperature change on switch activation'
+                    }
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="px-6 py-4 border-t border-[#2a2a2f] flex justify-end gap-3">
               <button

@@ -105,6 +105,8 @@ class GroupBase(BaseModel):
     description: Optional[str] = None
     circadian_enabled: bool = False
     circadian_profile_id: Optional[int] = None
+    default_max_brightness: Optional[int] = Field(1000, ge=0, le=1000, description="Default maximum brightness (0-1000) when switch turns group on")
+    default_cct_kelvin: Optional[int] = Field(None, ge=1000, le=10000, description="Default color temperature in Kelvin when switch turns group on")
 
 
 class GroupCreate(GroupBase):
@@ -116,6 +118,8 @@ class GroupUpdate(BaseModel):
     description: Optional[str] = None
     circadian_enabled: Optional[bool] = None
     circadian_profile_id: Optional[int] = None
+    default_max_brightness: Optional[int] = Field(None, ge=0, le=1000, description="Default maximum brightness (0-1000) when switch turns group on")
+    default_cct_kelvin: Optional[int] = Field(None, ge=1000, le=10000, description="Default color temperature in Kelvin when switch turns group on")
 
 
 class GroupResponse(GroupBase):

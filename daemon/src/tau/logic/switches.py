@@ -231,6 +231,39 @@ class SwitchHandler:
                 # TODO: Implement paddle composite (multi-button)
                 pass
 
+    async def _get_group_defaults(self, group_id: int) -> Tuple[float, Optional[int]]:
+        """
+        Get group's default brightness and CCT settings
+
+        Returns:
+            Tuple of (brightness 0.0-1.0, cct_kelvin or None)
+        """
+        try:
+            async with get_db_session() as session:
+                from sqlalchemy import select
+                from tau.models.groups import Group
+
+                result = await session.execute(
+                    select(Group).where(Group.id == group_id)
+                )
+                group = result.scalar_one_or_none()
+
+                if group:
+                    # Convert 0-1000 to 0.0-1.0
+                    brightness = (group.default_max_brightness or 1000) / 1000.0
+                    cct = group.default_cct_kelvin
+                    return (brightness, cct)
+
+        except Exception as e:
+            logger.warning(
+                "failed_to_get_group_defaults",
+                group_id=group_id,
+                error=str(e)
+            )
+
+        # Fallback to 100% brightness, no CCT change
+        return (1.0, None)
+
     async def _process_simple_switch(
         self,
         switch: Switch,
@@ -273,18 +306,45 @@ class SwitchHandler:
                 state="on" if digital_value else "off"
             )
         elif switch.target_group_id:
-            self.state_manager.set_group_brightness(
-                switch.target_group_id,
-                brightness,
-                transition_duration=0.5,
-                timestamp=current_time
-            )
-            logger.debug(
-                "switch_toggled_group",
-                switch_id=switch.id,
-                group_id=switch.target_group_id,
-                state="on" if digital_value else "off"
-            )
+            # When turning on, use group's default settings
+            if digital_value:  # Turning on
+                brightness, cct = await self._get_group_defaults(switch.target_group_id)
+
+                self.state_manager.set_group_brightness(
+                    switch.target_group_id,
+                    brightness,
+                    transition_duration=0.5,
+                    timestamp=current_time
+                )
+
+                # Also set CCT if group has a default
+                if cct is not None:
+                    self.state_manager.set_group_cct(
+                        switch.target_group_id,
+                        cct,
+                        transition_duration=0.5,
+                        timestamp=current_time
+                    )
+
+                logger.debug(
+                    "switch_turned_on_group",
+                    switch_id=switch.id,
+                    group_id=switch.target_group_id,
+                    brightness=brightness,
+                    cct=cct
+                )
+            else:  # Turning off
+                self.state_manager.set_group_brightness(
+                    switch.target_group_id,
+                    0.0,
+                    transition_duration=0.5,
+                    timestamp=current_time
+                )
+                logger.debug(
+                    "switch_turned_off_group",
+                    switch_id=switch.id,
+                    group_id=switch.target_group_id
+                )
 
         self.events_processed += 1
 
@@ -498,19 +558,45 @@ class SwitchHandler:
                 )
             elif switch.target_group_id:
                 current = self.state_manager.get_group_state(switch.target_group_id)
-                new_brightness = 0.0 if (current and current.brightness > 0) else 1.0
+                is_currently_on = current and current.brightness > 0
 
-                self.state_manager.set_group_brightness(
-                    switch.target_group_id,
-                    new_brightness,
-                    timestamp=current_time
-                )
-                logger.debug(
-                    "retractive_toggled_group",
-                    switch_id=switch.id,
-                    group_id=switch.target_group_id,
-                    brightness=new_brightness
-                )
+                if is_currently_on:
+                    # Turning off
+                    self.state_manager.set_group_brightness(
+                        switch.target_group_id,
+                        0.0,
+                        timestamp=current_time
+                    )
+                    logger.debug(
+                        "retractive_toggled_group_off",
+                        switch_id=switch.id,
+                        group_id=switch.target_group_id
+                    )
+                else:
+                    # Turning on - use group defaults
+                    brightness, cct = await self._get_group_defaults(switch.target_group_id)
+
+                    self.state_manager.set_group_brightness(
+                        switch.target_group_id,
+                        brightness,
+                        timestamp=current_time
+                    )
+
+                    # Also set CCT if group has a default
+                    if cct is not None:
+                        self.state_manager.set_group_cct(
+                            switch.target_group_id,
+                            cct,
+                            timestamp=current_time
+                        )
+
+                    logger.debug(
+                        "retractive_toggled_group_on",
+                        switch_id=switch.id,
+                        group_id=switch.target_group_id,
+                        brightness=brightness,
+                        cct=cct
+                    )
 
     async def _handle_hold_event(
         self,
