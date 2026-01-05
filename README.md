@@ -157,6 +157,47 @@ npm install
 npm run dev
 ```
 
+---
+
+## Development Mode
+
+For active development with hot reload and debugging features:
+
+### Quick Start Script
+
+```bash
+# From project root
+./start_dev.sh
+```
+
+This automatically starts:
+- Backend daemon at `http://localhost:8000` (with mock hardware)
+- Frontend dev server at `http://localhost:3000` (with hot reload)
+- API documentation at `http://localhost:8000/docs`
+
+Press `Ctrl+C` to stop all servers.
+
+### Production vs Development
+
+| Mode | Frontend | Backend | Port | Use Case |
+|------|----------|---------|------|----------|
+| **Development** | Next.js dev server | Python daemon | 3000 | Adding features, debugging |
+| **Production** | Static files (nginx) | Python daemon | 80 | Actual lighting control |
+
+### Complete Development Guide
+
+For detailed development instructions, including:
+- Running components separately
+- Debugging with VS Code
+- Database migrations
+- Testing and linting
+- Hardware integration
+- Troubleshooting
+
+See **[DEVELOPMENT.md](DEVELOPMENT.md)** for the complete development guide.
+
+---
+
 ## Database Management
 
 ### Migrations
