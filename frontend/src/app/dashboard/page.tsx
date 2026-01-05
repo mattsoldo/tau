@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 
 const API_URL = ''; // Use relative paths for nginx proxy
@@ -132,6 +132,10 @@ export default function DashboardPage() {
   const [editingBrightness, setEditingBrightness] = useState<{ type: 'fixture' | 'group'; id: number } | null>(null);
   const [brightnessInputValue, setBrightnessInputValue] = useState('');
   const [controlError, setControlError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Request version refs for race condition handling
+  const requestVersionRef = useRef<Map<string, number>>(new Map());
 
   // Auto-dismiss control errors after 3 seconds
   useEffect(() => {
@@ -140,6 +144,23 @@ export default function DashboardPage() {
       return () => clearTimeout(timeout);
     }
   }, [controlError]);
+
+  // Auto-dismiss validation errors after 2 seconds
+  useEffect(() => {
+    if (validationError) {
+      const timeout = setTimeout(() => setValidationError(null), 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [validationError]);
+
+  // Cleanup debounce timeouts on unmount
+  useEffect(() => {
+    const debounceRef = sliderDebounceRef.current;
+    return () => {
+      debounceRef.forEach(timeout => clearTimeout(timeout));
+      debounceRef.clear();
+    };
+  }, []);
 
   // Light simulator state for each FIO channel
   const [lightStates, setLightStates] = useState<LightState[]>(
@@ -478,8 +499,14 @@ export default function DashboardPage() {
     }
   };
 
-  // Control fixture brightness (debounced)
-  const handleFixtureBrightness = (fixtureId: number, brightness: number) => {
+  // Control fixture brightness (debounced with race condition handling)
+  const handleFixtureBrightness = useCallback((fixtureId: number, brightness: number) => {
+    const key = `fixture-brightness-${fixtureId}`;
+
+    // Increment request version for race condition handling
+    const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
+    requestVersionRef.current.set(key, currentVersion);
+
     // Optimistic UI update immediately
     setFixtureStates(prev => {
       const newMap = new Map(prev);
@@ -491,11 +518,15 @@ export default function DashboardPage() {
     });
 
     // Debounce API call
-    const key = `fixture-brightness-${fixtureId}`;
-    const existing = sliderDebounceRef.current.get(key);
-    if (existing) clearTimeout(existing);
+    const existingTimeout = sliderDebounceRef.current.get(key);
+    if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if this request is still the latest
+      if (requestVersionRef.current.get(key) !== currentVersion) {
+        return; // A newer request superseded this one
+      }
+
       try {
         const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
           method: 'POST',
@@ -510,10 +541,16 @@ export default function DashboardPage() {
         setControlError(`Failed to set brightness for ${fixtureName}`);
       }
     }, SLIDER_DEBOUNCE_MS));
-  };
+  }, []);
 
-  // Control fixture CCT (debounced)
-  const handleFixtureCCT = (fixtureId: number, cct: number) => {
+  // Control fixture CCT (debounced with race condition handling)
+  const handleFixtureCCT = useCallback((fixtureId: number, cct: number) => {
+    const key = `fixture-cct-${fixtureId}`;
+
+    // Increment request version for race condition handling
+    const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
+    requestVersionRef.current.set(key, currentVersion);
+
     // Optimistic UI update immediately
     setFixtureStates(prev => {
       const newMap = new Map(prev);
@@ -525,11 +562,15 @@ export default function DashboardPage() {
     });
 
     // Debounce API call
-    const key = `fixture-cct-${fixtureId}`;
     const existingTimeout = sliderDebounceRef.current.get(key);
     if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if this request is still the latest
+      if (requestVersionRef.current.get(key) !== currentVersion) {
+        return; // A newer request superseded this one
+      }
+
       try {
         const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
           method: 'POST',
@@ -544,10 +585,16 @@ export default function DashboardPage() {
         setControlError(`Failed to set color temperature for ${fixtureName}`);
       }
     }, SLIDER_DEBOUNCE_MS));
-  };
+  }, []);
 
-  // Control group brightness (debounced with optimistic update)
-  const handleGroupBrightness = (groupId: number, brightness: number) => {
+  // Control group brightness (debounced with optimistic update and race condition handling)
+  const handleGroupBrightness = useCallback((groupId: number, brightness: number) => {
+    const key = `group-brightness-${groupId}`;
+
+    // Increment request version for race condition handling
+    const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
+    requestVersionRef.current.set(key, currentVersion);
+
     // Optimistic UI update for all fixtures in group
     const fixturesInGroup = groupFixtures.get(groupId) || [];
     setFixtureStates(prev => {
@@ -562,11 +609,15 @@ export default function DashboardPage() {
     });
 
     // Debounce API call
-    const key = `group-brightness-${groupId}`;
     const existingTimeout = sliderDebounceRef.current.get(key);
     if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if this request is still the latest
+      if (requestVersionRef.current.get(key) !== currentVersion) {
+        return; // A newer request superseded this one
+      }
+
       try {
         const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
           method: 'POST',
@@ -581,10 +632,16 @@ export default function DashboardPage() {
         setControlError(`Failed to set brightness for ${group?.name || 'group'}`);
       }
     }, SLIDER_DEBOUNCE_MS));
-  };
+  }, [groupFixtures, groups]);
 
-  // Control group CCT (debounced with optimistic update)
-  const handleGroupCCT = (groupId: number, cct: number) => {
+  // Control group CCT (debounced with optimistic update and race condition handling)
+  const handleGroupCCT = useCallback((groupId: number, cct: number) => {
+    const key = `group-cct-${groupId}`;
+
+    // Increment request version for race condition handling
+    const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
+    requestVersionRef.current.set(key, currentVersion);
+
     // Optimistic UI update for all fixtures in group
     const fixturesInGroup = groupFixtures.get(groupId) || [];
     setFixtureStates(prev => {
@@ -599,11 +656,15 @@ export default function DashboardPage() {
     });
 
     // Debounce API call
-    const key = `group-cct-${groupId}`;
     const existingTimeout = sliderDebounceRef.current.get(key);
     if (existingTimeout) clearTimeout(existingTimeout);
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
+      // Check if this request is still the latest
+      if (requestVersionRef.current.get(key) !== currentVersion) {
+        return; // A newer request superseded this one
+      }
+
       try {
         const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
           method: 'POST',
@@ -618,7 +679,7 @@ export default function DashboardPage() {
         setControlError(`Failed to set color temperature for ${group?.name || 'group'}`);
       }
     }, SLIDER_DEBOUNCE_MS));
-  };
+  }, [groupFixtures, groups]);
 
   // Toggle group on/off (with optimistic update)
   const handleGroupToggle = async (groupId: number, turnOn: boolean) => {
@@ -658,33 +719,65 @@ export default function DashboardPage() {
     return fixtures.some(f => fixtureStates.get(f.id)?.is_on);
   };
 
-  // Get average brightness for a group
-  const getGroupBrightness = (groupId: number): number => {
-    const fixtures = groupFixtures.get(groupId) || [];
-    if (fixtures.length === 0) return 0;
-    const total = fixtures.reduce((sum, f) => {
-      const state = fixtureStates.get(f.id);
-      return sum + (state ? state.goal_brightness / 10 : 0);
-    }, 0);
-    return Math.round(total / fixtures.length);
-  };
+  // Get average brightness for a group (memoized)
+  const groupBrightnessCache = useMemo(() => {
+    const cache = new Map<number, number>();
+    groupFixtures.forEach((fixtures, groupId) => {
+      if (fixtures.length === 0) {
+        cache.set(groupId, 0);
+        return;
+      }
+      const total = fixtures.reduce((sum, f) => {
+        const state = fixtureStates.get(f.id);
+        return sum + (state ? state.goal_brightness / 10 : 0);
+      }, 0);
+      cache.set(groupId, Math.round(total / fixtures.length));
+    });
+    return cache;
+  }, [groupFixtures, fixtureStates]);
 
-  // Handle brightness input submit
-  const handleBrightnessInputSubmit = async (type: 'fixture' | 'group', id: number, value: string) => {
-    const brightness = parseInt(value, 10);
-    if (isNaN(brightness) || brightness < 0 || brightness > 100) {
+  const getGroupBrightness = useCallback((groupId: number): number => {
+    return groupBrightnessCache.get(groupId) ?? 0;
+  }, [groupBrightnessCache]);
+
+  // Handle brightness input submit with validation feedback
+  const handleBrightnessInputSubmit = useCallback((type: 'fixture' | 'group', id: number, value: string) => {
+    const trimmedValue = value.trim();
+
+    // Check for empty input
+    if (trimmedValue === '') {
+      setValidationError('Please enter a brightness value');
       setEditingBrightness(null);
       setBrightnessInputValue('');
       return;
     }
+
+    const brightness = parseInt(trimmedValue, 10);
+
+    // Check for non-numeric input
+    if (isNaN(brightness)) {
+      setValidationError('Brightness must be a number');
+      setEditingBrightness(null);
+      setBrightnessInputValue('');
+      return;
+    }
+
+    // Check for out of range
+    if (brightness < 0 || brightness > 100) {
+      setValidationError('Brightness must be between 0 and 100');
+      setEditingBrightness(null);
+      setBrightnessInputValue('');
+      return;
+    }
+
     if (type === 'fixture') {
-      await handleFixtureBrightness(id, brightness / 100);
+      handleFixtureBrightness(id, brightness / 100);
     } else {
-      await handleGroupBrightness(id, brightness / 100);
+      handleGroupBrightness(id, brightness / 100);
     }
     setEditingBrightness(null);
     setBrightnessInputValue('');
-  };
+  }, [handleFixtureBrightness, handleGroupBrightness]);
 
   // Get ungrouped fixtures
   const getUngroupedFixtures = (): Fixture[] => {
@@ -1029,6 +1122,24 @@ export default function DashboardPage() {
                   className="p-1 hover:bg-red-500/20 rounded transition-colors"
                 >
                   <svg className="w-3 h-3 stroke-red-400" fill="none" strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            {/* Validation Error Toast */}
+            {validationError && (
+              <div className="mb-3 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-center gap-2">
+                <svg className="w-4 h-4 stroke-yellow-400 flex-shrink-0" fill="none" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span className="text-[12px] text-yellow-400 flex-1">{validationError}</span>
+                <button
+                  onClick={() => setValidationError(null)}
+                  className="p-1 hover:bg-yellow-500/20 rounded transition-colors"
+                >
+                  <svg className="w-3 h-3 stroke-yellow-400" fill="none" strokeWidth="2" viewBox="0 0 24 24">
                     <path d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
