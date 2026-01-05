@@ -415,17 +415,16 @@
         }
 
         // Handle FIO0 input (PRD Section 10.1 - Retractive Switch)
-        // Note: Driver inverts logic for hardware without pull-ups
-        // So: HIGH (true) = switch released, LOW (false) = switch pressed
-        function handleSwitchInput(switchReleased) {
+        // Normally-closed switch: HIGH = closed (not pressed), LOW = open (pressed)
+        function handleSwitchInput(switchClosed) {
             const fioIndicator = document.getElementById('fio0-indicator');
             const actionIndicator = document.getElementById('action-indicator');
 
-            fioIndicator.textContent = `FIO0: ${switchReleased ? 'RELEASED' : 'PRESSED'}`;
-            fioIndicator.className = switchReleased ? '' : 'active';
+            fioIndicator.textContent = `FIO0: ${switchClosed ? 'CLOSED' : 'OPEN'}`;
+            fioIndicator.className = switchClosed ? '' : 'active';
 
-            // Detect press (falling edge - LOW means switch pressed after inversion)
-            if (!switchReleased && lastSwitchState) {
+            // Detect press (falling edge - LOW means switch opened/pressed)
+            if (!switchClosed && lastSwitchState) {
                 switchPressTime = Date.now();
                 actionIndicator.textContent = 'PRESSED';
 
@@ -459,8 +458,8 @@
                 }, TAP_WINDOW_MS);
             }
 
-            // Detect release (rising edge - HIGH means switch released after inversion)
-            if (switchReleased && !lastSwitchState) {
+            // Detect release (rising edge - HIGH means switch closed/released)
+            if (switchClosed && !lastSwitchState) {
                 const pressDuration = Date.now() - switchPressTime;
 
                 // Clear any hold interval
@@ -494,7 +493,7 @@
                 }
             }
 
-            lastSwitchState = switchReleased;
+            lastSwitchState = switchClosed;
         }
 
         // Poll status

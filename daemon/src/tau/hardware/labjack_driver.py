@@ -46,6 +46,10 @@ class LabJackDriver(LabJackInterface):
         # Track channel modes
         self.channel_modes = {i: 'analog' for i in range(16)}
 
+        # Track channels that need logic inversion (for switches without pull-ups)
+        # FIO0 has a normally-closed switch - no inversion needed
+        self.inverted_channels = set()
+
         # Track our intended FIOAnalog bitmask (all analog by default)
         # This is separate from what the hardware reports, as some U3 models
         # may report differently
@@ -284,6 +288,10 @@ class LabJackDriver(LabJackInterface):
                 # EIO pins (8-15)
                 state = self.device.getEIOState(channel - 8)
 
+            # Invert logic if this channel requires it (for switches without pull-ups)
+            if channel in self.inverted_channels:
+                state = not state
+
             # Update the tracked state
             self.digital_inputs[channel] = bool(state)
             self.read_count += 1
@@ -291,7 +299,8 @@ class LabJackDriver(LabJackInterface):
             logger.debug(
                 "labjack_digital_read",
                 channel=channel,
-                state="HIGH" if state else "LOW"
+                state="HIGH" if state else "LOW",
+                inverted=channel in self.inverted_channels
             )
 
             return bool(state)
