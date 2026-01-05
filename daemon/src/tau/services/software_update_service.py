@@ -152,14 +152,14 @@ class SoftwareUpdateService:
         config = result.scalar_one_or_none()
         if config:
             config.value = value
-            config.updated_at = datetime.now(timezone.utc)
+            config.updated_at = datetime.utcnow()
         else:
             description = DEFAULT_UPDATE_CONFIG.get(key, (None, None))[1]
             new_config = UpdateConfig(
                 key=key,
                 value=value,
                 description=description,
-                updated_at=datetime.now(timezone.utc),
+                updated_at=datetime.utcnow(),
             )
             self.db_session.add(new_config)
         await self.db_session.commit()
