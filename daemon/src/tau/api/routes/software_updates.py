@@ -9,7 +9,7 @@ Provides endpoints for:
 - Managing version history
 - Configuring update settings
 """
-from typing import Optional, List
+from typing import Optional, List, AsyncGenerator
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -140,10 +140,23 @@ class UpdateConfigRequest(BaseModel):
     value: str = Field(..., description="New value")
 
 
-# Helper to get service
-async def get_update_service(db: AsyncSession = Depends(get_session)) -> SoftwareUpdateService:
-    """Get SoftwareUpdateService instance"""
-    return SoftwareUpdateService(db_session=db)
+# Helper to get service with proper session management
+async def get_update_service(
+    db: AsyncSession = Depends(get_session),
+) -> AsyncGenerator[SoftwareUpdateService, None]:
+    """
+    Get SoftwareUpdateService instance with proper lifecycle management.
+
+    Uses yield pattern to ensure service is properly cleaned up after request.
+    The database session is managed by the get_session dependency.
+    """
+    service = SoftwareUpdateService(db_session=db)
+    try:
+        yield service
+    finally:
+        # Clean up any cached resources
+        if service._github_client:
+            await service._github_client.close()
 
 
 # Endpoints
