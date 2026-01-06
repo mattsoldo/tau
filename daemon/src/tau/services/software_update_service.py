@@ -545,13 +545,15 @@ class SoftwareUpdateService:
             self.db_session.add(version_history)
             await self.db_session.commit()
 
-            # Step 4: Stop services
-            self._current_state = "stopping_services"
-            self._update_progress = {"stage": "stopping_services", "percent": 0}
+            # Step 4: Skip stopping services
+            # Note: We can't stop tau-daemon from within itself
+            # The scheduled restart will handle stopping and starting with new code
+            self._current_state = "preparing_install"
+            self._update_progress = {"stage": "preparing_install", "percent": 0}
             if progress_callback:
-                progress_callback("stopping_services", 0, "Stopping services...")
+                progress_callback("preparing_install", 0, "Preparing installation...")
 
-            await self._stop_services()
+            logger.info("skipping_service_stop", reason="will_restart_after_install")
 
             # Step 5: Install package
             self._current_state = "installing"
