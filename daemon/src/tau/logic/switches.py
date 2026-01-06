@@ -89,6 +89,8 @@ class SwitchHandler:
         self.last_broadcast_time: Dict[str, float] = {}
         self.broadcast_throttle_ms = 100  # Minimum time between broadcasts
         self.broadcast_cleanup_threshold = 300  # Clean up entries older than 5 minutes
+        self.broadcast_cleanup_interval = 300  # Run cleanup every 5 minutes (time-based)
+        self.last_cleanup_time = 0.0  # Track last cleanup time
 
         # Statistics
         self.events_processed = 0
@@ -796,9 +798,11 @@ class SwitchHandler:
             await self._broadcast_fixture_state(fixture_id)
             self.last_broadcast_time[key] = current_time
 
-            # Periodically clean up stale entries (every ~100 broadcasts)
-            if len(self.last_broadcast_time) % 100 == 0:
-                self._cleanup_broadcast_timestamps(current_time)
+        # Time-based cleanup: run every 5 minutes regardless of broadcast frequency
+        # (prevents memory leak in low-frequency switch usage scenarios)
+        if (current_time - self.last_cleanup_time) >= self.broadcast_cleanup_interval:
+            self._cleanup_broadcast_timestamps(current_time)
+            self.last_cleanup_time = current_time
 
     async def _broadcast_group_state_throttled(self, group_id: int, current_time: float) -> None:
         """
@@ -819,9 +823,11 @@ class SwitchHandler:
             await self._broadcast_group_state(group_id)
             self.last_broadcast_time[key] = current_time
 
-            # Periodically clean up stale entries (every ~100 broadcasts)
-            if len(self.last_broadcast_time) % 100 == 0:
-                self._cleanup_broadcast_timestamps(current_time)
+        # Time-based cleanup: run every 5 minutes regardless of broadcast frequency
+        # (prevents memory leak in low-frequency switch usage scenarios)
+        if (current_time - self.last_cleanup_time) >= self.broadcast_cleanup_interval:
+            self._cleanup_broadcast_timestamps(current_time)
+            self.last_cleanup_time = current_time
 
     def get_statistics(self) -> dict:
         """

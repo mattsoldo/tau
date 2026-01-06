@@ -109,9 +109,18 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             case 'group_state_changed':
               optionsRef.current.onGroupStateChanged?.(data);
               break;
+            default:
+              // Log unexpected event types in development
+              if (process.env.NODE_ENV === 'development') {
+                console.warn('[WebSocket] Unknown event type:', data.type, data);
+              }
+              break;
           }
-        } catch {
-          // Ignore parse errors for non-JSON messages or unknown types
+        } catch (error) {
+          // Log parse errors in development to aid debugging
+          if (process.env.NODE_ENV === 'development') {
+            console.error('[WebSocket] Failed to parse message:', event.data, error);
+          }
         }
       };
 

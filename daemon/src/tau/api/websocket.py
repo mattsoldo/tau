@@ -252,18 +252,19 @@ class EventType:
 async def broadcast_fixture_state_change(
     fixture_id: int,
     brightness: float,
-    color_temp: int = None
+    color_temp: int | None = None
 ) -> None:
     """
     Broadcast fixture state change event
 
     Args:
         fixture_id: Fixture that changed
-        brightness: New brightness (0.0-1.0)
-        color_temp: New color temperature in Kelvin
+        brightness: New brightness (0.0-1.0) - values outside range are clamped
+        color_temp: New color temperature in Kelvin (1000-10000) - values outside range are clamped
 
-    Raises:
-        ValueError: If brightness or color_temp is out of valid range
+    Note:
+        Invalid values are clamped to valid ranges and logged as warnings.
+        This prevents broadcast failures from disrupting switch control.
     """
     # Validate brightness range
     if not 0.0 <= brightness <= 1.0:
@@ -298,18 +299,19 @@ async def broadcast_fixture_state_change(
 async def broadcast_group_state_change(
     group_id: int,
     brightness: float,
-    color_temp: int = None
+    color_temp: int | None = None
 ) -> None:
     """
     Broadcast group state change event
 
     Args:
         group_id: Group that changed
-        brightness: New brightness (0.0-1.0)
-        color_temp: New color temperature in Kelvin
+        brightness: New brightness (0.0-1.0) - values outside range are clamped
+        color_temp: New color temperature in Kelvin (1000-10000) - values outside range are clamped
 
-    Raises:
-        ValueError: If brightness or color_temp is out of valid range
+    Note:
+        Invalid values are clamped to valid ranges and logged as warnings.
+        This prevents broadcast failures from disrupting switch control.
     """
     # Validate brightness range
     if not 0.0 <= brightness <= 1.0:
