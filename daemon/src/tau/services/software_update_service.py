@@ -720,6 +720,7 @@ class SoftwareUpdateService:
         for service in SERVICES:
             try:
                 process = await asyncio.create_subprocess_exec(
+                    "sudo",
                     "systemctl",
                     "stop",
                     service,
@@ -738,6 +739,7 @@ class SoftwareUpdateService:
         for service in SERVICES:
             try:
                 process = await asyncio.create_subprocess_exec(
+                    "sudo",
                     "systemctl",
                     "start",
                     service,
