@@ -41,7 +41,7 @@ class Installation(Base):
 
     # Installation Details
     installed_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP,
+        TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),
     )
@@ -79,11 +79,11 @@ class VersionHistory(Base):
 
     # Timestamps
     installed_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP,
+        TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),
     )
-    uninstalled_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
+    uninstalled_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     # Backup Information
     backup_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
@@ -118,7 +118,7 @@ class AvailableRelease(Base):
 
     # GitHub Release Information
     tag_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    published_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
     release_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Asset Information
@@ -133,7 +133,7 @@ class AvailableRelease(Base):
 
     # Cache Metadata
     checked_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP,
+        TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),
     )
@@ -164,7 +164,7 @@ class UpdateCheck(Base):
 
     # Check Details
     checked_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP,
+        TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),
     )
@@ -215,7 +215,7 @@ class UpdateConfig(Base):
     # Metadata
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP,
+        TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),
     )
