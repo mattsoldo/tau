@@ -178,7 +178,7 @@ async def get_update_status(
         raise HTTPException(status_code=500, detail=f"Failed to get update status: {str(e)}")
 
 
-@router.post(
+@router.get(
     "/check",
     response_model=UpdateCheckResponse,
     summary="Check for Updates",
