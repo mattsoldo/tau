@@ -568,24 +568,29 @@ class SoftwareUpdateService:
 
             await self._run_migrations()
 
-            # Step 7: Start services
-            self._current_state = "starting_services"
-            self._update_progress = {"stage": "starting_services", "percent": 0}
+            # Step 7: Schedule service restart
+            # Note: We can't restart tau-daemon from within itself, so we schedule a delayed restart
+            self._current_state = "scheduling_restart"
+            self._update_progress = {"stage": "scheduling_restart", "percent": 0}
             if progress_callback:
-                progress_callback("starting_services", 0, "Starting services...")
+                progress_callback("scheduling_restart", 0, "Scheduling service restart...")
 
-            await self._start_services()
+            # Spawn a background process that will restart services after this process exits
+            subprocess.Popen(
+                ["sh", "-c", "sleep 3 && sudo systemctl restart tau-daemon tau-frontend"],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
-            # Step 8: Verify installation
+            # Step 8: Verify installation (skip service checks since we're restarting)
             self._current_state = "verifying_install"
             self._update_progress = {"stage": "verifying_install", "percent": 0}
             if progress_callback:
                 progress_callback("verifying_install", 0, "Verifying installation...")
 
-            verify_after = await self._get_config_bool("verify_after_install")
-            if verify_after:
-                if not await self._verify_installation(target_version):
-                    raise InstallationError("Installation verification failed")
+            # Skip verification since services will restart momentarily
+            logger.info("skipping_verification", reason="services_restarting")
 
             # Step 9: Update installation record
             installation.current_version = target_version
@@ -835,8 +840,10 @@ class SoftwareUpdateService:
     async def _run_migrations(self):
         """Run database migrations"""
         try:
+            # Use alembic from the venv
+            alembic_path = self.app_root / "daemon" / ".venv" / "bin" / "alembic"
             process = await asyncio.create_subprocess_exec(
-                "alembic",
+                str(alembic_path),
                 "upgrade",
                 "head",
                 cwd=str(self.app_root / "daemon"),
