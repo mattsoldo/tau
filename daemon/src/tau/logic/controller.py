@@ -496,6 +496,15 @@ class LightingController:
         logger.info("circadian_disabled", group_id=group_id)
         return True
 
+    def set_dim_speed_ms(self, dim_speed_ms: int) -> None:
+        """
+        Update the dimming speed at runtime (hot-reload)
+
+        Args:
+            dim_speed_ms: Time in ms for full brightness range (0-100%)
+        """
+        self.switches.set_dim_speed_ms(dim_speed_ms)
+
     def get_statistics(self) -> dict:
         """
         Get controller statistics
