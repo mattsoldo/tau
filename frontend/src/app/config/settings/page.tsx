@@ -74,6 +74,9 @@ export default function SettingsPage() {
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
+      // Check if an update is in progress
+      const updateInProgress = localStorage.getItem('tau_update_in_progress') === 'true';
+
       const [hardwareRes, statusRes, settingsRes, dtwRes, dtwCurvesRes] = await Promise.all([
         fetch(`${API_URL}/api/config/hardware-availability`),
         fetch(`${API_URL}/status`),
@@ -81,6 +84,13 @@ export default function SettingsPage() {
         fetch(`${API_URL}/api/dtw/settings`),
         fetch(`${API_URL}/api/dtw/curves`),
       ]);
+
+      // If update is in progress and hardware/status requests fail, show friendlier message
+      if (updateInProgress && (!hardwareRes.ok || !statusRes.ok)) {
+        setError('Update in progress - services restarting...');
+        setIsLoading(false);
+        return;
+      }
 
       if (!hardwareRes.ok) throw new Error('Failed to fetch hardware availability');
       if (!statusRes.ok) throw new Error('Failed to fetch system status');
@@ -108,7 +118,13 @@ export default function SettingsPage() {
 
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load settings');
+      // Check if update is in progress to provide better error message
+      const updateInProgress = localStorage.getItem('tau_update_in_progress') === 'true';
+      if (updateInProgress) {
+        setError('Update in progress - services restarting...');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load settings');
+      }
     } finally {
       setIsLoading(false);
     }

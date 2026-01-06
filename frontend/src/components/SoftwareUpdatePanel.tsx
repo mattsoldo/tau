@@ -175,6 +175,9 @@ export default function SoftwareUpdatePanel() {
     setIsUpdating(true);
     setError(null);
 
+    // Mark update as in progress for other components
+    localStorage.setItem('tau_update_in_progress', 'true');
+
     try {
       await api.softwareUpdate.apply(version);
       // System will restart, start polling for reconnection
@@ -182,6 +185,8 @@ export default function SoftwareUpdatePanel() {
     } catch (err: any) {
       setError(err.message || 'Failed to apply update');
       setIsUpdating(false);
+      // Clear flag on error
+      localStorage.removeItem('tau_update_in_progress');
     }
   }, []);
 
@@ -228,6 +233,8 @@ export default function SoftwareUpdatePanel() {
         const response = await fetch(`${API_URL}/health`);
         if (response.ok) {
           clearInterval(interval);
+          // Clear update flag before reloading
+          localStorage.removeItem('tau_update_in_progress');
           window.location.reload();
         }
       } catch {
