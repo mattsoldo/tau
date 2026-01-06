@@ -218,7 +218,26 @@ class BackupManager:
             )
 
         backup_dir = self._get_backup_dir(version)
-        backup_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "creating_backup_directory",
+            backup_dir=str(backup_dir),
+            backup_location=str(self.backup_location),
+            exists=backup_dir.exists(),
+            parent_exists=backup_dir.parent.exists(),
+        )
+
+        try:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("backup_directory_created", backup_dir=str(backup_dir))
+        except OSError as e:
+            logger.error(
+                "failed_to_create_backup_directory",
+                backup_dir=str(backup_dir),
+                error=str(e),
+                errno=e.errno,
+                strerror=e.strerror,
+            )
+            raise BackupError(f"Failed to create backup directory {backup_dir}: {e}") from e
 
         files_manifest: List[Dict[str, str]] = []
         total_size = 0
