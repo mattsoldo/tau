@@ -9,6 +9,7 @@ Coordinates the entire update workflow including:
 - Managing version history and rollback capability
 """
 import asyncio
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
