@@ -46,6 +46,19 @@ ESSENTIAL_FILES = [
     "frontend/package-lock.json",
 ]
 
+# Patterns to exclude from backups
+EXCLUDE_PATTERNS = [
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "node_modules",
+    ".next",
+    ".git",
+]
+
 
 @dataclass
 class BackupManifest:
@@ -131,6 +144,28 @@ class BackupManager:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         safe_version = version.replace("/", "_").replace("\\", "_")
         return self.backup_location / f"{safe_version}_{timestamp}"
+
+    def _should_exclude(self, path: Path) -> bool:
+        """Check if a path matches any exclude pattern"""
+        path_str = str(path)
+        for pattern in EXCLUDE_PATTERNS:
+            if pattern in path_str or path.name == pattern:
+                return True
+            # Handle wildcard patterns
+            if "*" in pattern:
+                import fnmatch
+                if fnmatch.fnmatch(path.name, pattern):
+                    return True
+        return False
+
+    def _ignore_patterns(self, directory: str, contents: list) -> set:
+        """Ignore function for shutil.copytree to exclude unwanted files"""
+        ignored = set()
+        for item in contents:
+            item_path = Path(directory) / item
+            if self._should_exclude(item_path):
+                ignored.add(item)
+        return ignored
 
     def _calculate_checksum(self, file_path: Path) -> str:
         """Calculate SHA256 checksum of a file"""
@@ -258,9 +293,9 @@ class BackupManager:
                         files_manifest.append({"path": dir_path, "checksum": checksum})
                         total_size += source.stat().st_size
                     else:
-                        shutil.copytree(source, dest, dirs_exist_ok=True)
+                        shutil.copytree(source, dest, dirs_exist_ok=True, ignore=self._ignore_patterns)
                         for item in source.rglob("*"):
-                            if item.is_file():
+                            if item.is_file() and not self._should_exclude(item):
                                 rel_path = str(item.relative_to(self.app_root))
                                 checksum = self._calculate_checksum(item)
                                 files_manifest.append({"path": rel_path, "checksum": checksum})
@@ -282,9 +317,9 @@ class BackupManager:
                         files_manifest.append({"path": dir_path, "checksum": checksum})
                         total_size += source.stat().st_size
                     else:
-                        shutil.copytree(source, dest, dirs_exist_ok=True)
+                        shutil.copytree(source, dest, dirs_exist_ok=True, ignore=self._ignore_patterns)
                         for item in source.rglob("*"):
-                            if item.is_file():
+                            if item.is_file() and not self._should_exclude(item):
                                 rel_path = str(item.relative_to(self.app_root))
                                 checksum = self._calculate_checksum(item)
                                 files_manifest.append({"path": rel_path, "checksum": checksum})
