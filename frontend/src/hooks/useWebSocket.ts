@@ -36,12 +36,22 @@ interface UseWebSocketOptions {
 export function useWebSocket(options: UseWebSocketOptions = {}) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
   const mountedRef = useRef(true);
   const isConnectedRef = useRef(false);
 
   // Store callbacks in refs to avoid reconnection on callback changes
   const optionsRef = useRef(options);
   optionsRef.current = options;
+
+  // Calculate exponential backoff delay for reconnection attempts
+  const getReconnectDelay = useCallback(() => {
+    const baseDelay = 1000; // 1 second
+    const maxDelay = 30000; // 30 seconds
+    const delay = Math.min(baseDelay * Math.pow(2, reconnectAttemptsRef.current), maxDelay);
+    return delay;
+  }, []);
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
@@ -62,6 +72,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
           return;
         }
         isConnectedRef.current = true;
+        reconnectAttemptsRef.current = 0; // Reset backoff on successful connection
         optionsRef.current.onConnected?.();
 
         // Subscribe to state change events
@@ -71,14 +82,17 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         }));
 
         // Set up ping interval for keepalive
-        const pingInterval = setInterval(() => {
+        pingIntervalRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ action: 'ping' }));
           }
         }, 30000);
 
         ws.addEventListener('close', () => {
-          clearInterval(pingInterval);
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current);
+            pingIntervalRef.current = null;
+          }
         });
       };
 
@@ -106,12 +120,14 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         isConnectedRef.current = false;
         optionsRef.current.onDisconnected?.();
 
-        // Attempt to reconnect after delay
+        // Attempt to reconnect with exponential backoff
+        const delay = getReconnectDelay();
+        reconnectAttemptsRef.current += 1;
         reconnectTimeoutRef.current = setTimeout(() => {
           if (mountedRef.current) {
             connect();
           }
-        }, 3000);
+        }, delay);
       };
 
       ws.onerror = () => {
@@ -119,19 +135,25 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       };
 
     } catch {
-      // Connection failed, try again later
+      // Connection failed, try again with exponential backoff
+      const delay = getReconnectDelay();
+      reconnectAttemptsRef.current += 1;
       reconnectTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) {
           connect();
         }
-      }, 3000);
+      }, delay);
     }
-  }, []);
+  }, [getReconnectDelay]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
+    }
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
     }
     if (wsRef.current) {
       wsRef.current.close();

@@ -7,6 +7,16 @@ import { useWebSocket, FixtureStateChangedEvent, GroupStateChangedEvent } from '
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
+// Brightness scaling constants
+// IMPORTANT: Multiple brightness representations exist in the system:
+// - WebSocket broadcasts: 0.0-1.0 (daemon internal state)
+// - REST API (brightness_percent): 0-100 (user-facing API)
+// - Frontend state: 0-1000 (internal, for smooth slider control)
+// - Frontend display: 0-100 (UI, same as REST API scale)
+//
+// Conversion: WebSocket (0.0-1.0) × BRIGHTNESS_SCALE → State (0-1000)
+const BRIGHTNESS_SCALE = 1000; // Multiply WebSocket 0.0-1.0 to get state 0-1000
+
 // === Types ===
 
 type FixtureType = 'simple_dimmable' | 'tunable_white' | 'dim_to_warm' | 'non_dimmable' | 'other';
@@ -144,7 +154,7 @@ export default function LightTestPage() {
         fixtures: group.fixtures.map(f => {
           if (f.id !== event.fixture_id || !f.state) return f;
 
-          const newBrightness = event.brightness * 1000;
+          const newBrightness = event.brightness * BRIGHTNESS_SCALE;
           const newCct = event.color_temp ?? f.state.goal_cct;
           const newIsOn = event.brightness > 0;
 
@@ -193,7 +203,7 @@ export default function LightTestPage() {
         const updatedFixtures = group.fixtures.map(f => {
           if (!f.state) return f;
 
-          const newBrightness = event.brightness * 1000;
+          const newBrightness = event.brightness * BRIGHTNESS_SCALE;
           const newCct = event.color_temp ?? f.state.goal_cct;
           const newIsOn = event.brightness > 0;
 

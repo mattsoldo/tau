@@ -9,7 +9,6 @@ from typing import Dict, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 import time
-import asyncio
 import structlog
 
 from tau.database import get_db_session
@@ -89,6 +88,7 @@ class SwitchHandler:
         # Keys are "fixture:{id}" or "group:{id}", values are last broadcast timestamp
         self.last_broadcast_time: Dict[str, float] = {}
         self.broadcast_throttle_ms = 100  # Minimum time between broadcasts
+        self.broadcast_cleanup_threshold = 300  # Clean up entries older than 5 minutes
 
         # Statistics
         self.events_processed = 0
@@ -753,6 +753,30 @@ class SwitchHandler:
             # Log error but don't crash the switch handler
             logger.error(f"Failed to broadcast group {group_id} state: {e}")
 
+    def _cleanup_broadcast_timestamps(self, current_time: float) -> None:
+        """
+        Clean up stale entries from last_broadcast_time dictionary.
+
+        Removes entries older than broadcast_cleanup_threshold to prevent
+        memory leak from deleted fixtures/groups.
+
+        Args:
+            current_time: Current timestamp in seconds
+        """
+        stale_keys = [
+            key for key, timestamp in self.last_broadcast_time.items()
+            if (current_time - timestamp) > self.broadcast_cleanup_threshold
+        ]
+        for key in stale_keys:
+            del self.last_broadcast_time[key]
+
+        if stale_keys:
+            logger.debug(
+                "broadcast_cleanup",
+                removed_count=len(stale_keys),
+                remaining_count=len(self.last_broadcast_time)
+            )
+
     async def _broadcast_fixture_state_throttled(self, fixture_id: int, current_time: float) -> None:
         """
         Broadcast fixture state change with throttling.
@@ -772,6 +796,10 @@ class SwitchHandler:
             await self._broadcast_fixture_state(fixture_id)
             self.last_broadcast_time[key] = current_time
 
+            # Periodically clean up stale entries (every ~100 broadcasts)
+            if len(self.last_broadcast_time) % 100 == 0:
+                self._cleanup_broadcast_timestamps(current_time)
+
     async def _broadcast_group_state_throttled(self, group_id: int, current_time: float) -> None:
         """
         Broadcast group state change with throttling.
@@ -790,6 +818,10 @@ class SwitchHandler:
         if time_since_last >= self.broadcast_throttle_ms:
             await self._broadcast_group_state(group_id)
             self.last_broadcast_time[key] = current_time
+
+            # Periodically clean up stale entries (every ~100 broadcasts)
+            if len(self.last_broadcast_time) % 100 == 0:
+                self._cleanup_broadcast_timestamps(current_time)
 
     def get_statistics(self) -> dict:
         """

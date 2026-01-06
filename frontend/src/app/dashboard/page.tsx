@@ -23,8 +23,18 @@ const STATUS_POLL_INTERVAL_MS = 2000;
 const OVERRIDES_POLL_INTERVAL_MS = 2000;
 
 // Brightness scaling constants
-const BRIGHTNESS_SCALE = 1000; // API uses 0-1000 scale
-const BRIGHTNESS_DISPLAY_SCALE = 10; // Display uses 0-100, state uses 0-1000
+// IMPORTANT: Multiple brightness representations exist in the system:
+// - WebSocket broadcasts: 0.0-1.0 (daemon internal state)
+// - REST API (brightness_percent): 0-100 (user-facing API)
+// - Frontend state: 0-1000 (internal, for smooth slider control)
+// - Frontend display: 0-100 (UI, divided from state by BRIGHTNESS_DISPLAY_SCALE)
+//
+// Conversion flow:
+// WebSocket (0.0-1.0) × BRIGHTNESS_SCALE → State (0-1000)
+// State (0-1000) ÷ BRIGHTNESS_DISPLAY_SCALE → Display (0-100)
+// Display (0-100) → REST API brightness_percent (0-100)
+const BRIGHTNESS_SCALE = 1000; // Multiply WebSocket 0.0-1.0 to get state 0-1000
+const BRIGHTNESS_DISPLAY_SCALE = 10; // Divide state 0-1000 to get display 0-100
 
 interface SystemStatus {
   status: string;
