@@ -756,41 +756,77 @@ class SoftwareUpdateService:
                 raise InstallationError(f"Timeout starting {service} after {SERVICE_START_TIMEOUT}s")
 
     async def _install_package(self, package_path: Path):
-        """Install a .deb package"""
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "dpkg",
-                "-i",
-                str(package_path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT
-            )
+        """Extract and install update package (tar.gz or .deb)"""
+        import tarfile
 
-            if process.returncode != 0:
-                # Try to fix dependencies
-                fix_process = await asyncio.create_subprocess_exec(
-                    "apt-get",
-                    "install",
-                    "-f",
-                    "-y",
+        try:
+            # Check if it's a tarball
+            if package_path.suffix == ".gz" and package_path.stem.endswith(".tar"):
+                logger.info("extracting_tarball", path=str(package_path), dest=str(self.app_root))
+
+                # Extract tarball to app_root
+                with tarfile.open(package_path, "r:gz") as tar:
+                    # Get the top-level directory name from the tarball
+                    members = tar.getmembers()
+                    if not members:
+                        raise InstallationError("Tarball is empty")
+
+                    # Strip the top-level directory (e.g., "tau-1.1.0/")
+                    top_dir = members[0].name.split('/')[0] if '/' in members[0].name else members[0].name
+
+                    for member in members:
+                        # Strip the top-level directory from the path
+                        if member.name.startswith(top_dir + '/'):
+                            member.name = member.name[len(top_dir) + 1:]
+                        elif member.name == top_dir:
+                            continue
+
+                        # Skip empty paths
+                        if not member.name:
+                            continue
+
+                        # Extract to app_root
+                        tar.extract(member, path=self.app_root)
+
+                logger.info("tarball_extracted", path=str(package_path))
+
+            else:
+                # Fall back to dpkg for .deb packages
+                process = await asyncio.create_subprocess_exec(
+                    "dpkg",
+                    "-i",
+                    str(package_path),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                fix_stdout, fix_stderr = await asyncio.wait_for(
-                    fix_process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT
                 )
 
-                if fix_process.returncode != 0:
-                    raise InstallationError(
-                        f"Package installation failed: {stderr.decode()}. "
-                        f"Dependency fix also failed: {fix_stderr.decode()}"
+                if process.returncode != 0:
+                    # Try to fix dependencies
+                    fix_process = await asyncio.create_subprocess_exec(
+                        "apt-get",
+                        "install",
+                        "-f",
+                        "-y",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    fix_stdout, fix_stderr = await asyncio.wait_for(
+                        fix_process.communicate(), timeout=PACKAGE_INSTALL_TIMEOUT
                     )
 
-            logger.info("package_installed", path=str(package_path))
+                    if fix_process.returncode != 0:
+                        raise InstallationError(
+                            f"Package installation failed: {stderr.decode()}. "
+                            f"Dependency fix also failed: {fix_stderr.decode()}"
+                        )
 
+                logger.info("package_installed", path=str(package_path))
+
+        except tarfile.TarError as e:
+            raise InstallationError(f"Failed to extract tarball: {str(e)}")
         except asyncio.TimeoutError:
             raise InstallationError(f"Package installation timed out after {PACKAGE_INSTALL_TIMEOUT}s")
 
