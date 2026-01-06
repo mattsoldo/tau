@@ -112,7 +112,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             default:
               // Log unexpected event types in development
               if (process.env.NODE_ENV === 'development') {
-                console.warn('[WebSocket] Unknown event type:', data.type, data);
+                console.warn('[WebSocket] Unknown event type:', (data as any).type, data);
               }
               break;
           }
