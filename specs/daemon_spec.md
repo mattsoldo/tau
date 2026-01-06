@@ -360,6 +360,44 @@ Event examples:
 	•	dependency.labjack.disconnected
 	•	state.fixture.updated
 
+10.10 WebSocket Real-Time Updates
+
+WebSocket endpoint: /api/ws
+Protocol: WebSocket (ws:// or wss://)
+
+The daemon provides real-time state updates via WebSocket for responsive UI updates, particularly for physical switch actions.
+
+Broadcast events:
+	•	fixture_state_changed - Sent when a fixture's state changes due to physical switch input
+	•	group_state_changed - Sent when a group's state changes due to physical switch input
+
+fixture_state_changed event format:
+{
+  "type": "fixture_state_changed",
+  "fixture_id": 10,
+  "brightness": 0.75,        // 0.0-1.0 range
+  "color_temp": 3500         // Kelvin (optional, null for non-tunable fixtures)
+}
+
+group_state_changed event format:
+{
+  "type": "group_state_changed",
+  "group_id": 5,
+  "brightness": 0.6,         // 0.0-1.0 range
+  "color_temp": 4000         // Kelvin (optional, null if group not in circadian mode)
+}
+
+Broadcast behavior:
+	•	Broadcasts are triggered by physical switch actions (momentary, latching, retractive)
+	•	During dimming (hold events), broadcasts are throttled to maximum once per 100ms to prevent overwhelming clients
+	•	Error handling: broadcast failures are logged but do not interrupt switch handler operation
+	•	No authentication required (daemon listens on localhost only)
+
+Client recommendations:
+	•	Track pending API requests to avoid race conditions with WebSocket updates
+	•	Implement early returns to skip unnecessary re-renders when state hasn't changed
+	•	Use debouncing/throttling on the client side for high-frequency updates during dimming
+
 ⸻
 
 11. Alerts and Logging

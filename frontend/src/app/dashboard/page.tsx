@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { filterMergedFixtures } from '@/utils/fixtures';
+import { useWebSocket, FixtureStateChangedEvent, GroupStateChangedEvent } from '@/hooks/useWebSocket';
 
 const API_URL = ''; // Use relative paths for nginx proxy
 
@@ -22,8 +23,18 @@ const STATUS_POLL_INTERVAL_MS = 2000;
 const OVERRIDES_POLL_INTERVAL_MS = 2000;
 
 // Brightness scaling constants
-const BRIGHTNESS_SCALE = 1000; // API uses 0-1000 scale
-const BRIGHTNESS_DISPLAY_SCALE = 10; // Display uses 0-100, state uses 0-1000
+// IMPORTANT: Multiple brightness representations exist in the system:
+// - WebSocket broadcasts: 0.0-1.0 (daemon internal state)
+// - REST API (brightness_percent): 0-100 (user-facing API)
+// - Frontend state: 0-1000 (internal, for smooth slider control)
+// - Frontend display: 0-100 (UI, divided from state by BRIGHTNESS_DISPLAY_SCALE)
+//
+// Conversion flow:
+// WebSocket (0.0-1.0) × BRIGHTNESS_SCALE → State (0-1000)
+// State (0-1000) ÷ BRIGHTNESS_DISPLAY_SCALE → Display (0-100)
+// Display (0-100) → REST API brightness_percent (0-100)
+const BRIGHTNESS_SCALE = 1000; // Multiply WebSocket 0.0-1.0 to get state 0-1000
+const BRIGHTNESS_DISPLAY_SCALE = 10; // Divide state 0-1000 to get display 0-100
 
 interface SystemStatus {
   status: string;
@@ -148,6 +159,100 @@ export default function DashboardPage() {
   // Request version refs for race condition handling
   const requestVersionRef = useRef<Map<string, number>>(new Map());
   const mountedRef = useRef(true);
+
+  // Track pending API requests to avoid WebSocket race conditions
+  // (replaces timestamp-based grace period - more robust)
+  const pendingRequestsRef = useRef<Set<string>>(new Set());
+
+  // WebSocket integration for real-time updates from switch actions
+  const handleFixtureStateChanged = useCallback((event: FixtureStateChangedEvent) => {
+    const key = `fixture-brightness-${event.fixture_id}`;
+
+    // Don't overwrite if there's a pending API request for this fixture
+    // This prevents race conditions where WebSocket updates arrive while
+    // user-initiated API calls are still in flight
+    if (pendingRequestsRef.current.has(key)) {
+      return;
+    }
+
+    setFixtureStates(prev => {
+      const existing = prev.get(event.fixture_id);
+      if (!existing) return prev; // Fixture not in map
+
+      const newBrightness = event.brightness * BRIGHTNESS_SCALE;
+      const newCct = event.color_temp ?? existing.goal_cct;
+      const newIsOn = event.brightness > 0;
+
+      // Early return if state hasn't actually changed (avoid unnecessary re-renders)
+      if (
+        existing.goal_brightness === newBrightness &&
+        existing.goal_cct === newCct &&
+        existing.is_on === newIsOn
+      ) {
+        return prev;
+      }
+
+      const newMap = new Map(prev);
+      newMap.set(event.fixture_id, {
+        ...existing,
+        goal_brightness: newBrightness,
+        goal_cct: newCct,
+        is_on: newIsOn
+      });
+      return newMap;
+    });
+  }, []);
+
+  const handleGroupStateChanged = useCallback((event: GroupStateChangedEvent) => {
+    const key = `group-brightness-${event.group_id}`;
+
+    // Don't overwrite if there's a pending API request for this group
+    if (pendingRequestsRef.current.has(key)) {
+      return;
+    }
+
+    // Update all fixtures in the affected group
+    const fixturesInGroup = groupFixtures.get(event.group_id) || [];
+    const newBrightness = event.brightness * BRIGHTNESS_SCALE;
+    const newCct = event.color_temp;
+
+    setFixtureStates(prev => {
+      let hasChanges = false;
+      const newMap = new Map(prev);
+
+      fixturesInGroup.forEach(fixture => {
+        const existing = newMap.get(fixture.id);
+        if (!existing) return;
+
+        const updatedCct = newCct ?? existing.goal_cct;
+        const updatedIsOn = event.brightness > 0;
+
+        // Check if this fixture's state would actually change
+        if (
+          existing.goal_brightness !== newBrightness ||
+          existing.goal_cct !== updatedCct ||
+          existing.is_on !== updatedIsOn
+        ) {
+          hasChanges = true;
+          newMap.set(fixture.id, {
+            ...existing,
+            goal_brightness: newBrightness,
+            goal_cct: updatedCct,
+            is_on: updatedIsOn
+          });
+        }
+      });
+
+      // Early return if no fixtures actually changed (avoid unnecessary re-renders)
+      return hasChanges ? newMap : prev;
+    });
+  }, [groupFixtures]);
+
+  // Connect to WebSocket for real-time updates
+  useWebSocket({
+    onFixtureStateChanged: handleFixtureStateChanged,
+    onGroupStateChanged: handleGroupStateChanged,
+  });
 
   // Auto-dismiss control errors
   useEffect(() => {
@@ -526,6 +631,9 @@ export default function DashboardPage() {
   const handleFixtureBrightness = useCallback((fixtureId: number, brightness: number) => {
     const key = `fixture-brightness-${fixtureId}`;
 
+    // Mark this fixture as having a pending request
+    pendingRequestsRef.current.add(key);
+
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
     requestVersionRef.current.set(key, currentVersion);
@@ -546,10 +654,14 @@ export default function DashboardPage() {
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
       // Check if component is still mounted
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        pendingRequestsRef.current.delete(key);
+        return;
+      }
 
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
+        pendingRequestsRef.current.delete(key);
         return; // A newer request superseded this one
       }
 
@@ -566,6 +678,9 @@ export default function DashboardPage() {
         if (!mountedRef.current) return;
         const fixtureName = getFixtureName(fixtureId);
         setControlError(`Failed to set brightness for ${fixtureName}`);
+      } finally {
+        // Always remove pending request marker when request completes
+        pendingRequestsRef.current.delete(key);
       }
     }, SLIDER_DEBOUNCE_MS));
   }, [fixtures]);
@@ -573,6 +688,11 @@ export default function DashboardPage() {
   // Control fixture CCT (debounced with race condition handling)
   const handleFixtureCCT = useCallback((fixtureId: number, cct: number) => {
     const key = `fixture-cct-${fixtureId}`;
+    const brightnessKey = `fixture-brightness-${fixtureId}`;
+
+    // Mark both keys as having pending requests (CCT changes affect state updates)
+    pendingRequestsRef.current.add(key);
+    pendingRequestsRef.current.add(brightnessKey);
 
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
@@ -594,10 +714,16 @@ export default function DashboardPage() {
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
       // Check if component is still mounted
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        pendingRequestsRef.current.delete(key);
+        pendingRequestsRef.current.delete(brightnessKey);
+        return;
+      }
 
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
+        pendingRequestsRef.current.delete(key);
+        pendingRequestsRef.current.delete(brightnessKey);
         return; // A newer request superseded this one
       }
 
@@ -614,6 +740,10 @@ export default function DashboardPage() {
         if (!mountedRef.current) return;
         const fixtureName = getFixtureName(fixtureId);
         setControlError(`Failed to set color temperature for ${fixtureName}`);
+      } finally {
+        // Always remove pending request markers when request completes
+        pendingRequestsRef.current.delete(key);
+        pendingRequestsRef.current.delete(brightnessKey);
       }
     }, SLIDER_DEBOUNCE_MS));
   }, [fixtures]);
@@ -621,6 +751,9 @@ export default function DashboardPage() {
   // Control group brightness (debounced with optimistic update and race condition handling)
   const handleGroupBrightness = useCallback((groupId: number, brightness: number) => {
     const key = `group-brightness-${groupId}`;
+
+    // Mark this group as having a pending request
+    pendingRequestsRef.current.add(key);
 
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
@@ -645,10 +778,14 @@ export default function DashboardPage() {
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
       // Check if component is still mounted
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        pendingRequestsRef.current.delete(key);
+        return;
+      }
 
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
+        pendingRequestsRef.current.delete(key);
         return; // A newer request superseded this one
       }
 
@@ -665,6 +802,9 @@ export default function DashboardPage() {
         if (!mountedRef.current) return;
         const group = groups.find(g => g.id === groupId);
         setControlError(`Failed to set brightness for ${group?.name || 'group'}`);
+      } finally {
+        // Always remove pending request marker when request completes
+        pendingRequestsRef.current.delete(key);
       }
     }, SLIDER_DEBOUNCE_MS));
   }, [groupFixtures, groups]);
@@ -672,6 +812,11 @@ export default function DashboardPage() {
   // Control group CCT (debounced with optimistic update and race condition handling)
   const handleGroupCCT = useCallback((groupId: number, cct: number) => {
     const key = `group-cct-${groupId}`;
+    const brightnessKey = `group-brightness-${groupId}`;
+
+    // Mark both keys as having pending requests (CCT changes affect state updates)
+    pendingRequestsRef.current.add(key);
+    pendingRequestsRef.current.add(brightnessKey);
 
     // Increment request version for race condition handling
     const currentVersion = (requestVersionRef.current.get(key) || 0) + 1;
@@ -696,10 +841,16 @@ export default function DashboardPage() {
 
     sliderDebounceRef.current.set(key, setTimeout(async () => {
       // Check if component is still mounted
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        pendingRequestsRef.current.delete(key);
+        pendingRequestsRef.current.delete(brightnessKey);
+        return;
+      }
 
       // Check if this request is still the latest
       if (requestVersionRef.current.get(key) !== currentVersion) {
+        pendingRequestsRef.current.delete(key);
+        pendingRequestsRef.current.delete(brightnessKey);
         return; // A newer request superseded this one
       }
 
@@ -716,6 +867,10 @@ export default function DashboardPage() {
         if (!mountedRef.current) return;
         const group = groups.find(g => g.id === groupId);
         setControlError(`Failed to set color temperature for ${group?.name || 'group'}`);
+      } finally {
+        // Always remove pending request markers when request completes
+        pendingRequestsRef.current.delete(key);
+        pendingRequestsRef.current.delete(brightnessKey);
       }
     }, SLIDER_DEBOUNCE_MS));
   }, [groupFixtures, groups]);

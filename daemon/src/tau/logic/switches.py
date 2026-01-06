@@ -14,6 +14,7 @@ import structlog
 from tau.database import get_db_session
 from tau.models.switches import Switch, SwitchModel
 from tau.hardware import HardwareManager
+from tau.api.websocket import broadcast_fixture_state_change, broadcast_group_state_change
 
 if TYPE_CHECKING:
     from tau.control.state_manager import StateManager
@@ -82,6 +83,14 @@ class SwitchHandler:
 
         # Runtime state tracking {switch_id: SwitchState}
         self.switch_states: Dict[int, SwitchState] = {}
+
+        # Broadcast throttling for hold events (max once per 100ms per target)
+        # Keys are "fixture:{id}" or "group:{id}", values are last broadcast timestamp
+        self.last_broadcast_time: Dict[str, float] = {}
+        self.broadcast_throttle_ms = 100  # Minimum time between broadcasts
+        self.broadcast_cleanup_threshold = 300  # Clean up entries older than 5 minutes
+        self.broadcast_cleanup_interval = 300  # Run cleanup every 5 minutes (time-based)
+        self.last_cleanup_time = 0.0  # Track last cleanup time
 
         # Statistics
         self.events_processed = 0
@@ -325,6 +334,8 @@ class SwitchHandler:
                 fixture_id=switch.target_fixture_id,
                 state="on" if digital_value else "off"
             )
+            # Broadcast state change via WebSocket
+            await self._broadcast_fixture_state(switch.target_fixture_id)
         elif switch.target_group_id:
             # When turning on, use group's default settings
             if digital_value:  # Turning on
@@ -365,6 +376,8 @@ class SwitchHandler:
                     switch_id=switch.id,
                     group_id=switch.target_group_id
                 )
+            # Broadcast group state change via WebSocket
+            await self._broadcast_group_state(switch.target_group_id)
 
         self.events_processed += 1
 
@@ -476,6 +489,8 @@ class SwitchHandler:
                 fixture_id=switch.target_fixture_id,
                 brightness=brightness
             )
+            # Broadcast state change via WebSocket
+            await self._broadcast_fixture_state(switch.target_fixture_id)
         elif switch.target_group_id:
             self.state_manager.set_group_brightness(
                 switch.target_group_id,
@@ -489,6 +504,8 @@ class SwitchHandler:
                 group_id=switch.target_group_id,
                 brightness=brightness
             )
+            # Broadcast group state change via WebSocket
+            await self._broadcast_group_state(switch.target_group_id)
 
         self.events_processed += 1
 
@@ -557,7 +574,11 @@ class SwitchHandler:
                 switch_id=switch.id,
                 final_brightness=state.dim_start_brightness
             )
-            # Brightness is already set by hold events, nothing more to do
+            # Brightness is already set by hold events, broadcast final state
+            if switch.target_fixture_id:
+                await self._broadcast_fixture_state(switch.target_fixture_id)
+            elif switch.target_group_id:
+                await self._broadcast_group_state(switch.target_group_id)
         else:
             # No dimming - this was a quick press, so toggle
             if switch.target_fixture_id:
@@ -576,6 +597,8 @@ class SwitchHandler:
                     fixture_id=switch.target_fixture_id,
                     brightness=new_brightness
                 )
+                # Broadcast state change via WebSocket
+                await self._broadcast_fixture_state(switch.target_fixture_id)
             elif switch.target_group_id:
                 current = self.state_manager.get_group_state(switch.target_group_id)
                 is_currently_on = current and current.brightness > 0
@@ -617,6 +640,8 @@ class SwitchHandler:
                         brightness=brightness,
                         cct=cct
                     )
+                # Broadcast group state change via WebSocket
+                await self._broadcast_group_state(switch.target_group_id)
 
     async def _handle_hold_event(
         self,
@@ -697,6 +722,132 @@ class SwitchHandler:
             brightness=round(new_brightness, 3),
             hold_duration=round(hold_duration, 3)
         )
+
+        # Broadcast state change with throttling for real-time updates
+        # (prevents overwhelming WebSocket clients during continuous dimming)
+        if switch.target_fixture_id:
+            await self._broadcast_fixture_state_throttled(switch.target_fixture_id, current_time)
+        elif switch.target_group_id:
+            await self._broadcast_group_state_throttled(switch.target_group_id, current_time)
+
+    async def _broadcast_fixture_state(self, fixture_id: int) -> None:
+        """
+        Broadcast fixture state change via WebSocket.
+
+        Args:
+            fixture_id: ID of the fixture that changed
+        """
+        try:
+            state = self.state_manager.get_fixture_state(fixture_id)
+            if state:
+                await broadcast_fixture_state_change(
+                    fixture_id=fixture_id,
+                    brightness=state.goal_brightness,
+                    color_temp=state.goal_color_temp
+                )
+        except Exception as e:
+            # Log error but don't crash the switch handler
+            logger.error(f"Failed to broadcast fixture {fixture_id} state: {e}")
+
+    async def _broadcast_group_state(self, group_id: int) -> None:
+        """
+        Broadcast group state change via WebSocket.
+
+        Broadcasts for all fixtures in the group.
+
+        Args:
+            group_id: ID of the group that changed
+        """
+        try:
+            group_state = self.state_manager.get_group_state(group_id)
+            if group_state:
+                await broadcast_group_state_change(
+                    group_id=group_id,
+                    brightness=group_state.brightness,
+                    color_temp=group_state.circadian_color_temp if group_state.circadian_enabled else None
+                )
+
+            # Also broadcast individual fixture states for the group
+            for fixture_id, group_ids in self.state_manager.fixture_group_memberships.items():
+                if group_id in group_ids:
+                    await self._broadcast_fixture_state(fixture_id)
+        except Exception as e:
+            # Log error but don't crash the switch handler
+            logger.error(f"Failed to broadcast group {group_id} state: {e}")
+
+    def _cleanup_broadcast_timestamps(self, current_time: float) -> None:
+        """
+        Clean up stale entries from last_broadcast_time dictionary.
+
+        Removes entries older than broadcast_cleanup_threshold to prevent
+        memory leak from deleted fixtures/groups.
+
+        Args:
+            current_time: Current timestamp in seconds
+        """
+        stale_keys = [
+            key for key, timestamp in self.last_broadcast_time.items()
+            if (current_time - timestamp) > self.broadcast_cleanup_threshold
+        ]
+        for key in stale_keys:
+            del self.last_broadcast_time[key]
+
+        if stale_keys:
+            logger.debug(
+                "broadcast_cleanup",
+                removed_count=len(stale_keys),
+                remaining_count=len(self.last_broadcast_time)
+            )
+
+    async def _broadcast_fixture_state_throttled(self, fixture_id: int, current_time: float) -> None:
+        """
+        Broadcast fixture state change with throttling.
+
+        Only broadcasts if enough time has passed since the last broadcast
+        for this fixture (controlled by broadcast_throttle_ms).
+
+        Args:
+            fixture_id: ID of the fixture that changed
+            current_time: Current timestamp in seconds
+        """
+        key = f"fixture:{fixture_id}"
+        last_broadcast = self.last_broadcast_time.get(key, 0)
+        time_since_last = (current_time - last_broadcast) * 1000  # Convert to ms
+
+        if time_since_last >= self.broadcast_throttle_ms:
+            await self._broadcast_fixture_state(fixture_id)
+            self.last_broadcast_time[key] = current_time
+
+        # Time-based cleanup: run every 5 minutes regardless of broadcast frequency
+        # (prevents memory leak in low-frequency switch usage scenarios)
+        if (current_time - self.last_cleanup_time) >= self.broadcast_cleanup_interval:
+            self._cleanup_broadcast_timestamps(current_time)
+            self.last_cleanup_time = current_time
+
+    async def _broadcast_group_state_throttled(self, group_id: int, current_time: float) -> None:
+        """
+        Broadcast group state change with throttling.
+
+        Only broadcasts if enough time has passed since the last broadcast
+        for this group (controlled by broadcast_throttle_ms).
+
+        Args:
+            group_id: ID of the group that changed
+            current_time: Current timestamp in seconds
+        """
+        key = f"group:{group_id}"
+        last_broadcast = self.last_broadcast_time.get(key, 0)
+        time_since_last = (current_time - last_broadcast) * 1000  # Convert to ms
+
+        if time_since_last >= self.broadcast_throttle_ms:
+            await self._broadcast_group_state(group_id)
+            self.last_broadcast_time[key] = current_time
+
+        # Time-based cleanup: run every 5 minutes regardless of broadcast frequency
+        # (prevents memory leak in low-frequency switch usage scenarios)
+        if (current_time - self.last_cleanup_time) >= self.broadcast_cleanup_interval:
+            self._cleanup_broadcast_timestamps(current_time)
+            self.last_cleanup_time = current_time
 
     def get_statistics(self) -> dict:
         """

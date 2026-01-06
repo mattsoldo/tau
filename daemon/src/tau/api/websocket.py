@@ -252,16 +252,41 @@ class EventType:
 async def broadcast_fixture_state_change(
     fixture_id: int,
     brightness: float,
-    color_temp: int = None
+    color_temp: int | None = None
 ) -> None:
     """
     Broadcast fixture state change event
 
     Args:
         fixture_id: Fixture that changed
-        brightness: New brightness (0.0-1.0)
-        color_temp: New color temperature in Kelvin
+        brightness: New brightness (0.0-1.0) - values outside range are clamped
+        color_temp: New color temperature in Kelvin (1000-10000) - values outside range are clamped
+
+    Note:
+        Invalid values are clamped to valid ranges and logged as warnings.
+        This prevents broadcast failures from disrupting switch control.
     """
+    # Validate brightness range
+    if not 0.0 <= brightness <= 1.0:
+        logger.warning(
+            "invalid_brightness_value",
+            fixture_id=fixture_id,
+            brightness=brightness,
+            clamped_to=max(0.0, min(1.0, brightness))
+        )
+        brightness = max(0.0, min(1.0, brightness))  # Clamp to valid range
+
+    # Validate color temperature range (typical range: 1000K - 10000K)
+    if color_temp is not None:
+        if not 1000 <= color_temp <= 10000:
+            logger.warning(
+                "invalid_color_temp_value",
+                fixture_id=fixture_id,
+                color_temp=color_temp,
+                clamped_to=max(1000, min(10000, color_temp))
+            )
+            color_temp = max(1000, min(10000, color_temp))  # Clamp to valid range
+
     message = {
         "type": EventType.FIXTURE_STATE_CHANGED,
         "fixture_id": fixture_id,
@@ -274,16 +299,41 @@ async def broadcast_fixture_state_change(
 async def broadcast_group_state_change(
     group_id: int,
     brightness: float,
-    color_temp: int = None
+    color_temp: int | None = None
 ) -> None:
     """
     Broadcast group state change event
 
     Args:
         group_id: Group that changed
-        brightness: New brightness (0.0-1.0)
-        color_temp: New color temperature in Kelvin
+        brightness: New brightness (0.0-1.0) - values outside range are clamped
+        color_temp: New color temperature in Kelvin (1000-10000) - values outside range are clamped
+
+    Note:
+        Invalid values are clamped to valid ranges and logged as warnings.
+        This prevents broadcast failures from disrupting switch control.
     """
+    # Validate brightness range
+    if not 0.0 <= brightness <= 1.0:
+        logger.warning(
+            "invalid_brightness_value",
+            group_id=group_id,
+            brightness=brightness,
+            clamped_to=max(0.0, min(1.0, brightness))
+        )
+        brightness = max(0.0, min(1.0, brightness))  # Clamp to valid range
+
+    # Validate color temperature range (typical range: 1000K - 10000K)
+    if color_temp is not None:
+        if not 1000 <= color_temp <= 10000:
+            logger.warning(
+                "invalid_color_temp_value",
+                group_id=group_id,
+                color_temp=color_temp,
+                clamped_to=max(1000, min(10000, color_temp))
+            )
+            color_temp = max(1000, min(10000, color_temp))  # Clamp to valid range
+
     message = {
         "type": EventType.GROUP_STATE_CHANGED,
         "group_id": group_id,
