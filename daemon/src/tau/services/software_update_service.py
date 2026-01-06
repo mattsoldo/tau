@@ -771,29 +771,29 @@ class SoftwareUpdateService:
             if package_path.suffix == ".gz" and package_path.stem.endswith(".tar"):
                 logger.info("extracting_tarball", path=str(package_path), dest=str(self.app_root))
 
-                # Extract tarball to app_root
-                with tarfile.open(package_path, "r:gz") as tar:
-                    # Get the top-level directory name from the tarball
-                    members = tar.getmembers()
-                    if not members:
-                        raise InstallationError("Tarball is empty")
+                # Extract tarball to a temp directory first
+                import tempfile
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    with tarfile.open(package_path, "r:gz") as tar:
+                        # Extract everything to temp
+                        tar.extractall(temp_dir)
 
-                    # Strip the top-level directory (e.g., "tau-1.1.0/")
-                    top_dir = members[0].name.split('/')[0] if '/' in members[0].name else members[0].name
+                    # Find the extracted directory
+                    temp_path = Path(temp_dir)
+                    extracted_dirs = list(temp_path.iterdir())
+                    if not extracted_dirs:
+                        raise InstallationError("Tarball extraction produced no files")
 
-                    for member in members:
-                        # Strip the top-level directory from the path
-                        if member.name.startswith(top_dir + '/'):
-                            member.name = member.name[len(top_dir) + 1:]
-                        elif member.name == top_dir:
-                            continue
+                    source_dir = extracted_dirs[0]
 
-                        # Skip empty paths
-                        if not member.name:
-                            continue
-
-                        # Extract to app_root
-                        tar.extract(member, path=self.app_root)
+                    # Copy files from temp to app_root using shutil
+                    # This preserves the current user ownership
+                    for item in source_dir.rglob("*"):
+                        if item.is_file():
+                            rel_path = item.relative_to(source_dir)
+                            dest = self.app_root / rel_path
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(item, dest)
 
                 logger.info("tarball_extracted", path=str(package_path))
 
