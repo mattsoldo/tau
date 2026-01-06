@@ -84,6 +84,20 @@ export default function HomePage() {
             </div>
           </Link>
 
+          {/* Scenes */}
+          <Link href="/scenes" className="block bg-gradient-to-br from-rose-600 to-rose-700 rounded-lg shadow-lg p-6 text-white hover:from-rose-500 hover:to-rose-600 transition-all hover:shadow-xl hover:-translate-y-0.5">
+            <h2 className="text-2xl font-semibold mb-2">Scenes</h2>
+            <p className="text-rose-200">
+              Create and manage lighting presets, capture current state or configure manually
+            </p>
+            <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+              <span>Open Scenes</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </div>
+          </Link>
+
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-2xl font-semibold mb-4">Welcome to Tau</h2>
             <p className="text-gray-700 mb-4">
@@ -98,12 +112,12 @@ export default function HomePage() {
                 Control lighting by room and zone
               </p>
             </div>
-            <div className="bg-white rounded-lg shadow-md p-6">
+            <Link href="/scenes" className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
               <h3 className="text-lg font-semibold mb-2">Scenes</h3>
               <p className="text-gray-600 text-sm">
                 Activate preset lighting scenes
               </p>
-            </div>
+            </Link>
             <div className="bg-white rounded-lg shadow-md p-6">
               <h3 className="text-lg font-semibold mb-2">Schedule</h3>
               <p className="text-gray-600 text-sm">

@@ -125,13 +125,30 @@ export interface Scene {
   id: number;
   name: string;
   scope_group_id?: number;
+  values?: SceneValue[];
 }
 
 export interface SceneValue {
-  scene_id: number;
+  scene_id?: number;
   fixture_id: number;
-  target_brightness: number; // 0-1000
-  target_cct_kelvin?: number;
+  target_brightness: number | null; // 0-1000
+  target_cct_kelvin?: number | null;
+}
+
+export interface SceneCreateWithValues {
+  name: string;
+  scope_group_id?: number;
+  values: SceneValueCreate[];
+}
+
+export interface SceneValueCreate {
+  fixture_id: number;
+  target_brightness?: number | null;
+  target_cct_kelvin?: number | null;
+}
+
+export interface SceneValuesUpdateRequest {
+  values: SceneValueCreate[];
 }
 
 // State Types

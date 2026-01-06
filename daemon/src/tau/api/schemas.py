@@ -187,6 +187,25 @@ class SceneRecallRequest(BaseModel):
     fade_duration: float = Field(default=0.0, ge=0.0, le=10.0)
 
 
+class SceneValueCreate(BaseModel):
+    """Create/update a scene value for a fixture"""
+    fixture_id: int = Field(..., gt=0)
+    target_brightness: Optional[int] = Field(None, ge=0, le=1000)
+    target_cct_kelvin: Optional[int] = Field(None, ge=1000, le=10000)
+
+
+class SceneCreateWithValues(BaseModel):
+    """Create a new scene with explicit fixture values"""
+    name: str = Field(..., max_length=100)
+    scope_group_id: Optional[int] = None
+    values: List[SceneValueCreate] = Field(default_factory=list)
+
+
+class SceneValuesUpdateRequest(BaseModel):
+    """Update multiple scene values at once"""
+    values: List[SceneValueCreate] = Field(..., min_length=1)
+
+
 # Control Schemas
 class FixtureControlRequest(BaseModel):
     brightness: Optional[float] = Field(None, ge=0.0, le=1.0)

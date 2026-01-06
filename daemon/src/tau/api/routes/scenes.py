@@ -3,18 +3,23 @@ Scenes API Routes - CRUD operations for scenes and scene control
 """
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from tau.database import get_session
 from tau.models.scenes import Scene, SceneValue
+from tau.models.fixtures import Fixture
 from tau.api.schemas import (
     SceneCreate,
     SceneUpdate,
     SceneResponse,
     SceneCaptureRequest,
     SceneRecallRequest,
+    SceneCreateWithValues,
+    SceneValueCreate,
+    SceneValuesUpdateRequest,
+    SceneValueResponse,
 )
 from tau.api import get_daemon_instance
 from tau.api.websocket import broadcast_scene_recalled
@@ -175,3 +180,248 @@ async def recall_scene(
     )
 
     return {"message": "Scene recalled successfully"}
+
+
+@router.post("/with-values", response_model=SceneResponse, status_code=201)
+async def create_scene_with_values(
+    scene_data: SceneCreateWithValues,
+    session: AsyncSession = Depends(get_session)
+):
+    """Create a new scene with explicit fixture values"""
+    # Verify scope group exists if specified
+    if scene_data.scope_group_id:
+        from tau.models.groups import Group
+        group = await session.get(Group, scene_data.scope_group_id)
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+    # Verify all fixtures exist
+    fixture_ids = [v.fixture_id for v in scene_data.values]
+    if fixture_ids:
+        result = await session.execute(
+            select(Fixture.id).where(Fixture.id.in_(fixture_ids))
+        )
+        existing_ids = set(row[0] for row in result)
+        missing = set(fixture_ids) - existing_ids
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Fixtures not found: {list(missing)}"
+            )
+
+    # Create scene
+    scene = Scene(
+        name=scene_data.name,
+        scope_group_id=scene_data.scope_group_id,
+    )
+    session.add(scene)
+    await session.flush()
+
+    # Create scene values
+    for value_data in scene_data.values:
+        scene_value = SceneValue(
+            scene_id=scene.id,
+            fixture_id=value_data.fixture_id,
+            target_brightness=value_data.target_brightness,
+            target_cct_kelvin=value_data.target_cct_kelvin,
+        )
+        session.add(scene_value)
+
+    await session.commit()
+    await session.refresh(scene)
+
+    # Reload with values
+    scene = await session.get(
+        Scene,
+        scene.id,
+        options=[selectinload(Scene.values)]
+    )
+
+    # Invalidate scene cache in engine
+    daemon = get_daemon_instance()
+    if daemon and daemon.lighting_controller:
+        if scene.id in daemon.lighting_controller.scenes.scenes:
+            del daemon.lighting_controller.scenes.scenes[scene.id]
+
+    return scene
+
+
+@router.get("/{scene_id}/values", response_model=List[SceneValueResponse])
+async def get_scene_values(
+    scene_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get all values for a scene"""
+    scene = await session.get(
+        Scene,
+        scene_id,
+        options=[selectinload(Scene.values)]
+    )
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    return scene.values
+
+
+@router.put("/{scene_id}/values", response_model=SceneResponse)
+async def update_scene_values(
+    scene_id: int,
+    values_data: SceneValuesUpdateRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Update multiple scene values at once (replaces all values)"""
+    scene = await session.get(Scene, scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Verify all fixtures exist
+    fixture_ids = [v.fixture_id for v in values_data.values]
+    result = await session.execute(
+        select(Fixture.id).where(Fixture.id.in_(fixture_ids))
+    )
+    existing_ids = set(row[0] for row in result)
+    missing = set(fixture_ids) - existing_ids
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Fixtures not found: {list(missing)}"
+        )
+
+    # Delete all existing scene values
+    await session.execute(
+        delete(SceneValue).where(SceneValue.scene_id == scene_id)
+    )
+
+    # Create new scene values
+    for value_data in values_data.values:
+        scene_value = SceneValue(
+            scene_id=scene_id,
+            fixture_id=value_data.fixture_id,
+            target_brightness=value_data.target_brightness,
+            target_cct_kelvin=value_data.target_cct_kelvin,
+        )
+        session.add(scene_value)
+
+    await session.commit()
+
+    # Reload scene with values
+    scene = await session.get(
+        Scene,
+        scene_id,
+        options=[selectinload(Scene.values)]
+    )
+
+    # Invalidate scene cache in engine
+    daemon = get_daemon_instance()
+    if daemon and daemon.lighting_controller:
+        if scene_id in daemon.lighting_controller.scenes.scenes:
+            del daemon.lighting_controller.scenes.scenes[scene_id]
+
+    return scene
+
+
+@router.post("/{scene_id}/values/{fixture_id}", response_model=SceneValueResponse)
+async def set_scene_value(
+    scene_id: int,
+    fixture_id: int,
+    value_data: SceneValueCreate,
+    session: AsyncSession = Depends(get_session)
+):
+    """Set or update a single fixture value in a scene"""
+    # Verify scene exists
+    scene = await session.get(Scene, scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Verify fixture exists
+    fixture = await session.get(Fixture, fixture_id)
+    if not fixture:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+
+    # Check if value already exists
+    existing = await session.get(SceneValue, (scene_id, fixture_id))
+
+    if existing:
+        # Update existing value
+        if value_data.target_brightness is not None:
+            existing.target_brightness = value_data.target_brightness
+        if value_data.target_cct_kelvin is not None:
+            existing.target_cct_kelvin = value_data.target_cct_kelvin
+        scene_value = existing
+    else:
+        # Create new value
+        scene_value = SceneValue(
+            scene_id=scene_id,
+            fixture_id=fixture_id,
+            target_brightness=value_data.target_brightness,
+            target_cct_kelvin=value_data.target_cct_kelvin,
+        )
+        session.add(scene_value)
+
+    await session.commit()
+    await session.refresh(scene_value)
+
+    # Invalidate scene cache in engine
+    daemon = get_daemon_instance()
+    if daemon and daemon.lighting_controller:
+        if scene_id in daemon.lighting_controller.scenes.scenes:
+            del daemon.lighting_controller.scenes.scenes[scene_id]
+
+    return scene_value
+
+
+@router.delete("/{scene_id}/values/{fixture_id}", status_code=204)
+async def remove_scene_value(
+    scene_id: int,
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """Remove a fixture from a scene"""
+    # Verify scene exists
+    scene = await session.get(Scene, scene_id)
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Check if value exists
+    existing = await session.get(SceneValue, (scene_id, fixture_id))
+    if not existing:
+        raise HTTPException(status_code=404, detail="Fixture not in scene")
+
+    await session.delete(existing)
+    await session.commit()
+
+    # Invalidate scene cache in engine
+    daemon = get_daemon_instance()
+    if daemon and daemon.lighting_controller:
+        if scene_id in daemon.lighting_controller.scenes.scenes:
+            del daemon.lighting_controller.scenes.scenes[scene_id]
+
+
+@router.get("/current-state", response_model=List[SceneValueResponse])
+async def get_current_fixture_states(
+    session: AsyncSession = Depends(get_session)
+):
+    """Get current state of all fixtures (for scene capture preview)"""
+    daemon = get_daemon_instance()
+    if not daemon or not daemon.state_manager:
+        raise HTTPException(
+            status_code=503,
+            detail="State manager not available"
+        )
+
+    # Get all fixtures
+    result = await session.execute(select(Fixture.id))
+    fixture_ids = [row[0] for row in result]
+
+    states = []
+    for fixture_id in fixture_ids:
+        state = daemon.state_manager.get_fixture_state(fixture_id)
+        if state:
+            # Convert state manager brightness (0.0-1.0) to API format (0-1000)
+            brightness_db = int(state.brightness * 1000)
+            states.append(SceneValueResponse(
+                fixture_id=fixture_id,
+                target_brightness=brightness_db,
+                target_cct_kelvin=state.color_temp,
+            ))
+
+    return states
