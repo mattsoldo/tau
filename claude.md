@@ -607,11 +607,30 @@ Pre-release versions use suffixes: `v2.0.0-beta.1`, `v2.0.0-rc.1`
 
 ### Release Artifacts
 
+**CRITICAL**: Every version release requires BOTH a git tag AND a GitHub Release with downloadable assets. The auto-update system uses the GitHub Releases API, which only sees actual Releases, not bare git tags.
+
 Every release must include:
 
-1. **Debian package**: `lighting-control-{version}-armhf.deb`
-2. **Checksum file**: `lighting-control-{version}-armhf.deb.sha256`
-3. **Release notes** in the GitHub release body (not a separate file)
+1. **Git tag**: `git tag -a v1.x.x -m "description"` and `git push origin v1.x.x`
+2. **GitHub Release**: Created via `gh release create` with assets attached
+3. **Tarball asset**: `tau-v{version}.tar.gz` (created with `git archive`)
+4. **Release notes** in the GitHub release body (not a separate file)
+
+**Creating a release**:
+```bash
+# 1. Tag the release
+git tag -a v1.1.3 -m "v1.1.3 - Description of changes"
+git push origin v1.1.3
+
+# 2. Create tarball
+git archive --format=tar.gz --prefix=tau/ -o /tmp/tau-v1.1.3.tar.gz v1.1.3
+
+# 3. Create GitHub Release with asset
+gh release create v1.1.3 /tmp/tau-v1.1.3.tar.gz \
+  --repo mattsoldo/tau \
+  --title "v1.1.3 - Title" \
+  --notes "Release notes here"
+```
 
 When modifying build scripts or CI workflows, ensure these artifacts are generated and attached to releases.
 
