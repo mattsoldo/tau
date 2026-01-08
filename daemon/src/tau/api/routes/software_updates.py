@@ -184,6 +184,13 @@ async def get_update_status(
     summary="Check for Updates",
     description="Check if software updates are available from GitHub Releases",
 )
+@router.post(
+    "/check",
+    response_model=UpdateCheckResponse,
+    summary="Check for Updates (Legacy)",
+    description="Check if software updates are available (POST for backwards compatibility)",
+    include_in_schema=False,  # Hide from OpenAPI docs
+)
 async def check_for_updates(
     service: SoftwareUpdateService = Depends(get_update_service),
 ):

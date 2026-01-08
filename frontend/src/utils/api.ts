@@ -272,7 +272,8 @@ export const api = {
   // Software Updates (GitHub Releases-based)
   softwareUpdate: {
     getStatus: () => request<SoftwareUpdateStatusResponse>('/api/system/update/status'),
-    check: () => request<SoftwareUpdateCheckResponse>('/api/system/update/check'),
+    // Use POST for backwards compatibility with older backends
+    check: () => request<SoftwareUpdateCheckResponse>('/api/system/update/check', { method: 'POST' }),
     apply: (targetVersion: string) =>
       request<SoftwareUpdateApplyResponse>('/api/system/update/apply', {
         method: 'POST',
