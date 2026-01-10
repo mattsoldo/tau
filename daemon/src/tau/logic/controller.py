@@ -330,22 +330,43 @@ class LightingController:
             universe = fixture_state.dmx_universe
             start_channel = fixture_state.dmx_channel_start
             secondary_channel = fixture_state.secondary_dmx_channel
+            dmx_footprint = fixture_state.dmx_footprint or 1
+            fixture_type = fixture_state.fixture_type
             brightness = effective_state.brightness
 
+            supports_cct = (
+                dmx_footprint >= 2
+                and (fixture_type in (None, "tunable_white", "dim_to_warm"))
+            ) or secondary_channel is not None
+
             # Determine CCT for tunable white fixtures
-            # Apply DTW if no explicit CCT is set and DTW is enabled
-            cct = effective_state.color_temp
-            if secondary_channel is not None:
-                if cct is None and self.dtw.is_enabled:
-                    # No circadian or manual CCT set - use DTW
+            # Priority: circadian -> manual CCT -> DTW -> fallback/default
+            cct = None
+            if supports_cct:
+                circadian_cct = None
+                if not fixture_state.override_active:
+                    for group_id in self.state_manager.fixture_group_memberships.get(fixture_id, set()):
+                        group_state = self.state_manager.groups.get(group_id)
+                        if group_state and group_state.circadian_enabled and group_state.circadian_color_temp is not None:
+                            circadian_cct = group_state.circadian_color_temp
+                            break
+
+                if circadian_cct is not None:
+                    cct = circadian_cct
+                elif fixture_state.manual_cct_active and effective_state.color_temp is not None:
+                    cct = effective_state.color_temp
+                elif self.dtw.is_enabled:
                     dtw_result = self.dtw.calculate_cct(fixture_id, brightness)
                     cct = dtw_result.cct
-                elif cct is None:
-                    # DTW disabled and no CCT - use fixture model max CCT
+                else:
+                    cct = effective_state.color_temp
+
+                if cct is None:
                     cct = fixture_state.cct_max or 4000
 
             # For tunable white fixtures, calculate warm/cool channel values
-            if secondary_channel is not None and cct is not None:
+            if supports_cct and cct is not None:
+                cool_channel = secondary_channel if secondary_channel is not None else start_channel + 1
 
                 # Get CCT range from fixture model (with defaults)
                 cct_min = fixture_state.cct_min or 2700
@@ -413,21 +434,33 @@ class LightingController:
                         gamma=gamma,
                     )
 
-                dmx_values = [warm_level, cool_level]
+                if cool_channel == start_channel + 1:
+                    dmx_values = [warm_level, cool_level]
+                    channel_map = None
+                else:
+                    dmx_values = [warm_level, cool_level]
+                    channel_map = {start_channel: warm_level, cool_channel: cool_level}
             else:
                 # Single channel fixture or no CCT info - just use brightness
                 dmx_brightness = int(effective_state.brightness * 255)
                 dmx_values = [dmx_brightness]
+                channel_map = None
                 if secondary_channel is not None:
                     dmx_values.append(dmx_brightness)
 
             # Send to hardware
             try:
-                await self.hardware_manager.set_fixture_dmx(
-                    universe=universe,
-                    start_channel=start_channel,
-                    values=dmx_values
-                )
+                if channel_map:
+                    await self.hardware_manager.set_dmx_output(
+                        universe=universe,
+                        channels=channel_map
+                    )
+                else:
+                    await self.hardware_manager.set_fixture_dmx(
+                        universe=universe,
+                        start_channel=start_channel,
+                        values=dmx_values
+                    )
                 self.hardware_updates += 1
             except Exception as e:
                 logger.error(

@@ -84,7 +84,9 @@ class FixtureStateData:
     dmx_universe: int = 0
     dmx_channel_start: int = 1
     secondary_dmx_channel: Optional[int] = None
+    dmx_footprint: int = 1
     fixture_model_id: Optional[int] = None
+    fixture_type: Optional[str] = None
     # CCT range from fixture model
     cct_min: Optional[int] = None
     cct_max: Optional[int] = None
@@ -100,6 +102,8 @@ class FixtureStateData:
     override_active: bool = False
     override_expires_at: Optional[float] = None  # Unix timestamp
     override_source: Optional[str] = None  # 'fixture' or 'group'
+    # Manual CCT override (bypasses DTW when enabled)
+    manual_cct_active: bool = False
 
     @property
     def brightness(self) -> float:
@@ -329,6 +333,8 @@ class StateManager:
 
         fixture.goal_brightness = brightness
         fixture.last_updated = now
+        if brightness <= 0.0:
+            fixture.manual_cct_active = False
 
         if transition_duration > 0:
             # Start a transition from current to goal
@@ -414,6 +420,7 @@ class StateManager:
 
         fixture.goal_color_temp = color_temp
         fixture.last_updated = now
+        fixture.manual_cct_active = True
 
         if transition_duration > 0:
             # Start a transition from current to goal
@@ -895,7 +902,9 @@ class StateManager:
                     dmx_universe=fixture.dmx_universe,
                     dmx_channel_start=fixture.dmx_channel_start,
                     secondary_dmx_channel=fixture.secondary_dmx_channel,
+                    dmx_footprint=fixture.dmx_footprint,
                     fixture_model_id=fixture.fixture_model_id,
+                    fixture_type=fixture.fixture_type,
                     cct_min=fixture.cct_min,
                     cct_max=fixture.cct_max,
                     warm_xy_x=fixture.warm_xy_x,
@@ -908,6 +917,7 @@ class StateManager:
                     override_active=True,
                     override_expires_at=fixture.override_expires_at,
                     override_source=fixture.override_source,
+                    manual_cct_active=fixture.manual_cct_active,
                 )
 
         # No override - use fixture state directly (groups already set fixture values)
@@ -943,7 +953,9 @@ class StateManager:
             dmx_universe=fixture.dmx_universe,
             dmx_channel_start=fixture.dmx_channel_start,
             secondary_dmx_channel=fixture.secondary_dmx_channel,
+            dmx_footprint=fixture.dmx_footprint,
             fixture_model_id=fixture.fixture_model_id,
+            fixture_type=fixture.fixture_type,
             cct_min=fixture.cct_min,
             cct_max=fixture.cct_max,
             warm_xy_x=fixture.warm_xy_x,
@@ -953,6 +965,7 @@ class StateManager:
             warm_lumens=fixture.warm_lumens,
             cool_lumens=fixture.cool_lumens,
             gamma=fixture.gamma,
+            manual_cct_active=fixture.manual_cct_active,
         )
 
         return state

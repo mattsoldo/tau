@@ -105,12 +105,16 @@ class ConfigLoader:
             fixture_state.dmx_channel_start = fixture.dmx_channel_start or 1
             fixture_state.secondary_dmx_channel = fixture.secondary_dmx_channel
             fixture_state.fixture_model_id = fixture.fixture_model_id
+            fixture_state.dmx_footprint = 1
+            fixture_state.fixture_type = None
             # Universe defaults to 0 (TODO: add dmx_universe column to fixtures table)
             fixture_state.dmx_universe = getattr(fixture, 'dmx_universe', 0) or 0
 
             # Load color mixing parameters from fixture model
             model = fixture.fixture_model
             if model:
+                fixture_state.dmx_footprint = model.dmx_footprint or 1
+                fixture_state.fixture_type = model.type
                 fixture_state.cct_min = model.cct_min_kelvin
                 fixture_state.cct_max = model.cct_max_kelvin
                 fixture_state.warm_xy_x = model.warm_xy_x
