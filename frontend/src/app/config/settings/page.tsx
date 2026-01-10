@@ -69,6 +69,8 @@ export default function SettingsPage() {
   const [dtwSettings, setDtwSettings] = useState<DTWSettings | null>(null);
   const [dtwCurveInfo, setDtwCurveInfo] = useState<DTWCurveInfo | null>(null);
   const [dtwSaving, setDtwSaving] = useState(false);
+  const [editingMinCct, setEditingMinCct] = useState<string>('');
+  const [editingMaxCct, setEditingMaxCct] = useState<string>('');
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -360,17 +362,26 @@ export default function SettingsPage() {
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
-                            value={dtwSettings.min_cct}
-                            onChange={(e) => {
+                            value={editingMinCct || dtwSettings.min_cct}
+                            onChange={(e) => setEditingMinCct(e.target.value)}
+                            onFocus={() => setEditingMinCct(String(dtwSettings.min_cct))}
+                            onBlur={(e) => {
                               const val = parseInt(e.target.value);
-                              if (val >= 1000 && val <= 10000) {
+                              if (val >= 1000 && val <= 10000 && val !== dtwSettings.min_cct) {
                                 handleUpdateDTW({ min_cct: val });
+                              }
+                              setEditingMinCct('');
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                (e.target as HTMLInputElement).blur();
                               }
                             }}
                             min={1000}
                             max={10000}
                             step={100}
-                            className="flex-1 px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                            disabled={dtwSaving}
+                            className="flex-1 px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white font-mono focus:outline-none focus:border-amber-500 disabled:opacity-50"
                           />
                           <span className="text-[#636366]">K</span>
                         </div>
@@ -380,17 +391,26 @@ export default function SettingsPage() {
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
-                            value={dtwSettings.max_cct}
-                            onChange={(e) => {
+                            value={editingMaxCct || dtwSettings.max_cct}
+                            onChange={(e) => setEditingMaxCct(e.target.value)}
+                            onFocus={() => setEditingMaxCct(String(dtwSettings.max_cct))}
+                            onBlur={(e) => {
                               const val = parseInt(e.target.value);
-                              if (val >= 1000 && val <= 10000) {
+                              if (val >= 1000 && val <= 10000 && val !== dtwSettings.max_cct) {
                                 handleUpdateDTW({ max_cct: val });
+                              }
+                              setEditingMaxCct('');
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                (e.target as HTMLInputElement).blur();
                               }
                             }}
                             min={1000}
                             max={10000}
                             step={100}
-                            className="flex-1 px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white font-mono focus:outline-none focus:border-amber-500"
+                            disabled={dtwSaving}
+                            className="flex-1 px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white font-mono focus:outline-none focus:border-amber-500 disabled:opacity-50"
                           />
                           <span className="text-[#636366]">K</span>
                         </div>
