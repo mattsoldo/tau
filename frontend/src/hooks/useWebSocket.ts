@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
+import { getWsUrl } from '@/utils/api';
 
 export interface FixtureStateChangedEvent {
   type: 'fixture_state_changed';
@@ -57,10 +58,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     if (!mountedRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    // Determine WebSocket URL based on current location
-    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = typeof window !== 'undefined' ? window.location.host : 'localhost:8000';
-    const wsUrl = `${protocol}//${host}/ws`;
+    const wsUrl = getWsUrl();
 
     try {
       const ws = new WebSocket(wsUrl);

@@ -31,6 +31,18 @@ def _import_models():
             SceneValue,
             FixtureState,
             GroupState,
+            SystemSetting,
+            UpdateLog,
+            UpdateStatus,
+            Installation,
+            VersionHistory,
+            AvailableRelease,
+            UpdateCheck,
+            UpdateConfig,
+            Override,
+            TargetType,
+            OverrideType,
+            OverrideSource,
         )
         logger.debug("orm_models_imported")
     except ImportError as e:

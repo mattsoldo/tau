@@ -92,6 +92,10 @@ class SwitchHandler:
         self.broadcast_cleanup_interval = 300  # Run cleanup every 5 minutes (time-based)
         self.last_cleanup_time = 0.0  # Track last cleanup time
 
+        # Cache for group defaults to avoid repeated DB hits during rapid switching
+        self.group_defaults_cache: Dict[int, tuple[float, Optional[int], float]] = {}
+        self.group_defaults_ttl = 30.0  # seconds
+
         # Statistics
         self.events_processed = 0
         self.switches_loaded = 0
@@ -267,6 +271,13 @@ class SwitchHandler:
         Returns:
             Tuple of (brightness 0.0-1.0, cct_kelvin or None)
         """
+        now = time.time()
+
+        # Serve from cache when fresh
+        cached = self.group_defaults_cache.get(group_id)
+        if cached and (now - cached[2]) < self.group_defaults_ttl:
+            return (cached[0], cached[1])
+
         try:
             async with get_db_session() as session:
                 from sqlalchemy import select
@@ -281,6 +292,7 @@ class SwitchHandler:
                     # Convert 0-1000 to 0.0-1.0
                     brightness = (group.default_max_brightness or 1000) / 1000.0
                     cct = group.default_cct_kelvin
+                    self.group_defaults_cache[group_id] = (brightness, cct, now)
                     return (brightness, cct)
 
         except Exception as e:
@@ -291,6 +303,7 @@ class SwitchHandler:
             )
 
         # Fallback to 100% brightness, no CCT change
+        self.group_defaults_cache[group_id] = (1.0, None, now)
         return (1.0, None)
 
     async def _process_simple_switch(

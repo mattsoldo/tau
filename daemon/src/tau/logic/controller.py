@@ -75,6 +75,7 @@ class LightingController:
         # Statistics
         self.loop_iterations = 0
         self.hardware_updates = 0
+        self._last_dmx_output: Dict[tuple[int, int, int], tuple[int, ...]] = {}
 
         # Override expiry check counter (check every ~30 seconds at 30 Hz)
         self._expiry_check_counter = 0
@@ -421,6 +422,13 @@ class LightingController:
                 if secondary_channel is not None:
                     dmx_values.append(dmx_brightness)
 
+            # TEMP DEBUG: Caching disabled to diagnose light issues
+            # key = (universe, start_channel, len(dmx_values))
+            # values_tuple = tuple(dmx_values)
+            # if self._last_dmx_output.get(key) == values_tuple:
+            #     # No change for this fixture/universe/channel range; skip write
+            #     continue
+
             # Send to hardware
             try:
                 await self.hardware_manager.set_fixture_dmx(
@@ -429,6 +437,7 @@ class LightingController:
                     values=dmx_values
                 )
                 self.hardware_updates += 1
+                # self._last_dmx_output[key] = values_tuple
             except Exception as e:
                 logger.error(
                     "hardware_update_failed",

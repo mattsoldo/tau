@@ -28,6 +28,7 @@ LabJackPython==2.1.0
 python-dotenv==1.0.0
 pyyaml==6.0.1
 click==8.1.7
+requests==2.31.0
 
 # Async support
 aiofiles==23.2.1
@@ -40,6 +41,7 @@ python-json-logger==2.0.7
 # Time handling
 python-dateutil==2.8.2
 pytz==2024.1
+aiosqlite==0.20.0
 
 # Testing
 pytest==7.4.4

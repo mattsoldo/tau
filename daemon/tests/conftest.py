@@ -9,6 +9,8 @@ Provides fixtures for:
 - Sample data
 """
 import asyncio
+import sys
+from pathlib import Path
 from typing import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,6 +20,12 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+
+# Ensure src/ is on sys.path for direct pytest runs
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
 
 from tau.database import Base, get_session
 from tau.config import Settings
@@ -60,6 +68,8 @@ async def async_engine():
         Group, GroupFixture, GroupHierarchy,
         CircadianProfile, Scene, SceneValue,
         FixtureState, GroupState,
+        SystemSetting,
+        Override, TargetType, OverrideType, OverrideSource,
     )
     from tau.models.software_update import (
         Installation, VersionHistory, AvailableRelease,
