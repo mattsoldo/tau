@@ -5,12 +5,13 @@ Manages lighting scenes (static presets) that can be captured from current
 state and recalled to quickly set specific lighting configurations. Scenes
 store target brightness and CCT values for fixtures.
 """
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, TypedDict
 import structlog
 from datetime import datetime
 
 from tau.database import get_db_session
 from tau.models.scenes import Scene, SceneValue
+from tau.models.state import GroupState
 from tau.models.fixtures import Fixture
 from tau.models.groups import GroupFixture
 
@@ -18,6 +19,11 @@ if TYPE_CHECKING:
     from tau.control.state_manager import StateManager
 
 logger = structlog.get_logger(__name__)
+
+
+class SceneMetadata(TypedDict):
+    name: str
+    scope_group_id: Optional[int]
 
 
 class SceneEngine:
@@ -40,6 +46,8 @@ class SceneEngine:
 
         # Cache of loaded scenes {scene_id: {fixture_id: (brightness, cct)}}
         self.scenes: Dict[int, Dict[int, Tuple[Optional[int], Optional[int]]]] = {}
+        # Cache of scene metadata {scene_id: {"name": str, "scope_group_id": Optional[int]}}
+        self.scene_metadata: Dict[int, SceneMetadata] = {}
 
         # Statistics
         self.scenes_recalled = 0
@@ -60,7 +68,15 @@ class SceneEngine:
         """
         try:
             async with get_db_session() as session:
-                scene = await session.get(Scene, scene_id)
+                from sqlalchemy import select
+                from sqlalchemy.orm import selectinload
+
+                result = await session.execute(
+                    select(Scene)
+                    .options(selectinload(Scene.values))
+                    .where(Scene.id == scene_id)
+                )
+                scene = result.scalar_one_or_none()
 
                 if not scene:
                     logger.warning("scene_not_found", scene_id=scene_id)
@@ -76,6 +92,10 @@ class SceneEngine:
 
                 # Cache scene
                 self.scenes[scene_id] = scene_data
+                self.scene_metadata[scene_id] = {
+                    "name": scene.name,
+                    "scope_group_id": scene.scope_group_id,
+                }
 
                 logger.info(
                     "scene_loaded",
@@ -185,6 +205,10 @@ class SceneEngine:
                 await session.commit()
 
                 self.scenes_captured += 1
+                self.scene_metadata[scene.id] = {
+                    "name": scene.name,
+                    "scope_group_id": scene.scope_group_id,
+                }
 
                 logger.info(
                     "scene_captured",
@@ -252,6 +276,8 @@ class SceneEngine:
                 self.state_manager.set_fixture_color_temp(fixture_id, cct)
 
         self.scenes_recalled += 1
+        if success_count > 0:
+            await self._update_group_last_active_scene(scene_id)
 
         logger.info(
             "scene_recalled",
@@ -361,6 +387,8 @@ class SceneEngine:
                 # Remove from cache
                 if scene_id in self.scenes:
                     del self.scenes[scene_id]
+                if scene_id in self.scene_metadata:
+                    del self.scene_metadata[scene_id]
 
                 logger.info("scene_deleted", scene_id=scene_id)
                 return True
@@ -392,4 +420,47 @@ class SceneEngine:
         """Clear scene cache"""
         count = len(self.scenes)
         self.scenes.clear()
+        self.scene_metadata.clear()
         logger.info("scene_cache_cleared", scenes_cleared=count)
+
+    async def _update_group_last_active_scene(self, scene_id: int) -> None:
+        """
+        Update GroupState.last_active_scene_id for a scene scoped to a group.
+
+        Best-effort update; failures are logged but do not fail scene recall.
+        """
+        metadata = self.scene_metadata.get(scene_id)
+        scope_group_id = metadata.get("scope_group_id") if metadata else None
+
+        try:
+            async with get_db_session() as session:
+                if metadata is None:
+                    scene = await session.get(Scene, scene_id)
+                    if not scene:
+                        return
+                    scope_group_id = scene.scope_group_id
+                    self.scene_metadata[scene_id] = {
+                        "name": scene.name,
+                        "scope_group_id": scene.scope_group_id,
+                    }
+
+                if scope_group_id is None:
+                    return
+
+                group_state = await session.get(GroupState, scope_group_id)
+                if not group_state:
+                    group_state = GroupState(
+                        group_id=scope_group_id,
+                        circadian_suspended=False,
+                    )
+                    session.add(group_state)
+
+                group_state.last_active_scene_id = scene_id
+
+        except Exception as e:
+            logger.warning(
+                "scene_group_state_update_failed",
+                scene_id=scene_id,
+                scope_group_id=scope_group_id,
+                error=str(e),
+            )

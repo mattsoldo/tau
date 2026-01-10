@@ -54,7 +54,7 @@ async def create_scene(
     scene = Scene(**scene_data.model_dump())
     session.add(scene)
     await session.commit()
-    await session.refresh(scene)
+    await session.refresh(scene, attribute_names=["values"])
     return scene
 
 
@@ -91,7 +91,7 @@ async def update_scene(
         setattr(scene, field, value)
 
     await session.commit()
-    await session.refresh(scene)
+    await session.refresh(scene, attribute_names=["values"])
     return scene
 
 

@@ -9,6 +9,7 @@ Coordinates the entire update workflow including:
 - Managing version history and rollback capability
 """
 import asyncio
+import os
 import shutil
 import subprocess
 import tempfile
@@ -66,6 +67,7 @@ SERVICE_START_TIMEOUT = 30.0
 PACKAGE_INSTALL_TIMEOUT = 120.0
 MIGRATION_TIMEOUT = 60.0
 SERVICE_HEALTH_CHECK_TIMEOUT = 10.0
+FRONTEND_BUILD_TIMEOUT = 600.0
 
 
 class UpdateError(Exception):
@@ -563,7 +565,16 @@ class SoftwareUpdateService:
 
             await self._install_package(download_path)
 
-            # Step 6: Run migrations
+            # Step 6: Build frontend static assets
+            self._update_progress = {"stage": "installing", "percent": 50}
+            if progress_callback:
+                progress_callback("installing", 50, "Building frontend...")
+
+            await self._build_frontend()
+
+            self._update_progress = {"stage": "installing", "percent": 100}
+
+            # Step 7: Run migrations
             self._current_state = "migrating"
             self._update_progress = {"stage": "migrating", "percent": 0}
             if progress_callback:
@@ -571,7 +582,7 @@ class SoftwareUpdateService:
 
             await self._run_migrations()
 
-            # Step 7: Schedule service restart
+            # Step 8: Schedule service restart
             # Note: We can't restart tau-daemon from within itself, so we schedule a delayed restart
             self._current_state = "scheduling_restart"
             self._update_progress = {"stage": "scheduling_restart", "percent": 0}
@@ -586,7 +597,7 @@ class SoftwareUpdateService:
                 stderr=subprocess.DEVNULL,
             )
 
-            # Step 8: Verify installation (skip service checks since we're restarting)
+            # Step 9: Verify installation (skip service checks since we're restarting)
             self._current_state = "verifying_install"
             self._update_progress = {"stage": "verifying_install", "percent": 0}
             if progress_callback:
@@ -595,13 +606,13 @@ class SoftwareUpdateService:
             # Skip verification since services will restart momentarily
             logger.info("skipping_verification", reason="services_restarting")
 
-            # Step 9: Update installation record
+            # Step 10: Update installation record
             installation.current_version = target_version
             installation.installed_at = datetime.now(timezone.utc)
             installation.install_method = "update"
             await self.db_session.commit()
 
-            # Step 10: Prune old backups
+            # Step 11: Prune old backups
             await backup_manager.prune_old_backups()
 
             # Cleanup download
@@ -862,6 +873,62 @@ class SoftwareUpdateService:
             raise InstallationError(f"Failed to extract tarball: {str(e)}")
         except asyncio.TimeoutError:
             raise InstallationError(f"Package installation timed out after {PACKAGE_INSTALL_TIMEOUT}s")
+
+    async def _build_frontend(self) -> None:
+        """Build frontend static assets after update install."""
+        frontend_dir = self.app_root / "frontend"
+        package_json = frontend_dir / "package.json"
+        if not frontend_dir.exists() or not package_json.exists():
+            logger.warning("frontend_build_skipped", reason="frontend_missing", path=str(frontend_dir))
+            return
+
+        try:
+            # Clean previous build artifacts
+            for path in ("out", ".next", "node_modules/.cache"):
+                shutil.rmtree(frontend_dir / path, ignore_errors=True)
+
+            # Install dependencies
+            install_cmd = ["npm", "ci"] if (frontend_dir / "package-lock.json").exists() else ["npm", "install"]
+            logger.info("frontend_deps_installing", command=" ".join(install_cmd))
+            install_proc = await asyncio.create_subprocess_exec(
+                *install_cmd,
+                cwd=str(frontend_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(
+                install_proc.communicate(), timeout=FRONTEND_BUILD_TIMEOUT
+            )
+            if install_proc.returncode != 0:
+                raise InstallationError(
+                    f"Frontend dependency install failed: {stderr.decode().strip()}"
+                )
+
+            # Build static frontend
+            env = os.environ.copy()
+            env["NODE_ENV"] = "production"
+            logger.info("frontend_build_starting")
+            build_proc = await asyncio.create_subprocess_exec(
+                "npm",
+                "run",
+                "build",
+                cwd=str(frontend_dir),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(
+                build_proc.communicate(), timeout=FRONTEND_BUILD_TIMEOUT
+            )
+            if build_proc.returncode != 0:
+                raise InstallationError(f"Frontend build failed: {stderr.decode().strip()}")
+
+            if not (frontend_dir / "out").exists():
+                raise InstallationError("Frontend build completed but output directory is missing")
+
+            logger.info("frontend_build_complete", path=str(frontend_dir / "out"))
+        except asyncio.TimeoutError:
+            raise InstallationError(f"Frontend build timed out after {FRONTEND_BUILD_TIMEOUT}s")
 
     async def _run_migrations(self):
         """Run database migrations"""

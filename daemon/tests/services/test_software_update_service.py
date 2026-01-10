@@ -190,6 +190,84 @@ class TestInstallationRecord:
         assert version == "1.2.3"
 
 
+class TestFrontendBuild:
+    """Tests for frontend build during updates."""
+
+    @pytest.mark.asyncio
+    async def test_build_frontend_skips_when_missing(self, tmp_path: Path):
+        """Missing frontend directory is skipped without error."""
+        mock_session = AsyncMock(spec=AsyncSession)
+        service = SoftwareUpdateService(db_session=mock_session, app_root=str(tmp_path))
+
+        await service._build_frontend()
+
+    @pytest.mark.asyncio
+    async def test_build_frontend_runs_install_and_build(self, tmp_path: Path):
+        """Frontend build runs npm install and build commands."""
+        mock_session = AsyncMock(spec=AsyncSession)
+        service = SoftwareUpdateService(db_session=mock_session, app_root=str(tmp_path))
+
+        frontend_dir = tmp_path / "frontend"
+        frontend_dir.mkdir()
+        (frontend_dir / "package.json").write_text("{}")
+        (frontend_dir / "package-lock.json").write_text("{}")
+
+        calls = []
+
+        class FakeProcess:
+            def __init__(self, returncode: int = 0):
+                self.returncode = returncode
+
+            async def communicate(self):
+                return b"", b""
+
+        async def fake_create_subprocess_exec(*cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:3] == ("npm", "run", "build"):
+                (frontend_dir / "out").mkdir()
+            return FakeProcess(returncode=0)
+
+        with patch(
+            "tau.services.software_update_service.asyncio.create_subprocess_exec",
+            side_effect=fake_create_subprocess_exec,
+        ):
+            await service._build_frontend()
+
+        assert calls[0][:2] == ("npm", "ci")
+        assert calls[1][:3] == ("npm", "run", "build")
+        assert (frontend_dir / "out").exists()
+
+    @pytest.mark.asyncio
+    async def test_build_frontend_raises_on_install_failure(self, tmp_path: Path):
+        """Frontend build raises when dependency install fails."""
+        mock_session = AsyncMock(spec=AsyncSession)
+        service = SoftwareUpdateService(db_session=mock_session, app_root=str(tmp_path))
+
+        frontend_dir = tmp_path / "frontend"
+        frontend_dir.mkdir()
+        (frontend_dir / "package.json").write_text("{}")
+        (frontend_dir / "package-lock.json").write_text("{}")
+
+        class FakeProcess:
+            def __init__(self, returncode: int = 0):
+                self.returncode = returncode
+
+            async def communicate(self):
+                return b"", b"install failed"
+
+        async def fake_create_subprocess_exec(*cmd, **kwargs):
+            if cmd[:2] == ("npm", "ci"):
+                return FakeProcess(returncode=1)
+            return FakeProcess(returncode=0)
+
+        with patch(
+            "tau.services.software_update_service.asyncio.create_subprocess_exec",
+            side_effect=fake_create_subprocess_exec,
+        ):
+            with pytest.raises(InstallationError):
+                await service._build_frontend()
+
+
 class TestGitHubClientCreation:
     """Tests for GitHub client initialization."""
 
