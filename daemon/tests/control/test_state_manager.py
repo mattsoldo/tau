@@ -62,7 +62,7 @@ class TestStateManagerBrightness:
         """Test setting fixture brightness without transition."""
         state_manager.register_fixture(1)
 
-        result = state_manager.set_fixture_brightness(1, 0.5)
+        result = state_manager.set_fixture_brightness(1, 0.5, transition_duration=0.0)
 
         assert result is True
         fixture = state_manager.fixtures[1]
@@ -406,8 +406,8 @@ class TestStateManagerEffectiveState:
     def test_effective_state_no_groups(self, state_manager):
         """Test effective state for fixture not in any groups."""
         state_manager.register_fixture(1)
-        state_manager.set_fixture_brightness(1, 0.8)
-        state_manager.set_fixture_color_temp(1, 4000)
+        state_manager.set_fixture_brightness(1, 0.8, transition_duration=0.0)
+        state_manager.set_fixture_color_temp(1, 4000, transition_duration=0.0)
 
         effective = state_manager.get_effective_fixture_state(1)
 

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tau.models.groups import Group
-from tau.models.group_state import GroupState
+from tau.models.state import GroupState
 from tau.models.fixtures import Fixture
 
 

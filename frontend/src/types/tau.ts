@@ -66,6 +66,7 @@ export interface Switch {
   invert_reading: boolean;
   target_group_id?: number;
   target_fixture_id?: number;
+  double_tap_scene_id?: number;
   photo_url?: string;
   model?: SwitchModel;
 }
@@ -89,6 +90,7 @@ export interface SwitchCreate {
   invert_reading?: boolean;
   target_group_id?: number;
   target_fixture_id?: number;
+  double_tap_scene_id?: number;
   photo_url?: string;
 }
 
@@ -125,6 +127,7 @@ export interface Scene {
   id: number;
   name: string;
   scope_group_id?: number;
+  values?: SceneValue[];
 }
 
 export interface SceneValue {

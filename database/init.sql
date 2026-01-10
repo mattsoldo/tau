@@ -103,6 +103,9 @@ CREATE TABLE switches (
     target_group_id INT REFERENCES groups(id) ON DELETE SET NULL,
     target_fixture_id INT REFERENCES fixtures(id) ON DELETE SET NULL,
 
+    -- Double-tap scene recall (optional)
+    double_tap_scene_id INT,
+
     -- Optional photo for UI
     photo_url TEXT,
 
@@ -180,6 +183,10 @@ CREATE TABLE group_state (
 -- Add Foreign Key Constraint for circadian_profile_id after table creation
 ALTER TABLE groups ADD CONSTRAINT fk_groups_circadian_profile
     FOREIGN KEY (circadian_profile_id) REFERENCES circadian_profiles(id) ON DELETE SET NULL;
+
+-- Add Foreign Key Constraint for double_tap_scene_id after scene table creation
+ALTER TABLE switches ADD CONSTRAINT fk_switches_double_tap_scene
+    FOREIGN KEY (double_tap_scene_id) REFERENCES scenes(id) ON DELETE SET NULL;
 
 -- Create Indexes for Performance
 CREATE INDEX idx_fixtures_model_id ON fixtures(fixture_model_id);

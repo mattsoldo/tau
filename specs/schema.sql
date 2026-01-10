@@ -71,6 +71,9 @@ CREATE TABLE switches (
     -- Polymorphic Target
     target_group_id INT REFERENCES groups(id) ON DELETE SET NULL,
     target_fixture_id INT REFERENCES fixtures(id) ON DELETE SET NULL,
+
+    -- Double-tap scene recall (optional)
+    double_tap_scene_id INT,
     
     -- Optional photo for UI
     photo_url TEXT,

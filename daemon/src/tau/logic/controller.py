@@ -6,6 +6,7 @@ circadian calculations, scene management, switch processing, and hardware
 output on each control loop iteration.
 """
 from typing import Optional, Dict, Set, TYPE_CHECKING
+import time
 import structlog
 
 if TYPE_CHECKING:
@@ -68,7 +69,8 @@ class LightingController:
         self.switches = SwitchHandler(
             state_manager,
             hardware_manager,
-            dim_speed_ms=dim_speed_ms
+            dim_speed_ms=dim_speed_ms,
+            scene_engine=self.scenes
         )
         self.dtw = DTWEngine()
 
@@ -81,7 +83,7 @@ class LightingController:
         # Statistics
         self.loop_iterations = 0
         self.hardware_updates = 0
-        self._last_dmx_output: Dict[tuple[int, int, int], tuple[int, ...]] = {}
+        self._last_dmx_output: Dict[tuple[int, int, int, bool], tuple[tuple[int, ...], float]] = {}
 
         # Override expiry check counter (check every ~30 seconds at 30 Hz)
         self._expiry_check_counter = 0
@@ -455,12 +457,20 @@ class LightingController:
                 if secondary_channel is not None:
                     dmx_values.append(dmx_brightness)
 
-            # TEMP DEBUG: Caching disabled to diagnose light issues
-            # key = (universe, start_channel, len(dmx_values))
-            # values_tuple = tuple(dmx_values)
-            # if self._last_dmx_output.get(key) == values_tuple:
-            #     # No change for this fixture/universe/channel range; skip write
-            #     continue
+            # Skip redundant DMX writes when dedupe is enabled and within TTL
+            values_tuple = (
+                tuple(sorted(channel_map.items()))
+                if channel_map is not None
+                else tuple(dmx_values)
+            )
+            key = (universe, start_channel, len(values_tuple), channel_map is not None)
+            now = time.time()
+            if self.dmx_dedupe_enabled:
+                last_entry = self._last_dmx_output.get(key)
+                if last_entry:
+                    last_values, last_time = last_entry
+                    if values_tuple == last_values and (now - last_time) < self.dmx_dedupe_ttl_seconds:
+                        continue
 
             # Send to hardware
             try:
@@ -476,7 +486,8 @@ class LightingController:
                         values=dmx_values
                     )
                 self.hardware_updates += 1
-                # self._last_dmx_output[key] = values_tuple
+                if self.dmx_dedupe_enabled:
+                    self._last_dmx_output[key] = (values_tuple, now)
             except Exception as e:
                 logger.error(
                     "hardware_update_failed",

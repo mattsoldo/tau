@@ -32,6 +32,7 @@ interface Switch {
   invert_reading: boolean;
   target_group_id: number | null;
   target_fixture_id: number | null;
+  double_tap_scene_id: number | null;
   photo_url: string | null;
 }
 
@@ -47,6 +48,11 @@ interface Fixture {
   dmx_channel_start: number;
 }
 
+interface Scene {
+  id: number;
+  name: string;
+}
+
 type TargetType = 'group' | 'fixture';
 
 interface FormData {
@@ -59,6 +65,7 @@ interface FormData {
   target_type: TargetType;
   target_group_id: string;
   target_fixture_id: string;
+  double_tap_scene_id: string;
 }
 
 const emptyFormData: FormData = {
@@ -71,6 +78,7 @@ const emptyFormData: FormData = {
   target_type: 'group',
   target_group_id: '',
   target_fixture_id: '',
+  double_tap_scene_id: '',
 };
 
 const inputTypeLabels: Record<SwitchInputType, { label: string; color: string }> = {
@@ -88,6 +96,7 @@ export default function SwitchesPage() {
   const [switchModels, setSwitchModels] = useState<SwitchModel[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
+  const [scenes, setScenes] = useState<Scene[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,29 +120,33 @@ export default function SwitchesPage() {
   // Fetch all data
   const fetchData = useCallback(async () => {
     try {
-      const [switchesRes, modelsRes, groupsRes, fixturesRes] = await Promise.all([
+      const [switchesRes, modelsRes, groupsRes, fixturesRes, scenesRes] = await Promise.all([
         fetch(`${API_URL}/api/switches/`),
         fetch(`${API_URL}/api/switches/models`),
         fetch(`${API_URL}/api/groups/`),
         fetch(`${API_URL}/api/fixtures/`),
+        fetch(`${API_URL}/api/scenes/`),
       ]);
 
       if (!switchesRes.ok) throw new Error('Failed to fetch switches');
       if (!modelsRes.ok) throw new Error('Failed to fetch switch models');
       if (!groupsRes.ok) throw new Error('Failed to fetch groups');
       if (!fixturesRes.ok) throw new Error('Failed to fetch fixtures');
+      if (!scenesRes.ok) throw new Error('Failed to fetch scenes');
 
-      const [switchesData, modelsData, groupsData, fixturesData] = await Promise.all([
+      const [switchesData, modelsData, groupsData, fixturesData, scenesData] = await Promise.all([
         switchesRes.json(),
         modelsRes.json(),
         groupsRes.json(),
         fixturesRes.json(),
+        scenesRes.json(),
       ]);
 
       setSwitches(switchesData);
       setSwitchModels(modelsData);
       setGroups(groupsData);
       setFixtures(fixturesData);
+      setScenes(scenesData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -342,6 +355,7 @@ export default function SwitchesPage() {
       target_type: sw.target_group_id !== null ? 'group' : 'fixture',
       target_group_id: sw.target_group_id?.toString() || '',
       target_fixture_id: sw.target_fixture_id?.toString() || '',
+      double_tap_scene_id: sw.double_tap_scene_id?.toString() || '',
     });
     setIsModalOpen(true);
   };
@@ -384,6 +398,7 @@ export default function SwitchesPage() {
         invert_reading: formData.invert_reading,
         target_group_id: targetGroupId,
         target_fixture_id: targetFixtureId,
+        double_tap_scene_id: formData.double_tap_scene_id ? parseInt(formData.double_tap_scene_id) : null,
       };
 
       const url = editingSwitch
@@ -532,6 +547,9 @@ export default function SwitchesPage() {
               {sortedSwitches.map((sw) => {
                 const model = getModelById(sw.switch_model_id);
                 const target = getTargetDisplay(sw);
+                const scene = sw.double_tap_scene_id
+                  ? scenes.find((item) => item.id === sw.double_tap_scene_id)
+                  : null;
                 return (
                   <tr key={sw.id} className="hover:bg-white/[0.02] transition-colors">
                     <td className="px-6 py-4">
@@ -557,6 +575,11 @@ export default function SwitchesPage() {
                         <div>
                           <div className="text-sm">{target.name}</div>
                           <div className="text-xs text-[#636366]">{target.type}</div>
+                          {scene && (
+                            <div className="text-xs text-amber-400 mt-1">
+                              Double tap: {scene.name}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -854,6 +877,36 @@ export default function SwitchesPage() {
                 )}
                 {formData.target_type === 'fixture' && fixtures.length === 0 && (
                   <p className="text-xs text-amber-400">No fixtures available. Create a fixture first.</p>
+                )}
+              </div>
+
+              {/* Double Tap Scene */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-[#a1a1a6]">Double Tap Scene</label>
+                <select
+                  value={formData.double_tap_scene_id}
+                  onChange={(e) => setFormData({ ...formData, double_tap_scene_id: e.target.value })}
+                  className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                >
+                  <option value="">None</option>
+                  {scenes.map((scene) => (
+                    <option key={scene.id} value={scene.id}>
+                      {scene.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-[#636366]">
+                  Double tap recalls the scene while single tap still toggles the target.
+                </p>
+                {selectedModel && selectedModel.input_type !== 'retractive' && (
+                  <p className="text-xs text-amber-400">
+                    Double tap requires a retractive switch model.
+                  </p>
+                )}
+                {scenes.length === 0 && (
+                  <p className="text-xs text-amber-400">
+                    No scenes available yet. Capture a scene first.
+                  </p>
                 )}
               </div>
             </div>

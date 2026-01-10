@@ -492,7 +492,7 @@ class TestInterruptedUpdateRecovery:
         # Create temp download directory
         import tempfile
         import shutil
-        download_dir = Path("/tmp/tau-updates")
+        download_dir = Path(tempfile.gettempdir()) / "tau-updates"
         download_dir.mkdir(parents=True, exist_ok=True)
         (download_dir / "partial.deb").write_text("partial")
 

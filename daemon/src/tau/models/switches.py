@@ -132,6 +132,13 @@ class Switch(Base):
     # Optional UI Photo
     photo_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Optional double-tap scene recall
+    double_tap_scene_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("scenes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Relationships
     switch_model: Mapped[SwitchModel] = relationship(
         "SwitchModel",
@@ -148,6 +155,11 @@ class Switch(Base):
         "Fixture",
         back_populates="switches",
         foreign_keys=[target_fixture_id],
+    )
+
+    double_tap_scene: Mapped[Optional["Scene"]] = relationship(
+        "Scene",
+        foreign_keys=[double_tap_scene_id],
     )
 
     # Constraints

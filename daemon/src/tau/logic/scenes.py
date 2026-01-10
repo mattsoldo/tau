@@ -12,6 +12,7 @@ from datetime import datetime
 from tau.database import get_db_session
 from tau.models.scenes import Scene, SceneValue
 from tau.models.fixtures import Fixture
+from tau.models.groups import GroupFixture
 
 if TYPE_CHECKING:
     from tau.control.state_manager import StateManager
@@ -98,6 +99,9 @@ class SceneEngine:
         self,
         name: str,
         fixture_ids: Optional[List[int]] = None,
+        include_group_ids: Optional[List[int]] = None,
+        exclude_fixture_ids: Optional[List[int]] = None,
+        exclude_group_ids: Optional[List[int]] = None,
         scope_group_id: Optional[int] = None
     ) -> Optional[int]:
         """
@@ -106,6 +110,9 @@ class SceneEngine:
         Args:
             name: Name for the new scene
             fixture_ids: List of fixture IDs to capture (None = all fixtures)
+            include_group_ids: Group IDs to include fixtures from
+            exclude_fixture_ids: Fixture IDs to exclude from capture
+            exclude_group_ids: Group IDs to exclude fixtures from
             scope_group_id: Optional group to scope this scene to
 
         Returns:
@@ -113,12 +120,36 @@ class SceneEngine:
         """
         try:
             async with get_db_session() as session:
+                from sqlalchemy import select
+
                 # Determine which fixtures to capture
-                if fixture_ids is None:
-                    # Get all fixtures from database
-                    from sqlalchemy import select
+                include_fixture_ids = set(fixture_ids or [])
+                include_group_ids = include_group_ids or []
+                exclude_fixture_ids = set(exclude_fixture_ids or [])
+                exclude_group_ids = exclude_group_ids or []
+
+                if include_group_ids:
+                    result = await session.execute(
+                        select(GroupFixture.fixture_id).where(
+                            GroupFixture.group_id.in_(include_group_ids)
+                        )
+                    )
+                    include_fixture_ids.update(row[0] for row in result)
+
+                if fixture_ids is None and not include_group_ids:
+                    # Default to all fixtures when no include filters are provided
                     result = await session.execute(select(Fixture.id))
-                    fixture_ids = [row[0] for row in result]
+                    include_fixture_ids = {row[0] for row in result}
+
+                if exclude_group_ids:
+                    result = await session.execute(
+                        select(GroupFixture.fixture_id).where(
+                            GroupFixture.group_id.in_(exclude_group_ids)
+                        )
+                    )
+                    exclude_fixture_ids.update(row[0] for row in result)
+
+                fixture_ids = sorted(include_fixture_ids - exclude_fixture_ids)
 
                 # Create scene record
                 scene = Scene(

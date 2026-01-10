@@ -237,7 +237,8 @@ class TestOverrideAPI:
             params={"target_type": "fixture", "target_id": test_fixture.id}
         )
         assert response.status_code == 200
-        assert response.json()["count"] >= 3
+        # Only one override is stored per target/property (new overrides replace old)
+        assert response.json()["count"] == 1
 
     async def test_cleanup_expired_overrides(self, async_client: AsyncClient):
         """Should cleanup expired overrides"""

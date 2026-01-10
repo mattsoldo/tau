@@ -243,13 +243,13 @@ class TestFixturesAPI:
         fixture_id = create_response.json()["id"]
 
         # Update the fixture
-        update_data = {"name": "Updated Fixture Name", "room": "Bedroom"}
+        update_data = {"name": "Updated Fixture Name", "secondary_dmx_channel": 2}
         response = await async_client.patch(f"/api/fixtures/{fixture_id}", json=update_data)
 
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Updated Fixture Name"
-        assert data["room"] == "Bedroom"
+        assert data["secondary_dmx_channel"] == 2
 
     @pytest.mark.asyncio
     async def test_delete_fixture(self, async_client, created_model, sample_fixture_data):

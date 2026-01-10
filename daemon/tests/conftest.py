@@ -9,8 +9,11 @@ Provides fixtures for:
 - Sample data
 """
 import asyncio
+import os
 import sys
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,7 +22,7 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 
 # Ensure src/ is on sys.path for direct pytest runs
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +32,7 @@ if str(SRC_PATH) not in sys.path:
 
 from tau.database import Base, get_session
 from tau.config import Settings
-from tau.api import create_app
+from tau.api import create_app, get_daemon_instance, set_daemon_instance
 from tau.control.state_manager import StateManager, FixtureStateData, GroupStateData
 from tau.control.scheduler import Scheduler
 from tau.hardware.labjack_mock import LabJackMock as MockLabJackInterface
@@ -54,12 +57,39 @@ def event_loop():
 
 @pytest_asyncio.fixture
 async def async_engine():
-    """Create an async SQLite engine for testing."""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+    """Create an async Postgres engine for testing with isolated schema."""
+    database_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if not database_url:
+        pytest.skip("Set TEST_DATABASE_URL for Postgres-backed tests.")
+
+    database_url_str = str(database_url)
+    if database_url_str.startswith("postgres://"):
+        database_url_str = database_url_str.replace(
+            "postgres://", "postgresql+asyncpg://", 1
+        )
+    elif database_url_str.startswith("postgresql://"):
+        database_url_str = database_url_str.replace(
+            "postgresql://", "postgresql+asyncpg://", 1
+        )
+
+    schema_name = f"test_{uuid.uuid4().hex}"
+
+    admin_engine = create_async_engine(
+        database_url_str,
         echo=False,
+        poolclass=NullPool,
+    )
+
+    async with admin_engine.begin() as conn:
+        await conn.exec_driver_sql(f'CREATE SCHEMA "{schema_name}"')
+
+    await admin_engine.dispose()
+
+    engine = create_async_engine(
+        database_url_str,
+        echo=False,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"search_path": schema_name}},
     )
 
     # Import all models to register them with Base
@@ -79,7 +109,57 @@ async def async_engine():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Seed required system settings for API tests
+    async_session_maker = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    async with async_session_maker() as session:
+        session.add_all([
+            SystemSetting(
+                key="dtw_enabled",
+                value="true",
+                value_type="bool",
+                description="Enable dim-to-warm globally",
+            ),
+            SystemSetting(
+                key="dtw_min_cct",
+                value="1800",
+                value_type="int",
+                description="Minimum DTW color temperature",
+            ),
+            SystemSetting(
+                key="dtw_max_cct",
+                value="4000",
+                value_type="int",
+                description="Maximum DTW color temperature",
+            ),
+            SystemSetting(
+                key="dtw_min_brightness",
+                value="0.001",
+                value_type="float",
+                description="Minimum brightness floor for DTW curve",
+            ),
+            SystemSetting(
+                key="dtw_curve",
+                value="log",
+                value_type="str",
+                description="DTW curve type",
+            ),
+            SystemSetting(
+                key="dtw_override_timeout",
+                value="28800",
+                value_type="int",
+                description="DTW override timeout in seconds",
+            ),
+        ])
+        await session.commit()
+
     yield engine
+
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
 
     await engine.dispose()
 
@@ -104,8 +184,9 @@ async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 def test_settings() -> Settings:
     """Create test settings."""
+    database_url = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or "postgresql+asyncpg://localhost/postgres"
     return Settings(
-        database_url="sqlite+aiosqlite:///:memory:",
+        database_url=database_url,
         log_level="DEBUG",
         api_docs_enabled=True,
         cors_origins=["*"],
@@ -131,6 +212,17 @@ async def test_app(async_engine, test_settings):
 
     app = create_app(test_settings)
 
+    state_manager = StateManager()
+    daemon = SimpleNamespace(
+        state_manager=state_manager,
+        lighting_controller=None,
+        event_loop=None,
+        scheduler=None,
+        persistence=None,
+        hardware_manager=None,
+    )
+    set_daemon_instance(daemon)
+
     # Override the get_session dependency
     async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
         async with test_session_maker() as session:
@@ -149,6 +241,7 @@ async def test_app(async_engine, test_settings):
 
     # Restore original session maker
     db_module.async_session_maker = original_session_maker
+    set_daemon_instance(None)
 
 
 @pytest_asyncio.fixture
@@ -256,8 +349,6 @@ def sample_fixture_data() -> dict:
     return {
         "name": "Test Fixture",
         "dmx_channel_start": 1,
-        "room": "Living Room",
-        "notes": "Test fixture notes",
     }
 
 
@@ -341,7 +432,7 @@ async def test_fixture_model(db_session: AsyncSession):
 
 
 @pytest_asyncio.fixture
-async def test_fixture(db_session: AsyncSession, test_fixture_model):
+async def test_fixture(db_session: AsyncSession, test_fixture_model, test_app):
     """Create a test fixture."""
     from tau.models.fixtures import Fixture
 
@@ -349,17 +440,36 @@ async def test_fixture(db_session: AsyncSession, test_fixture_model):
         name="Test Fixture",
         fixture_model_id=test_fixture_model.id,
         dmx_channel_start=1,
-        dmx_universe=0,
-        room="Living Room",
     )
     db_session.add(fixture)
     await db_session.commit()
     await db_session.refresh(fixture)
+
+    daemon = get_daemon_instance()
+    if daemon and daemon.state_manager:
+        daemon.state_manager.register_fixture(fixture.id)
+        state = daemon.state_manager.fixtures[fixture.id]
+        state.dmx_channel_start = fixture.dmx_channel_start
+        state.secondary_dmx_channel = fixture.secondary_dmx_channel
+        state.dmx_universe = 0
+        state.dmx_footprint = test_fixture_model.dmx_footprint
+        state.fixture_model_id = test_fixture_model.id
+        state.fixture_type = test_fixture_model.type
+        state.cct_min = test_fixture_model.cct_min_kelvin
+        state.cct_max = test_fixture_model.cct_max_kelvin
+        state.warm_xy_x = test_fixture_model.warm_xy_x
+        state.warm_xy_y = test_fixture_model.warm_xy_y
+        state.cool_xy_x = test_fixture_model.cool_xy_x
+        state.cool_xy_y = test_fixture_model.cool_xy_y
+        state.warm_lumens = test_fixture_model.warm_lumens
+        state.cool_lumens = test_fixture_model.cool_lumens
+        state.gamma = test_fixture_model.gamma
+
     return fixture
 
 
 @pytest_asyncio.fixture
-async def test_tunable_fixture(db_session: AsyncSession, test_fixture_model):
+async def test_tunable_fixture(db_session: AsyncSession, test_fixture_model, test_app):
     """Create a test tunable white fixture."""
     from tau.models.fixtures import Fixture
 
@@ -367,18 +477,37 @@ async def test_tunable_fixture(db_session: AsyncSession, test_fixture_model):
         name="Test Tunable Fixture",
         fixture_model_id=test_fixture_model.id,
         dmx_channel_start=10,
-        dmx_universe=0,
         secondary_dmx_channel=11,
-        room="Bedroom",
     )
     db_session.add(fixture)
     await db_session.commit()
     await db_session.refresh(fixture)
+
+    daemon = get_daemon_instance()
+    if daemon and daemon.state_manager:
+        daemon.state_manager.register_fixture(fixture.id)
+        state = daemon.state_manager.fixtures[fixture.id]
+        state.dmx_channel_start = fixture.dmx_channel_start
+        state.secondary_dmx_channel = fixture.secondary_dmx_channel
+        state.dmx_universe = 0
+        state.dmx_footprint = test_fixture_model.dmx_footprint
+        state.fixture_model_id = test_fixture_model.id
+        state.fixture_type = test_fixture_model.type
+        state.cct_min = test_fixture_model.cct_min_kelvin
+        state.cct_max = test_fixture_model.cct_max_kelvin
+        state.warm_xy_x = test_fixture_model.warm_xy_x
+        state.warm_xy_y = test_fixture_model.warm_xy_y
+        state.cool_xy_x = test_fixture_model.cool_xy_x
+        state.cool_xy_y = test_fixture_model.cool_xy_y
+        state.warm_lumens = test_fixture_model.warm_lumens
+        state.cool_lumens = test_fixture_model.cool_lumens
+        state.gamma = test_fixture_model.gamma
+
     return fixture
 
 
 @pytest_asyncio.fixture
-async def test_group(db_session: AsyncSession):
+async def test_group(db_session: AsyncSession, test_app):
     """Create a test group."""
     from tau.models.groups import Group
 
@@ -390,14 +519,19 @@ async def test_group(db_session: AsyncSession):
     db_session.add(group)
     await db_session.commit()
     await db_session.refresh(group)
+
+    daemon = get_daemon_instance()
+    if daemon and daemon.state_manager:
+        daemon.state_manager.register_group(group.id)
+
     return group
 
 
 @pytest_asyncio.fixture
-async def test_fixtures_in_group(db_session: AsyncSession, test_group, test_fixture_model):
+async def test_fixtures_in_group(db_session: AsyncSession, test_group, test_fixture_model, test_app):
     """Create multiple test fixtures in a group."""
     from tau.models.fixtures import Fixture
-    from tau.models.fixture_group_membership import FixtureGroupMembership
+    from tau.models.groups import GroupFixture
 
     fixtures = []
     for i in range(3):
@@ -405,20 +539,39 @@ async def test_fixtures_in_group(db_session: AsyncSession, test_group, test_fixt
             name=f"Test Fixture {i+1}",
             fixture_model_id=test_fixture_model.id,
             dmx_channel_start=(i+1) * 10,
-            dmx_universe=0,
-            room="Test Room",
         )
         db_session.add(fixture)
         await db_session.commit()
         await db_session.refresh(fixture)
 
         # Add to group
-        membership = FixtureGroupMembership(
+        membership = GroupFixture(
             fixture_id=fixture.id,
             group_id=test_group.id,
         )
         db_session.add(membership)
         fixtures.append(fixture)
+
+        daemon = get_daemon_instance()
+        if daemon and daemon.state_manager:
+            daemon.state_manager.register_fixture(fixture.id)
+            state = daemon.state_manager.fixtures[fixture.id]
+            state.dmx_channel_start = fixture.dmx_channel_start
+            state.secondary_dmx_channel = fixture.secondary_dmx_channel
+            state.dmx_universe = 0
+            state.dmx_footprint = test_fixture_model.dmx_footprint
+            state.fixture_model_id = test_fixture_model.id
+            state.fixture_type = test_fixture_model.type
+            state.cct_min = test_fixture_model.cct_min_kelvin
+            state.cct_max = test_fixture_model.cct_max_kelvin
+            state.warm_xy_x = test_fixture_model.warm_xy_x
+            state.warm_xy_y = test_fixture_model.warm_xy_y
+            state.cool_xy_x = test_fixture_model.cool_xy_x
+            state.cool_xy_y = test_fixture_model.cool_xy_y
+            state.warm_lumens = test_fixture_model.warm_lumens
+            state.cool_lumens = test_fixture_model.cool_lumens
+            state.gamma = test_fixture_model.gamma
+            daemon.state_manager.add_fixture_to_group(fixture.id, test_group.id)
 
     await db_session.commit()
     return fixtures

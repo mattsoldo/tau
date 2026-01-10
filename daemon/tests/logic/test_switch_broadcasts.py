@@ -112,7 +112,7 @@ class TestBroadcastIntegration:
         switch_model
     ):
         """Test that momentary switch press broadcasts fixture state."""
-        with patch('tau.api.websocket.broadcast_fixture_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_fixture_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 
@@ -133,7 +133,7 @@ class TestBroadcastIntegration:
         momentary_group_switch
     ):
         """Test that momentary switch press broadcasts group state."""
-        with patch('tau.api.websocket.broadcast_group_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_group_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 
@@ -155,7 +155,7 @@ class TestBroadcastIntegration:
         mock_state_manager
     ):
         """Test that broadcasts are throttled during hold events."""
-        with patch('tau.api.websocket.broadcast_fixture_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_fixture_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 
@@ -179,7 +179,7 @@ class TestBroadcastIntegration:
         retractive_switch
     ):
         """Test that throttling allows broadcasts after sufficient delay."""
-        with patch('tau.api.websocket.broadcast_fixture_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_fixture_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 
@@ -210,7 +210,7 @@ class TestBroadcastIntegration:
         switch_handler
     ):
         """Test that throttling is independent for different fixtures."""
-        with patch('tau.api.websocket.broadcast_fixture_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_fixture_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 
@@ -240,7 +240,7 @@ class TestBroadcastErrorHandling:
             goal_color_temp=4000
         )
 
-        with patch('tau.api.websocket.broadcast_fixture_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_fixture_state_change') as mock_broadcast:
             # Simulate broadcast error
             mock_broadcast.side_effect = Exception("WebSocket error")
 
@@ -263,7 +263,7 @@ class TestBroadcastErrorHandling:
             circadian_color_temp=3500
         )
 
-        with patch('tau.api.websocket.broadcast_group_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_group_state_change') as mock_broadcast:
             # Simulate broadcast error
             mock_broadcast.side_effect = Exception("Connection error")
 
@@ -283,7 +283,7 @@ class TestBroadcastErrorHandling:
         # State manager returns None (fixture doesn't exist)
         mock_state_manager.get_fixture_state.return_value = None
 
-        with patch('tau.api.websocket.broadcast_fixture_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_fixture_state_change') as mock_broadcast:
             # Should not raise exception and should not broadcast
             await switch_handler._broadcast_fixture_state(999)
 
@@ -306,7 +306,7 @@ class TestBroadcastValues:
             goal_color_temp=3500
         )
 
-        with patch('tau.api.websocket.broadcast_fixture_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_fixture_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 
@@ -331,7 +331,7 @@ class TestBroadcastValues:
             circadian_color_temp=4200
         )
 
-        with patch('tau.api.websocket.broadcast_group_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_group_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 
@@ -356,7 +356,7 @@ class TestBroadcastValues:
             circadian_color_temp=None
         )
 
-        with patch('tau.api.websocket.broadcast_group_state_change') as mock_broadcast:
+        with patch('tau.logic.switches.broadcast_group_state_change') as mock_broadcast:
             mock_broadcast.return_value = asyncio.Future()
             mock_broadcast.return_value.set_result(None)
 

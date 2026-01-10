@@ -126,6 +126,9 @@ async def capture_scene(
     scene_id = await daemon.lighting_controller.scenes.capture_scene(
         name=capture_data.name,
         fixture_ids=capture_data.fixture_ids,
+        include_group_ids=capture_data.include_group_ids,
+        exclude_fixture_ids=capture_data.exclude_fixture_ids,
+        exclude_group_ids=capture_data.exclude_group_ids,
         scope_group_id=capture_data.scope_group_id
     )
 

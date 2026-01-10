@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tau.database import get_session
 from tau.models.switches import Switch, SwitchModel
+from tau.models.scenes import Scene
 from tau.models.groups import Group
 from tau.models.fixtures import Fixture
 from tau.api.schemas import (
@@ -187,6 +188,11 @@ async def create_switch(
         if not fixture:
             raise HTTPException(status_code=404, detail="Target fixture not found")
 
+    if switch_data.double_tap_scene_id is not None:
+        scene = await session.get(Scene, switch_data.double_tap_scene_id)
+        if not scene:
+            raise HTTPException(status_code=404, detail="Scene not found")
+
     # Validate pins based on model requirements
     if model.requires_digital_pin and switch_data.labjack_digital_pin is None:
         raise HTTPException(
@@ -291,6 +297,11 @@ async def update_switch(
         fixture = await session.get(Fixture, new_fixture_id)
         if not fixture:
             raise HTTPException(status_code=404, detail="Target fixture not found")
+
+    if "double_tap_scene_id" in update_data and update_data["double_tap_scene_id"] is not None:
+        scene = await session.get(Scene, update_data["double_tap_scene_id"])
+        if not scene:
+            raise HTTPException(status_code=404, detail="Scene not found")
 
     # Validate pins based on model requirements
     new_digital = update_data.get("labjack_digital_pin", switch.labjack_digital_pin)

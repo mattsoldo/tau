@@ -179,6 +179,9 @@ class SceneResponse(SceneBase):
 class SceneCaptureRequest(BaseModel):
     name: str = Field(..., max_length=100)
     fixture_ids: Optional[List[int]] = None
+    include_group_ids: Optional[List[int]] = None
+    exclude_fixture_ids: Optional[List[int]] = None
+    exclude_group_ids: Optional[List[int]] = None
     scope_group_id: Optional[int] = None
 
 
@@ -315,6 +318,7 @@ class SwitchBase(BaseModel):
     invert_reading: bool = Field(default=False)
     target_group_id: Optional[int] = None
     target_fixture_id: Optional[int] = None
+    double_tap_scene_id: Optional[int] = Field(None, gt=0)
     photo_url: Optional[str] = None
 
 
@@ -331,6 +335,7 @@ class SwitchUpdate(BaseModel):
     invert_reading: Optional[bool] = None
     target_group_id: Optional[int] = None
     target_fixture_id: Optional[int] = None
+    double_tap_scene_id: Optional[int] = Field(None, gt=0)
     photo_url: Optional[str] = None
 
 

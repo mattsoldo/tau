@@ -18,6 +18,7 @@ from tau.api.websocket import broadcast_fixture_state_change, broadcast_group_st
 
 if TYPE_CHECKING:
     from tau.control.state_manager import StateManager
+    from tau.logic.scenes import SceneEngine
 
 logger = structlog.get_logger(__name__)
 
@@ -46,6 +47,9 @@ class SwitchState:
     dim_direction: int = 1  # 1 = up (brighten), -1 = down (dim)
     dim_start_brightness: float = 0.0  # Brightness when dimming started
     was_on_at_press: bool = False  # State of target when switch was pressed
+    tap_count: int = 0
+    last_tap_time: Optional[float] = None
+    pending_single_tap: bool = False
 
 
 class SwitchHandler:
@@ -62,7 +66,9 @@ class SwitchHandler:
         state_manager: "StateManager",
         hardware_manager: HardwareManager,
         hold_threshold: float = 1.0,
-        dim_speed_ms: int = 700
+        dim_speed_ms: int = 700,
+        scene_engine: Optional["SceneEngine"] = None,
+        tap_window_ms: int = 500
     ):
         """
         Initialize switch handler
@@ -72,11 +78,15 @@ class SwitchHandler:
             hardware_manager: Reference to hardware for reading inputs
             hold_threshold: Duration in seconds to consider a press as "hold"
             dim_speed_ms: Time in ms for full brightness range (0-100%) when dimming
+            scene_engine: Optional scene engine for double-tap recall
+            tap_window_ms: Max time between taps for multi-tap detection
         """
         self.state_manager = state_manager
         self.hardware_manager = hardware_manager
         self.hold_threshold = hold_threshold
         self.dim_speed_ms = dim_speed_ms
+        self.scene_engine = scene_engine
+        self.tap_window_ms = tap_window_ms
 
         # Switch configurations {switch_id: (Switch, SwitchModel)}
         self.switches: Dict[int, Tuple[Switch, SwitchModel]] = {}
@@ -103,7 +113,8 @@ class SwitchHandler:
         logger.info(
             "switch_handler_initialized",
             hold_threshold=hold_threshold,
-            dim_speed_ms=dim_speed_ms
+            dim_speed_ms=dim_speed_ms,
+            tap_window_ms=tap_window_ms
         )
 
     def set_dim_speed_ms(self, dim_speed_ms: int) -> None:
@@ -263,6 +274,8 @@ class SwitchHandler:
             elif model.input_type == "paddle_composite":
                 # TODO: Implement paddle composite (multi-button)
                 pass
+
+            await self._flush_pending_tap(switch, state, current_time)
 
     async def _get_group_defaults(self, group_id: int) -> Tuple[float, Optional[int]]:
         """
@@ -581,6 +594,7 @@ class SwitchHandler:
         If no dimming occurred (quick press), toggle on/off.
         """
         if state.is_dimming:
+            self._reset_tap_state(state)
             # Dimming occurred - stop dimming, keep current brightness
             logger.debug(
                 "retractive_dim_stopped",
@@ -593,68 +607,171 @@ class SwitchHandler:
             elif switch.target_group_id:
                 await self._broadcast_group_state(switch.target_group_id)
         else:
-            # No dimming - this was a quick press, so toggle
-            if switch.target_fixture_id:
-                current = self.state_manager.get_fixture_state(switch.target_fixture_id)
-                new_brightness = 0.0 if (current and current.brightness > 0) else 1.0
+            if switch.double_tap_scene_id:
+                await self._handle_tap_sequence(switch, state, current_time)
+            else:
+                await self._toggle_target_on_release(switch, current_time)
 
-                self.state_manager.set_fixture_brightness(
-                    switch.target_fixture_id,
-                    new_brightness,
-                    transition_duration=0.0,  # Instant toggle
+    def _reset_tap_state(self, state: SwitchState) -> None:
+        state.tap_count = 0
+        state.last_tap_time = None
+        state.pending_single_tap = False
+
+    async def _handle_tap_sequence(
+        self,
+        switch: Switch,
+        state: SwitchState,
+        current_time: float
+    ) -> None:
+        tap_window = self.tap_window_ms / 1000.0
+
+        if state.last_tap_time is None or (current_time - state.last_tap_time) > tap_window:
+            state.tap_count = 1
+            state.last_tap_time = current_time
+            state.pending_single_tap = True
+            return
+
+        state.tap_count += 1
+        state.last_tap_time = current_time
+
+        if state.tap_count >= 2:
+            self._reset_tap_state(state)
+            recalled = await self._trigger_double_tap_scene(switch, current_time)
+            if not recalled:
+                await self._toggle_target_on_release(switch, current_time)
+
+    async def _flush_pending_tap(
+        self,
+        switch: Switch,
+        state: SwitchState,
+        current_time: float
+    ) -> None:
+        if not switch.double_tap_scene_id:
+            return
+        if not state.pending_single_tap or state.last_tap_time is None:
+            return
+
+        tap_window = self.tap_window_ms / 1000.0
+        if (current_time - state.last_tap_time) >= tap_window:
+            self._reset_tap_state(state)
+            await self._toggle_target_on_release(switch, current_time)
+
+    async def _trigger_double_tap_scene(
+        self,
+        switch: Switch,
+        current_time: float
+    ) -> bool:
+        scene_id = switch.double_tap_scene_id
+        if not scene_id:
+            return False
+        if not self.scene_engine:
+            logger.warning(
+                "scene_engine_unavailable",
+                switch_id=switch.id,
+                scene_id=scene_id
+            )
+            return False
+
+        recalled = await self.scene_engine.recall_scene(scene_id)
+        if not recalled:
+            logger.warning(
+                "double_tap_scene_recall_failed",
+                switch_id=switch.id,
+                scene_id=scene_id
+            )
+            return False
+
+        try:
+            from tau.api.websocket import broadcast_scene_recalled
+            scene_info = await self.scene_engine.get_scene(scene_id)
+            if scene_info:
+                await broadcast_scene_recalled(
+                    scene_id=scene_id,
+                    scene_name=scene_info["name"]
+                )
+        except Exception as e:
+            logger.warning(
+                "double_tap_scene_broadcast_failed",
+                switch_id=switch.id,
+                scene_id=scene_id,
+                error=str(e)
+            )
+
+        logger.info(
+            "double_tap_scene_recalled",
+            switch_id=switch.id,
+            scene_id=scene_id,
+            timestamp=current_time
+        )
+        return True
+
+    async def _toggle_target_on_release(
+        self,
+        switch: Switch,
+        current_time: float
+    ) -> None:
+        # No dimming - this was a quick press, so toggle
+        if switch.target_fixture_id:
+            current = self.state_manager.get_fixture_state(switch.target_fixture_id)
+            new_brightness = 0.0 if (current and current.brightness > 0) else 1.0
+
+            self.state_manager.set_fixture_brightness(
+                switch.target_fixture_id,
+                new_brightness,
+                transition_duration=0.0,  # Instant toggle
+                timestamp=current_time
+            )
+            logger.debug(
+                "retractive_toggled_fixture",
+                switch_id=switch.id,
+                fixture_id=switch.target_fixture_id,
+                brightness=new_brightness
+            )
+            # Broadcast state change via WebSocket
+            await self._broadcast_fixture_state(switch.target_fixture_id)
+        elif switch.target_group_id:
+            current = self.state_manager.get_group_state(switch.target_group_id)
+            is_currently_on = current and current.brightness > 0
+
+            if is_currently_on:
+                # Turning off
+                self.state_manager.set_group_brightness(
+                    switch.target_group_id,
+                    0.0,
                     timestamp=current_time
                 )
                 logger.debug(
-                    "retractive_toggled_fixture",
+                    "retractive_toggled_group_off",
                     switch_id=switch.id,
-                    fixture_id=switch.target_fixture_id,
-                    brightness=new_brightness
+                    group_id=switch.target_group_id
                 )
-                # Broadcast state change via WebSocket
-                await self._broadcast_fixture_state(switch.target_fixture_id)
-            elif switch.target_group_id:
-                current = self.state_manager.get_group_state(switch.target_group_id)
-                is_currently_on = current and current.brightness > 0
+            else:
+                # Turning on - use group defaults
+                brightness, cct = await self._get_group_defaults(switch.target_group_id)
 
-                if is_currently_on:
-                    # Turning off
-                    self.state_manager.set_group_brightness(
-                        switch.target_group_id,
-                        0.0,
-                        timestamp=current_time
-                    )
-                    logger.debug(
-                        "retractive_toggled_group_off",
-                        switch_id=switch.id,
-                        group_id=switch.target_group_id
-                    )
-                else:
-                    # Turning on - use group defaults
-                    brightness, cct = await self._get_group_defaults(switch.target_group_id)
+                self.state_manager.set_group_brightness(
+                    switch.target_group_id,
+                    brightness,
+                    timestamp=current_time
+                )
 
-                    self.state_manager.set_group_brightness(
+                # Also set CCT if group has a default
+                if cct is not None:
+                    self.state_manager.set_group_color_temp(
                         switch.target_group_id,
-                        brightness,
+                        cct,
                         timestamp=current_time
                     )
 
-                    # Also set CCT if group has a default
-                    if cct is not None:
-                        self.state_manager.set_group_color_temp(
-                            switch.target_group_id,
-                            cct,
-                            timestamp=current_time
-                        )
-
-                    logger.debug(
-                        "retractive_toggled_group_on",
-                        switch_id=switch.id,
-                        group_id=switch.target_group_id,
-                        brightness=brightness,
-                        cct=cct
-                    )
-                # Broadcast group state change via WebSocket
-                await self._broadcast_group_state(switch.target_group_id)
+                logger.debug(
+                    "retractive_toggled_group_on",
+                    switch_id=switch.id,
+                    group_id=switch.target_group_id,
+                    brightness=brightness,
+                    cct=cct
+                )
+            # Broadcast group state change via WebSocket
+            await self._broadcast_group_state(switch.target_group_id)
 
     async def _handle_hold_event(
         self,
@@ -674,6 +791,7 @@ class SwitchHandler:
         if not state.is_dimming:
             # First hold event - mark as dimming
             state.is_dimming = True
+            self._reset_tap_state(state)
             # Reset dim start brightness to current value at start of dimming
             if switch.target_fixture_id:
                 current = self.state_manager.get_fixture_state(switch.target_fixture_id)
@@ -824,10 +942,13 @@ class SwitchHandler:
             current_time: Current timestamp in seconds
         """
         key = f"fixture:{fixture_id}"
-        last_broadcast = self.last_broadcast_time.get(key, 0)
-        time_since_last = (current_time - last_broadcast) * 1000  # Convert to ms
+        last_broadcast = self.last_broadcast_time.get(key)
+        if last_broadcast is None:
+            time_since_last = self.broadcast_throttle_ms
+        else:
+            time_since_last = (current_time - last_broadcast) * 1000  # Convert to ms
 
-        if time_since_last >= self.broadcast_throttle_ms:
+        if last_broadcast is None or time_since_last >= self.broadcast_throttle_ms:
             await self._broadcast_fixture_state(fixture_id)
             self.last_broadcast_time[key] = current_time
 
@@ -849,10 +970,13 @@ class SwitchHandler:
             current_time: Current timestamp in seconds
         """
         key = f"group:{group_id}"
-        last_broadcast = self.last_broadcast_time.get(key, 0)
-        time_since_last = (current_time - last_broadcast) * 1000  # Convert to ms
+        last_broadcast = self.last_broadcast_time.get(key)
+        if last_broadcast is None:
+            time_since_last = self.broadcast_throttle_ms
+        else:
+            time_since_last = (current_time - last_broadcast) * 1000  # Convert to ms
 
-        if time_since_last >= self.broadcast_throttle_ms:
+        if last_broadcast is None or time_since_last >= self.broadcast_throttle_ms:
             await self._broadcast_group_state(group_id)
             self.last_broadcast_time[key] = current_time
 
