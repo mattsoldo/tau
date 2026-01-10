@@ -125,6 +125,12 @@ class Settings(BaseSettings):
         description="Allow CORS from any origin (useful for Raspberry Pi on local network)"
     )
 
+    # Update API security
+    updates_auth_token: Optional[str] = Field(
+        default=None,
+        description="Shared secret for protecting update endpoints; if set, clients must send X-Update-Token"
+    )
+
 
 def get_effective_cors_origins(settings: "Settings") -> list[str]:
     """

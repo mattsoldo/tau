@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { API_URL } from '@/utils/api';
 import SoftwareUpdatePanel from '../../../components/SoftwareUpdatePanel';
-
-const API_URL = ''; // Use relative paths for nginx proxy
 
 interface HardwareAvailability {
   labjack_available: boolean;

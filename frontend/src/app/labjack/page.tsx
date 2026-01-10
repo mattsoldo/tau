@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-
-const API_URL = '';
+import { API_URL } from '@/utils/api';
 
 // Timing constants for switch handling
 const TAP_WINDOW_MS = 500;

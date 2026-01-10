@@ -2,17 +2,32 @@
 Software Update API Routes - Check for and install updates
 """
 from typing import Optional, List
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
+from tau.config import get_settings
 from tau.database import get_db_session
 from tau.services.update_service import UpdateService
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter()
+
+def verify_update_token(x_update_token: str | None = Header(None)) -> None:
+    """
+    Enforce shared-secret auth for update endpoints when configured.
+
+    If UPDATES_AUTH_TOKEN is set, requests must provide X-Update-Token header.
+    """
+    token = get_settings().updates_auth_token
+    if not token:
+        return
+    if x_update_token != token:
+        raise HTTPException(status_code=401, detail="Invalid or missing update token")
+
+
+router = APIRouter(dependencies=[Depends(verify_update_token)])
 
 
 # Response Models

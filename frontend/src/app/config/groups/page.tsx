@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-
-const API_URL = ''; // Use relative paths for nginx proxy
+import { API_URL } from '@/utils/api';
 
 // === Types ===
 

@@ -3,8 +3,7 @@
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { filterMergedFixtures } from '@/utils/fixtures';
 import { useWebSocket, FixtureStateChangedEvent, GroupStateChangedEvent } from '@/hooks/useWebSocket';
-
-const API_URL = ''; // Use relative paths for nginx proxy
+import { API_URL } from '@/utils/api';
 
 // Timing constants (PRD Section 10.1-10.2)
 const TAP_WINDOW_MS = 500;

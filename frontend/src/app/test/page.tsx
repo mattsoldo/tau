@@ -4,8 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { filterMergedFixtures } from '@/utils/fixtures';
 import { useWebSocket, FixtureStateChangedEvent, GroupStateChangedEvent } from '@/hooks/useWebSocket';
-
-const API_URL = ''; // Use relative paths for nginx proxy
+import { API_URL } from '@/utils/api';
 
 // Brightness scaling constants
 // IMPORTANT: Multiple brightness representations exist in the system:

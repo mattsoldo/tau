@@ -17,7 +17,10 @@ import type {
  * - All API endpoints are proxied via /api/*
  */
 const getApiUrl = (): string => {
-  // Use relative paths - nginx will proxy /api/* to backend on port 8000
+  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL !== 'undefined') {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  // Default to relative paths so nginx can proxy /api/* to the daemon
   return '';
 };
 
@@ -27,12 +30,21 @@ const getApiUrl = (): string => {
  * - WebSocket connections are proxied via /api/ws
  */
 export const getWsUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_WS_URL && process.env.NEXT_PUBLIC_WS_URL !== 'undefined') {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+
   if (typeof window !== 'undefined') {
     // Client-side: use current origin for WebSocket (proxied by nginx)
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${protocol}://${window.location.host}/api/ws`;
+    return `${protocol}://${window.location.host}/ws`;
   }
-  // Server-side: use localhost (not used in production)
+
+  // Server-side fallback (dev/test)
+  const apiUrl = getApiUrl();
+  if (apiUrl.startsWith('http')) {
+    return apiUrl.replace(/^http/, 'ws') + '/ws';
+  }
   return 'ws://localhost:8000/ws';
 };
 
@@ -239,12 +251,12 @@ export const api = {
   // Control
   control: {
     setFixture: (fixtureId: number, brightness: number, cct?: number) =>
-      request<void>(`/api/control/fixture/${fixtureId}`, {
+      request<void>(`/api/control/fixtures/${fixtureId}`, {
         method: 'POST',
         body: JSON.stringify({ brightness, cct }),
       }),
     setGroup: (groupId: number, brightness: number, cct?: number) =>
-      request<void>(`/api/control/group/${groupId}`, {
+      request<void>(`/api/control/groups/${groupId}`, {
         method: 'POST',
         body: JSON.stringify({ brightness, cct }),
       }),
