@@ -85,6 +85,13 @@ async def control_fixture(
             raise HTTPException(status_code=500, detail="Failed to set color temperature")
         updated = True
 
+    if control_data.cct_mode is not None:
+        if control_data.cct_mode == "dim_to_warm":
+            success = daemon.state_manager.set_fixture_cct_mode_auto(fixture_id)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to set CCT mode")
+        updated = True
+
     if not updated:
         raise HTTPException(status_code=400, detail="No control values provided")
 
@@ -163,6 +170,13 @@ async def control_group(
         )
         if fixtures_updated == 0:
             raise HTTPException(status_code=400, detail="No fixtures in group to update")
+        updated = True
+
+    if control_data.cct_mode is not None:
+        if control_data.cct_mode == "dim_to_warm":
+            fixtures_updated = daemon.state_manager.set_group_cct_mode_auto(group_id)
+            if fixtures_updated == 0:
+                raise HTTPException(status_code=400, detail="No fixtures in group to update")
         updated = True
 
     if not updated:

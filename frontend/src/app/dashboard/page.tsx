@@ -94,6 +94,7 @@ interface Fixture {
 
 interface FixtureModel {
   id: number;
+  type: 'simple_dimmable' | 'tunable_white' | 'dim_to_warm' | 'non_dimmable' | 'other';
   cct_min_kelvin: number;
   cct_max_kelvin: number;
 }
@@ -127,6 +128,24 @@ interface LightState {
   scene: 'off' | 'full' | 'scene1' | 'scene2' | 'custom';
 }
 
+type CctMode = 'dim_to_warm' | 'manual';
+
+interface DtwSettings {
+  enabled: boolean;
+  min_cct: number;
+  max_cct: number;
+  min_brightness: number;
+  curve: 'linear' | 'log' | 'square' | 'incandescent';
+}
+
+const DEFAULT_DTW_SETTINGS: DtwSettings = {
+  enabled: true,
+  min_cct: 1800,
+  max_cct: 4000,
+  min_brightness: 0.001,
+  curve: 'log',
+};
+
 function formatNumber(num: number): string {
   if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
   if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
@@ -139,6 +158,42 @@ function formatUptime(seconds: number): string {
   return seconds.toFixed(0) + 's';
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function calculateDtwCct(brightness: number, settings: DtwSettings): number {
+  if (brightness <= 0) return settings.min_cct;
+  if (brightness >= 1) return settings.max_cct;
+
+  const effectiveBrightness = clamp(brightness, settings.min_brightness, 1);
+  let t = effectiveBrightness;
+
+  switch (settings.curve) {
+    case 'linear':
+      t = effectiveBrightness;
+      break;
+    case 'log':
+      t = Math.log10(1 + 9 * effectiveBrightness) / Math.log10(10);
+      break;
+    case 'square':
+      t = effectiveBrightness * effectiveBrightness;
+      break;
+    case 'incandescent':
+      t = Math.pow(effectiveBrightness, 0.25);
+      break;
+    default:
+      t = effectiveBrightness;
+      break;
+  }
+
+  return Math.round(settings.min_cct + (settings.max_cct - settings.min_cct) * t);
+}
+
+function isCctCapable(model?: FixtureModel): boolean {
+  return model?.type === 'tunable_white' || model?.type === 'dim_to_warm';
+}
+
 export default function DashboardPage() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
@@ -146,6 +201,9 @@ export default function DashboardPage() {
   const [fixtureModels, setFixtureModels] = useState<Map<number, FixtureModel>>(new Map());
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupFixtures, setGroupFixtures] = useState<Map<number, Fixture[]>>(new Map());
+  const [dtwSettings, setDtwSettings] = useState<DtwSettings>(DEFAULT_DTW_SETTINGS);
+  const [fixtureCctModes, setFixtureCctModes] = useState<Map<number, CctMode>>(new Map());
+  const [groupCctModes, setGroupCctModes] = useState<Map<number, CctMode>>(new Map());
   const [activeOverrides, setActiveOverrides] = useState<ActiveOverride[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expandedFixtures, setExpandedFixtures] = useState<Set<number>>(new Set());
@@ -450,11 +508,12 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statusRes, fixturesRes, groupsRes, modelsRes] = await Promise.all([
+        const [statusRes, fixturesRes, groupsRes, modelsRes, dtwRes] = await Promise.all([
           fetch(`${API_URL}/status`),
           fetch(`${API_URL}/api/fixtures/`),
           fetch(`${API_URL}/api/groups/`),
           fetch(`${API_URL}/api/fixtures/models`),
+          fetch(`${API_URL}/api/dtw/settings`),
         ]);
 
         if (!statusRes.ok) throw new Error('Status API error');
@@ -474,6 +533,11 @@ export default function DashboardPage() {
         const modelsMap = new Map<number, FixtureModel>();
         modelsData.forEach((m: FixtureModel) => modelsMap.set(m.id, m));
         setFixtureModels(modelsMap);
+
+        if (dtwRes.ok) {
+          const dtwData = await dtwRes.json();
+          setDtwSettings(dtwData);
+        }
 
         // Fetch fixtures for each group
         const groupFixturesMap = new Map<number, Fixture[]>();
@@ -527,6 +591,32 @@ export default function DashboardPage() {
     const interval = setInterval(fetchData, STATUS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    setFixtureCctModes(prev => {
+      const next = new Map(prev);
+      fixtures.forEach(fixture => {
+        if (!next.has(fixture.id)) {
+          const model = fixtureModels.get(fixture.fixture_model_id);
+          const defaultMode: CctMode = model?.type === 'dim_to_warm' ? 'dim_to_warm' : 'manual';
+          next.set(fixture.id, defaultMode);
+        }
+      });
+      return next;
+    });
+  }, [fixtures, fixtureModels]);
+
+  useEffect(() => {
+    setGroupCctModes(prev => {
+      const next = new Map(prev);
+      groups.forEach(group => {
+        if (!next.has(group.id)) {
+          next.set(group.id, 'manual');
+        }
+      });
+      return next;
+    });
+  }, [groups]);
 
   // Poll active overrides every 2 seconds
   useEffect(() => {
@@ -747,6 +837,35 @@ export default function DashboardPage() {
     }, SLIDER_DEBOUNCE_MS));
   }, [fixtures]);
 
+  const handleFixtureCctMode = useCallback(async (fixtureId: number, mode: CctMode, manualCct?: number) => {
+    setFixtureCctModes(prev => {
+      const next = new Map(prev);
+      next.set(fixtureId, mode);
+      return next;
+    });
+
+    if (mode === 'manual') {
+      if (manualCct !== undefined) {
+        handleFixtureCCT(fixtureId, manualCct);
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/control/fixtures/${fixtureId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cct_mode: 'dim_to_warm' }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to set CCT mode: ${response.statusText}`);
+      }
+    } catch {
+      const fixtureName = getFixtureName(fixtureId);
+      setControlError(`Failed to enable dim-to-warm for ${fixtureName}`);
+    }
+  }, [handleFixtureCCT, getFixtureName]);
+
   // Control group brightness (debounced with optimistic update and race condition handling)
   const handleGroupBrightness = useCallback((groupId: number, brightness: number) => {
     const key = `group-brightness-${groupId}`;
@@ -874,6 +993,35 @@ export default function DashboardPage() {
     }, SLIDER_DEBOUNCE_MS));
   }, [groupFixtures, groups]);
 
+  const handleGroupCctMode = useCallback(async (groupId: number, mode: CctMode, manualCct?: number) => {
+    setGroupCctModes(prev => {
+      const next = new Map(prev);
+      next.set(groupId, mode);
+      return next;
+    });
+
+    if (mode === 'manual') {
+      if (manualCct !== undefined) {
+        handleGroupCCT(groupId, manualCct);
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cct_mode: 'dim_to_warm' }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to set group CCT mode: ${response.statusText}`);
+      }
+    } catch {
+      const group = groups.find(g => g.id === groupId);
+      setControlError(`Failed to enable dim-to-warm for ${group?.name || 'group'}`);
+    }
+  }, [groups, handleGroupCCT]);
+
   // Toggle group on/off (with optimistic update)
   const handleGroupToggle = async (groupId: number, turnOn: boolean) => {
     const newBrightness = turnOn ? 1.0 : 0.0;
@@ -932,6 +1080,47 @@ export default function DashboardPage() {
   const getGroupBrightness = useCallback((groupId: number): number => {
     return groupBrightnessCache.get(groupId) ?? 0;
   }, [groupBrightnessCache]);
+
+  const groupCctCache = useMemo(() => {
+    const cache = new Map<number, number>();
+    groupFixtures.forEach((fixtures, groupId) => {
+      let total = 0;
+      let count = 0;
+      fixtures.forEach(fixture => {
+        const model = fixtureModels.get(fixture.fixture_model_id);
+        if (!isCctCapable(model)) {
+          return;
+        }
+        const state = fixtureStates.get(fixture.id);
+        total += state?.goal_cct ?? model?.cct_min_kelvin ?? 2700;
+        count += 1;
+      });
+      cache.set(groupId, count > 0 ? Math.round(total / count) : 2700);
+    });
+    return cache;
+  }, [groupFixtures, fixtureStates, fixtureModels]);
+
+  const getGroupCct = useCallback((groupId: number): number => {
+    return groupCctCache.get(groupId) ?? 2700;
+  }, [groupCctCache]);
+
+  const getGroupCctRange = useCallback((fixturesInGroup: Fixture[]): { min: number; max: number } => {
+    let min = 2700;
+    let max = 6500;
+    let hasCctFixture = false;
+
+    fixturesInGroup.forEach(fixture => {
+      const model = fixtureModels.get(fixture.fixture_model_id);
+      if (!isCctCapable(model)) {
+        return;
+      }
+      hasCctFixture = true;
+      min = Math.min(min, model?.cct_min_kelvin ?? min);
+      max = Math.max(max, model?.cct_max_kelvin ?? max);
+    });
+
+    return hasCctFixture ? { min, max } : { min: 2700, max: 6500 };
+  }, [fixtureModels]);
 
   // Handle brightness input submit with validation feedback
   const handleBrightnessInputSubmit = useCallback((type: 'fixture' | 'group', id: number, value: string) => {
@@ -1331,6 +1520,16 @@ export default function DashboardPage() {
                   const groupOn = isGroupOn(group.id);
                   const groupBrightness = getGroupBrightness(group.id);
                   const fixturesInGroup = groupFixtures.get(group.id) || [];
+                  const groupCctMode = groupCctModes.get(group.id) ?? 'manual';
+                  const isGroupDtw = groupCctMode === 'dim_to_warm';
+                  const groupCctRange = getGroupCctRange(fixturesInGroup);
+                  const groupCct = getGroupCct(group.id);
+                  const dtwGroupCct = clamp(
+                    calculateDtwCct(groupBrightness / 100, dtwSettings),
+                    groupCctRange.min,
+                    groupCctRange.max
+                  );
+                  const displayGroupCct = isGroupDtw ? dtwGroupCct : groupCct;
 
                   return (
                     <div key={`group-${group.id}`} className="bg-[#111113] rounded-xl overflow-hidden">
@@ -1451,15 +1650,42 @@ export default function DashboardPage() {
                               <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{groupBrightness}%</span>
                             </div>
                             <div className="flex items-center gap-3">
+                              <span className="text-[11px] text-[#636366] w-16">CCT Mode</span>
+                              <div className="flex items-center gap-1 bg-[#1a1a1d] p-0.5 rounded-full">
+                                <button
+                                  onClick={() => handleGroupCctMode(group.id, 'dim_to_warm')}
+                                  className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                    isGroupDtw ? 'bg-amber-500 text-black' : 'text-[#8e8e93] hover:text-white'
+                                  }`}
+                                >
+                                  DTW
+                                </button>
+                                <button
+                                  onClick={() => handleGroupCctMode(group.id, 'manual', displayGroupCct)}
+                                  className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                    !isGroupDtw ? 'bg-white text-black' : 'text-[#8e8e93] hover:text-white'
+                                  }`}
+                                >
+                                  Manual
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
                               <span className="text-[11px] text-[#636366] w-16">CCT</span>
                               <input
                                 type="range"
-                                min={2700}
-                                max={6500}
-                                defaultValue={4000}
-                                className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
-                                style={{ background: `linear-gradient(to right, ${kelvinToColor(2700)}, ${kelvinToColor(6500)})` }}
-                                onChange={(e) => handleGroupCCT(group.id, parseInt(e.target.value))}
+                                min={groupCctRange.min}
+                                max={groupCctRange.max}
+                                value={displayGroupCct}
+                                disabled={isGroupDtw}
+                                className={`flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white ${
+                                  isGroupDtw ? 'opacity-60 cursor-not-allowed' : ''
+                                }`}
+                                style={{ background: `linear-gradient(to right, ${kelvinToColor(groupCctRange.min)}, ${kelvinToColor(groupCctRange.max)})` }}
+                                onChange={(e) => {
+                                  if (isGroupDtw) return;
+                                  handleGroupCCT(group.id, parseInt(e.target.value));
+                                }}
                               />
                             </div>
                           </div>
@@ -1476,6 +1702,10 @@ export default function DashboardPage() {
                                 const cctMin = model?.cct_min_kelvin ?? 2700;
                                 const cctMax = model?.cct_max_kelvin ?? 6500;
                                 const isOn = state?.is_on ?? false;
+                                const fixtureCctMode = fixtureCctModes.get(fixture.id) ?? 'manual';
+                                const isFixtureDtw = fixtureCctMode === 'dim_to_warm';
+                                const dtwCct = clamp(calculateDtwCct(brightness / 100, dtwSettings), cctMin, cctMax);
+                                const displayCct = isFixtureDtw ? dtwCct : cct;
 
                                 return (
                                   <div key={`grouped-fixture-${fixture.id}`} className="bg-[#161619] rounded-lg overflow-hidden ml-4">
@@ -1586,17 +1816,44 @@ export default function DashboardPage() {
                                           <span className="font-mono text-[10px] text-[#a1a1a6] w-8 text-right">{brightness}%</span>
                                         </div>
                                         <div className="flex items-center gap-2">
+                                          <span className="text-[10px] text-[#636366] w-14">CCT Mode</span>
+                                          <div className="flex items-center gap-1 bg-[#1a1a1d] p-0.5 rounded-full">
+                                            <button
+                                              onClick={() => handleFixtureCctMode(fixture.id, 'dim_to_warm')}
+                                              className={`px-1.5 py-0.5 text-[9px] rounded-full transition-colors ${
+                                                isFixtureDtw ? 'bg-amber-500 text-black' : 'text-[#8e8e93] hover:text-white'
+                                              }`}
+                                            >
+                                              DTW
+                                            </button>
+                                            <button
+                                              onClick={() => handleFixtureCctMode(fixture.id, 'manual', displayCct)}
+                                              className={`px-1.5 py-0.5 text-[9px] rounded-full transition-colors ${
+                                                !isFixtureDtw ? 'bg-white text-black' : 'text-[#8e8e93] hover:text-white'
+                                              }`}
+                                            >
+                                              Manual
+                                            </button>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
                                           <span className="text-[10px] text-[#636366] w-14">CCT</span>
                                           <input
                                             type="range"
                                             min={cctMin}
                                             max={cctMax}
-                                            value={cct}
-                                            className="flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                                            value={displayCct}
+                                            disabled={isFixtureDtw}
+                                            className={`flex-1 h-1 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white ${
+                                              isFixtureDtw ? 'opacity-60 cursor-not-allowed' : ''
+                                            }`}
                                             style={{ background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})` }}
-                                            onChange={(e) => handleFixtureCCT(fixture.id, parseInt(e.target.value))}
+                                            onChange={(e) => {
+                                              if (isFixtureDtw) return;
+                                              handleFixtureCCT(fixture.id, parseInt(e.target.value));
+                                            }}
                                           />
-                                          <span className="font-mono text-[10px] text-[#a1a1a6] w-8 text-right">{cct}K</span>
+                                          <span className="font-mono text-[10px] text-[#a1a1a6] w-8 text-right">{displayCct}K</span>
                                         </div>
                                       </div>
                                     )}
@@ -1638,6 +1895,10 @@ export default function DashboardPage() {
                       const cctMin = model?.cct_min_kelvin ?? 2700;
                       const cctMax = model?.cct_max_kelvin ?? 6500;
                       const isOn = state?.is_on ?? false;
+                      const fixtureCctMode = fixtureCctModes.get(fixture.id) ?? 'manual';
+                      const isFixtureDtw = fixtureCctMode === 'dim_to_warm';
+                      const dtwCct = clamp(calculateDtwCct(brightness / 100, dtwSettings), cctMin, cctMax);
+                      const displayCct = isFixtureDtw ? dtwCct : cct;
 
                       return (
                         <div key={`ungrouped-fixture-${fixture.id}`} className="bg-[#111113] rounded-xl overflow-hidden">
@@ -1748,17 +2009,44 @@ export default function DashboardPage() {
                                 <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{brightness}%</span>
                               </div>
                               <div className="flex items-center gap-3">
+                                <span className="text-[11px] text-[#636366] w-16">CCT Mode</span>
+                                <div className="flex items-center gap-1 bg-[#1a1a1d] p-0.5 rounded-full">
+                                  <button
+                                    onClick={() => handleFixtureCctMode(fixture.id, 'dim_to_warm')}
+                                    className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                      isFixtureDtw ? 'bg-amber-500 text-black' : 'text-[#8e8e93] hover:text-white'
+                                    }`}
+                                  >
+                                    DTW
+                                  </button>
+                                  <button
+                                    onClick={() => handleFixtureCctMode(fixture.id, 'manual', displayCct)}
+                                    className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                      !isFixtureDtw ? 'bg-white text-black' : 'text-[#8e8e93] hover:text-white'
+                                    }`}
+                                  >
+                                    Manual
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
                                 <span className="text-[11px] text-[#636366] w-16">CCT</span>
                                 <input
                                   type="range"
                                   min={cctMin}
                                   max={cctMax}
-                                  value={cct}
-                                  className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+                                  value={displayCct}
+                                  disabled={isFixtureDtw}
+                                  className={`flex-1 h-1.5 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white ${
+                                    isFixtureDtw ? 'opacity-60 cursor-not-allowed' : ''
+                                  }`}
                                   style={{ background: `linear-gradient(to right, ${kelvinToColor(cctMin)}, ${kelvinToColor(cctMax)})` }}
-                                  onChange={(e) => handleFixtureCCT(fixture.id, parseInt(e.target.value))}
+                                  onChange={(e) => {
+                                    if (isFixtureDtw) return;
+                                    handleFixtureCCT(fixture.id, parseInt(e.target.value));
+                                  }}
                                 />
-                                <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{cct}K</span>
+                                <span className="font-mono text-[11px] text-[#a1a1a6] w-10 text-right">{displayCct}K</span>
                               </div>
                             </div>
                           )}

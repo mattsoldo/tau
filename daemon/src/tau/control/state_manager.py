@@ -450,6 +450,33 @@ class StateManager:
         )
         return True
 
+    def set_fixture_cct_mode_auto(
+        self,
+        fixture_id: int,
+        timestamp: Optional[float] = None
+    ) -> bool:
+        """
+        Clear manual CCT control for a fixture and return to automatic CCT.
+
+        This disables manual CCT overrides so DTW or circadian can take over.
+        """
+        if fixture_id not in self.fixtures:
+            logger.warning("fixture_not_found", fixture_id=fixture_id)
+            return False
+
+        fixture = self.fixtures[fixture_id]
+        fixture.manual_cct_active = False
+        fixture.goal_color_temp = None
+        fixture.current_color_temp = None
+        fixture.start_color_temp = None
+        fixture.cct_transition_start = None
+        fixture.cct_transition_duration = 0.0
+        fixture.last_updated = timestamp or time.time()
+        self.dirty = True
+
+        logger.debug("fixture_cct_auto_enabled", fixture_id=fixture_id)
+        return True
+
     def update_fixture_transitions(self, timestamp: Optional[float] = None) -> int:
         """
         Update all fixture current states based on transition progress.
@@ -649,6 +676,42 @@ class StateManager:
             "group_color_temp_updated",
             group_id=group_id,
             color_temp=color_temp,
+            fixtures_updated=updated_count,
+        )
+        return updated_count
+
+    def set_group_cct_mode_auto(
+        self,
+        group_id: int,
+        timestamp: Optional[float] = None
+    ) -> int:
+        """
+        Clear manual CCT control for all fixtures in a group.
+
+        Args:
+            group_id: Group ID
+            timestamp: Optional timestamp
+
+        Returns:
+            Number of fixtures updated
+        """
+        if group_id not in self.groups:
+            logger.warning("group_not_found", group_id=group_id)
+            return 0
+
+        updated_count = 0
+        for fixture_id, groups in self.fixture_group_memberships.items():
+            if group_id in groups:
+                success = self.set_fixture_cct_mode_auto(
+                    fixture_id,
+                    timestamp=timestamp
+                )
+                if success:
+                    updated_count += 1
+
+        logger.debug(
+            "group_cct_auto_enabled",
+            group_id=group_id,
             fixtures_updated=updated_count,
         )
         return updated_count

@@ -191,6 +191,11 @@ class SceneRecallRequest(BaseModel):
 class FixtureControlRequest(BaseModel):
     brightness: Optional[float] = Field(None, ge=0.0, le=1.0)
     color_temp: Optional[int] = Field(None, ge=1000, le=10000)
+    cct_mode: Optional[str] = Field(
+        default=None,
+        pattern="^(manual|dim_to_warm)$",
+        description="CCT control mode: manual or dim_to_warm"
+    )
     transition_duration: Optional[float] = Field(
         default=None,
         ge=0.0,
@@ -211,6 +216,11 @@ class FixtureControlRequest(BaseModel):
 class GroupControlRequest(BaseModel):
     brightness: Optional[float] = Field(None, ge=0.0, le=1.0)
     color_temp: Optional[int] = Field(None, ge=1000, le=10000)
+    cct_mode: Optional[str] = Field(
+        default=None,
+        pattern="^(manual|dim_to_warm)$",
+        description="CCT control mode: manual or dim_to_warm"
+    )
     transition_duration: Optional[float] = Field(
         default=None,
         ge=0.0,

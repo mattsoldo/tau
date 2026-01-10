@@ -66,7 +66,57 @@ interface GroupWithFixtures extends Group {
   fixtures: FixtureWithState[];
 }
 
+type CctMode = 'dim_to_warm' | 'manual';
+
+interface DtwSettings {
+  enabled: boolean;
+  min_cct: number;
+  max_cct: number;
+  min_brightness: number;
+  curve: 'linear' | 'log' | 'square' | 'incandescent';
+}
+
+const DEFAULT_DTW_SETTINGS: DtwSettings = {
+  enabled: true,
+  min_cct: 1800,
+  max_cct: 4000,
+  min_brightness: 0.001,
+  curve: 'log',
+};
+
 // === Helper Functions ===
+
+const clamp = (value: number, min: number, max: number): number => {
+  return Math.max(min, Math.min(max, value));
+};
+
+const calculateDtwCct = (brightness: number, settings: DtwSettings): number => {
+  if (brightness <= 0) return settings.min_cct;
+  if (brightness >= 1) return settings.max_cct;
+
+  const effectiveBrightness = clamp(brightness, settings.min_brightness, 1);
+  let t = effectiveBrightness;
+
+  switch (settings.curve) {
+    case 'linear':
+      t = effectiveBrightness;
+      break;
+    case 'log':
+      t = Math.log10(1 + 9 * effectiveBrightness) / Math.log10(10);
+      break;
+    case 'square':
+      t = effectiveBrightness * effectiveBrightness;
+      break;
+    case 'incandescent':
+      t = Math.pow(effectiveBrightness, 0.25);
+      break;
+    default:
+      t = effectiveBrightness;
+      break;
+  }
+
+  return Math.round(settings.min_cct + (settings.max_cct - settings.min_cct) * t);
+};
 
 const kelvinToColor = (kelvin: number): string => {
   const clampedKelvin = Math.max(1000, Math.min(40000, kelvin));
@@ -122,6 +172,9 @@ export default function LightTestPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const [dtwSettings, setDtwSettings] = useState<DtwSettings>(DEFAULT_DTW_SETTINGS);
+  const [fixtureCctModes, setFixtureCctModes] = useState<Map<number, CctMode>>(new Map());
+  const [groupCctModes, setGroupCctModes] = useState<Map<number, CctMode>>(new Map());
 
   // Debouncing refs
   const pendingChanges = useRef<Map<number, { brightness?: number; cct?: number }>>(new Map());
@@ -244,10 +297,11 @@ export default function LightTestPage() {
   // Fetch all data
   const fetchData = useCallback(async () => {
     try {
-      const [fixturesRes, modelsRes, groupsRes] = await Promise.all([
+      const [fixturesRes, modelsRes, groupsRes, dtwRes] = await Promise.all([
         fetch(`${API_URL}/api/fixtures/`),
         fetch(`${API_URL}/api/fixtures/models`),
         fetch(`${API_URL}/api/groups/`),
+        fetch(`${API_URL}/api/dtw/settings`),
       ]);
 
       if (!fixturesRes.ok || !modelsRes.ok || !groupsRes.ok) {
@@ -261,6 +315,11 @@ export default function LightTestPage() {
       ]);
 
       setFixtureModels(modelsData);
+
+      if (dtwRes.ok) {
+        const dtwData = await dtwRes.json();
+        setDtwSettings(dtwData);
+      }
 
       // Filter out fixtures that are merged into other fixtures
       const visibleFixtures = filterMergedFixtures(fixturesData);
@@ -338,6 +397,33 @@ export default function LightTestPage() {
     const interval = setInterval(fetchData, 2000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  useEffect(() => {
+    setFixtureCctModes(prev => {
+      const next = new Map(prev);
+      groupsWithFixtures.forEach(group => {
+        group.fixtures.forEach(fixture => {
+          if (!next.has(fixture.id)) {
+            const defaultMode: CctMode = fixture.model?.type === 'dim_to_warm' ? 'dim_to_warm' : 'manual';
+            next.set(fixture.id, defaultMode);
+          }
+        });
+      });
+      return next;
+    });
+  }, [groupsWithFixtures]);
+
+  useEffect(() => {
+    setGroupCctModes(prev => {
+      const next = new Map(prev);
+      groupsWithFixtures.forEach(group => {
+        if (!next.has(group.id)) {
+          next.set(group.id, 'manual');
+        }
+      });
+      return next;
+    });
+  }, [groupsWithFixtures]);
 
   // Toggle group expansion
   const toggleGroup = (groupId: number) => {
@@ -523,6 +609,57 @@ export default function LightTestPage() {
     sendFixtureControl(fixture.id, undefined, value);
   }, [sendFixtureControl, updateFixtureState]);
 
+  const handleFixtureCctMode = useCallback(async (fixture: FixtureWithState, mode: CctMode, manualCct?: number) => {
+    setFixtureCctModes(prev => {
+      const next = new Map(prev);
+      next.set(fixture.id, mode);
+      return next;
+    });
+
+    if (mode === 'manual') {
+      if (manualCct !== undefined) {
+        updateFixtureState(fixture.id, undefined, manualCct);
+        sendFixtureControl(fixture.id, undefined, manualCct);
+      }
+      return;
+    }
+
+    try {
+      await fetch(`${API_URL}/api/control/fixtures/${fixture.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cct_mode: 'dim_to_warm' }),
+      });
+    } catch (err) {
+      console.error('Fixture CCT mode error:', err);
+    }
+  }, [sendFixtureControl, updateFixtureState]);
+
+  const handleGroupCctMode = useCallback(async (groupId: number, mode: CctMode, manualCct?: number) => {
+    setGroupCctModes(prev => {
+      const next = new Map(prev);
+      next.set(groupId, mode);
+      return next;
+    });
+
+    if (mode === 'manual') {
+      if (manualCct !== undefined) {
+        sendGroupCctControl(groupId, manualCct);
+      }
+      return;
+    }
+
+    try {
+      await fetch(`${API_URL}/api/control/groups/${groupId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cct_mode: 'dim_to_warm' }),
+      });
+    } catch (err) {
+      console.error('Group CCT mode error:', err);
+    }
+  }, [sendGroupCctControl]);
+
   // Remove override from fixture
   const handleRemoveOverride = useCallback(async (fixtureId: number) => {
     try {
@@ -569,7 +706,9 @@ export default function LightTestPage() {
   }, [fetchData]);
 
   // Helpers
-  const supportsCct = (fixture: FixtureWithState): boolean => fixture.model?.type === 'tunable_white';
+  const supportsCct = (fixture: FixtureWithState): boolean => (
+    fixture.model?.type === 'tunable_white' || fixture.model?.type === 'dim_to_warm'
+  );
   const isDimmable = (fixture: FixtureWithState): boolean => fixture.model?.type !== 'non_dimmable';
 
   // Get group brightness - prioritize user-set value, fall back to average
@@ -598,11 +737,13 @@ export default function LightTestPage() {
       return userGoal.cct!; // User-set CCT value
     }
 
-    // Fall back to calculating average from tunable fixtures
-    const tunableFixtures = group.fixtures.filter(f => f.model?.type === 'tunable_white');
-    if (tunableFixtures.length === 0) return null;
-    const total = tunableFixtures.reduce((sum, f) => sum + (f.state?.goal_cct ?? 2700), 0);
-    return Math.round(total / tunableFixtures.length);
+    // Fall back to calculating average from CCT-capable fixtures
+    const cctFixtures = group.fixtures.filter(
+      f => f.model?.type === 'tunable_white' || f.model?.type === 'dim_to_warm'
+    );
+    if (cctFixtures.length === 0) return null;
+    const total = cctFixtures.reduce((sum, f) => sum + (f.state?.goal_cct ?? 2700), 0);
+    return Math.round(total / cctFixtures.length);
   };
 
   // Get group's average CURRENT brightness (transitioning state)
@@ -614,23 +755,27 @@ export default function LightTestPage() {
 
   // Get group's average CURRENT CCT (transitioning state)
   const getGroupCurrentCct = (group: GroupWithFixtures): number | null => {
-    const tunableFixtures = group.fixtures.filter(f => f.model?.type === 'tunable_white');
-    if (tunableFixtures.length === 0) return null;
-    const total = tunableFixtures.reduce((sum, f) => sum + (f.state?.current_cct ?? 2700), 0);
-    return Math.round(total / tunableFixtures.length);
+    const cctFixtures = group.fixtures.filter(
+      f => f.model?.type === 'tunable_white' || f.model?.type === 'dim_to_warm'
+    );
+    if (cctFixtures.length === 0) return null;
+    const total = cctFixtures.reduce((sum, f) => sum + (f.state?.current_cct ?? 2700), 0);
+    return Math.round(total / cctFixtures.length);
   };
 
-  // Check if group has any tunable white fixtures
-  const groupHasTunableFixtures = (group: GroupWithFixtures): boolean => {
-    return group.fixtures.some(f => f.model?.type === 'tunable_white');
+  // Check if group has any CCT-capable fixtures
+  const groupHasCctFixtures = (group: GroupWithFixtures): boolean => {
+    return group.fixtures.some(f => f.model?.type === 'tunable_white' || f.model?.type === 'dim_to_warm');
   };
 
   // Get CCT range for group (min/max from all tunable fixtures)
   const getGroupCctRange = (group: GroupWithFixtures): { min: number; max: number } => {
-    const tunableFixtures = group.fixtures.filter(f => f.model?.type === 'tunable_white');
-    if (tunableFixtures.length === 0) return { min: 2700, max: 6500 };
-    const min = Math.min(...tunableFixtures.map(f => f.model?.cct_min_kelvin ?? 2700));
-    const max = Math.max(...tunableFixtures.map(f => f.model?.cct_max_kelvin ?? 6500));
+    const cctFixtures = group.fixtures.filter(
+      f => f.model?.type === 'tunable_white' || f.model?.type === 'dim_to_warm'
+    );
+    if (cctFixtures.length === 0) return { min: 2700, max: 6500 };
+    const min = Math.min(...cctFixtures.map(f => f.model?.cct_min_kelvin ?? 2700));
+    const max = Math.max(...cctFixtures.map(f => f.model?.cct_max_kelvin ?? 6500));
     return { min, max };
   };
 
@@ -727,6 +872,16 @@ export default function LightTestPage() {
                 const avgBrightness = getGroupBrightness(group);
                 const overrideCount = getOverrideCount(group);
                 const hasLightsOn = group.fixtures.some(f => (f.state?.current_brightness ?? 0) > 0);
+                const groupCctMode = groupCctModes.get(group.id) ?? 'manual';
+                const isGroupDtw = groupCctMode === 'dim_to_warm';
+                const groupCct = getGroupCct(group) ?? 3500;
+                const groupCctRange = getGroupCctRange(group);
+                const dtwGroupCct = clamp(
+                  calculateDtwCct(avgBrightness / 100, dtwSettings),
+                  groupCctRange.min,
+                  groupCctRange.max
+                );
+                const displayGroupCct = isGroupDtw ? dtwGroupCct : groupCct;
 
                 return (
                   <div
@@ -856,23 +1011,43 @@ export default function LightTestPage() {
                         </div>
                       </div>
 
-                      {/* Group CCT Slider - only shown if group has tunable white fixtures */}
-                      {groupHasTunableFixtures(group) && (() => {
-                        const groupCct = getGroupCct(group) ?? 3500;
+                      {/* Group CCT Slider - only shown if group has CCT-capable fixtures */}
+                      {groupHasCctFixtures(group) && (() => {
                         const groupCurrentCct = getGroupCurrentCct(group) ?? 3500;
-                        const { min: cctMin, max: cctMax } = getGroupCctRange(group);
+                        const { min: cctMin, max: cctMax } = groupCctRange;
                         return (
                           <div className="mt-4">
                             <div className="flex items-center justify-between mb-2">
                               <label className="text-sm text-[#a1a1a6]">Group Color Temperature</label>
                               <div className="flex items-center gap-2">
                                 <span className="text-sm font-medium tabular-nums text-amber-400" title="Your setting (goal)">
-                                  Goal: {groupCct}K
+                                  Goal: {displayGroupCct}K
                                 </span>
                                 <span className="text-sm text-[#636366]">→</span>
                                 <span className="text-sm font-medium tabular-nums text-green-400" title="Average current level">
                                   Now: {groupCurrentCct}K
                                 </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs text-[#636366]">CCT Mode</span>
+                              <div className="flex items-center gap-1 bg-[#2a2a2f] p-0.5 rounded-full">
+                                <button
+                                  onClick={() => handleGroupCctMode(group.id, 'dim_to_warm')}
+                                  className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                    isGroupDtw ? 'bg-amber-500 text-black' : 'text-[#a1a1a6] hover:text-white'
+                                  }`}
+                                >
+                                  DTW
+                                </button>
+                                <button
+                                  onClick={() => handleGroupCctMode(group.id, 'manual', displayGroupCct)}
+                                  className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                    !isGroupDtw ? 'bg-white text-black' : 'text-[#a1a1a6] hover:text-white'
+                                  }`}
+                                >
+                                  Manual
+                                </button>
                               </div>
                             </div>
                             <div className="relative h-2">
@@ -896,12 +1071,14 @@ export default function LightTestPage() {
                                 type="range"
                                 min={cctMin}
                                 max={cctMax}
-                                value={groupCct}
+                                value={displayGroupCct}
+                                disabled={isGroupDtw}
                                 onChange={(e) => {
                                   const value = parseInt(e.target.value);
+                                  if (isGroupDtw) return;
                                   sendGroupCctControl(group.id, value);
                                 }}
-                                className="absolute top-0 left-0 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
+                                className={`absolute top-0 left-0 w-full h-2 bg-transparent rounded-full appearance-none cursor-pointer
                                   [&::-webkit-slider-runnable-track]:h-2
                                   [&::-webkit-slider-runnable-track]:rounded-full
                                   [&::-webkit-slider-runnable-track]:bg-transparent
@@ -913,15 +1090,22 @@ export default function LightTestPage() {
                                   [&::-webkit-slider-thumb]:border-2
                                   [&::-webkit-slider-thumb]:border-gray-600
                                   [&::-webkit-slider-thumb]:cursor-pointer
-                                  [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+                                  [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.3)]
+                                  ${isGroupDtw ? 'opacity-60 cursor-not-allowed' : ''}`}
                               />
                             </div>
                             <div className="flex justify-between mt-2">
                               {[cctMin, Math.round((cctMin + cctMax) / 2), cctMax].map((val) => (
                                 <button
                                   key={val}
-                                  onClick={() => sendGroupCctControl(group.id, val)}
-                                  className="px-3 py-1 text-xs font-medium rounded bg-[#2a2a2f] text-[#a1a1a6] hover:bg-[#3a3a3f] hover:text-white transition-colors"
+                                  onClick={() => {
+                                    if (isGroupDtw) return;
+                                    sendGroupCctControl(group.id, val);
+                                  }}
+                                  disabled={isGroupDtw}
+                                  className={`px-3 py-1 text-xs font-medium rounded bg-[#2a2a2f] text-[#a1a1a6] transition-colors ${
+                                    isGroupDtw ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#3a3a3f] hover:text-white'
+                                  }`}
                                 >
                                   {val}K
                                 </button>
@@ -950,6 +1134,10 @@ export default function LightTestPage() {
                             const cctMin = fixture.model?.cct_min_kelvin ?? 2700;
                             const cctMax = fixture.model?.cct_max_kelvin ?? 6500;
                             const hasOverride = fixture.state?.override_active;
+                            const fixtureCctMode = fixtureCctModes.get(fixture.id) ?? 'manual';
+                            const isFixtureDtw = fixtureCctMode === 'dim_to_warm';
+                            const dtwCct = clamp(calculateDtwCct(brightness / 100, dtwSettings), cctMin, cctMax);
+                            const displayCct = isFixtureDtw ? dtwCct : cct;
 
                             return (
                               <div
@@ -1068,12 +1256,33 @@ export default function LightTestPage() {
                                         <label className="text-xs text-[#a1a1a6]">Color Temperature</label>
                                         <div className="flex items-center gap-2">
                                           <span className="text-xs font-medium tabular-nums text-amber-400" title="Your setting (goal)">
-                                            Goal: {cct}K
+                                            Goal: {displayCct}K
                                           </span>
                                           <span className="text-xs text-[#636366]">→</span>
                                           <span className="text-xs font-medium tabular-nums text-green-400" title="Actual current level">
                                             Now: {currentCct}K
                                           </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <span className="text-xs text-[#636366]">CCT Mode</span>
+                                        <div className="flex items-center gap-1 bg-[#2a2a2f] p-0.5 rounded-full">
+                                          <button
+                                            onClick={() => handleFixtureCctMode(fixture, 'dim_to_warm')}
+                                            className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                              isFixtureDtw ? 'bg-amber-500 text-black' : 'text-[#a1a1a6] hover:text-white'
+                                            }`}
+                                          >
+                                            DTW
+                                          </button>
+                                          <button
+                                            onClick={() => handleFixtureCctMode(fixture, 'manual', displayCct)}
+                                            className={`px-2 py-0.5 text-[10px] rounded-full transition-colors ${
+                                              !isFixtureDtw ? 'bg-white text-black' : 'text-[#a1a1a6] hover:text-white'
+                                            }`}
+                                          >
+                                            Manual
+                                          </button>
                                         </div>
                                       </div>
                                       <div className="relative h-1.5">
@@ -1097,9 +1306,13 @@ export default function LightTestPage() {
                                           type="range"
                                           min={cctMin}
                                           max={cctMax}
-                                          value={cct}
-                                          onChange={(e) => handleFixtureCctChange(fixture, parseInt(e.target.value))}
-                                          className="absolute top-0 left-0 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
+                                          value={displayCct}
+                                          disabled={isFixtureDtw}
+                                          onChange={(e) => {
+                                            if (isFixtureDtw) return;
+                                            handleFixtureCctChange(fixture, parseInt(e.target.value));
+                                          }}
+                                          className={`absolute top-0 left-0 w-full h-1.5 bg-transparent rounded-full appearance-none cursor-pointer
                                             [&::-webkit-slider-runnable-track]:h-1.5
                                             [&::-webkit-slider-runnable-track]:rounded-full
                                             [&::-webkit-slider-runnable-track]:bg-transparent
@@ -1111,7 +1324,8 @@ export default function LightTestPage() {
                                             [&::-webkit-slider-thumb]:border-2
                                             [&::-webkit-slider-thumb]:border-gray-600
                                             [&::-webkit-slider-thumb]:cursor-pointer
-                                            [&::-webkit-slider-thumb]:shadow-[0_2px_6px_rgba(0,0,0,0.3)]"
+                                            [&::-webkit-slider-thumb]:shadow-[0_2px_6px_rgba(0,0,0,0.3)]
+                                            ${isFixtureDtw ? 'opacity-60 cursor-not-allowed' : ''}`}
                                         />
                                       </div>
                                     </div>
