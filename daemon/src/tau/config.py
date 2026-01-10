@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     # Control Loop Configuration
     control_loop_hz: int = Field(default=30, description="Control loop frequency in Hz")
     dmx_update_hz: int = Field(default=44, description="DMX output update frequency in Hz")
+    dmx_dedupe_enabled: bool = Field(
+        default=True,
+        description="Skip redundant DMX writes when output is unchanged"
+    )
+    dmx_dedupe_ttl_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Minimum seconds between identical DMX writes when dedupe is enabled"
+    )
 
     # State Persistence
     state_persist_interval_seconds: int = Field(

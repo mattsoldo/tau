@@ -99,10 +99,28 @@ class TauDaemon:
         )
         logger.info("dim_speed_loaded", dim_speed_ms=dim_speed_ms)
 
+        dmx_dedupe_enabled = await get_system_setting_typed(
+            key="dmx_dedupe_enabled",
+            value_type="bool",
+            default_value=self.settings.dmx_dedupe_enabled
+        )
+        dmx_dedupe_ttl_seconds = await get_system_setting_typed(
+            key="dmx_dedupe_ttl_seconds",
+            value_type="float",
+            default_value=self.settings.dmx_dedupe_ttl_seconds
+        )
+        logger.info(
+            "dmx_dedupe_settings_loaded",
+            enabled=dmx_dedupe_enabled,
+            ttl_seconds=dmx_dedupe_ttl_seconds
+        )
+
         self.lighting_controller = LightingController(
             self.state_manager,
             self.hardware_manager,
-            dim_speed_ms=dim_speed_ms
+            dim_speed_ms=dim_speed_ms,
+            dmx_dedupe_enabled=dmx_dedupe_enabled,
+            dmx_dedupe_ttl_seconds=dmx_dedupe_ttl_seconds
         )
         controller_ok = await self.lighting_controller.initialize()
         if not controller_ok:

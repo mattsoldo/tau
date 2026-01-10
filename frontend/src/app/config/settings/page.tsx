@@ -458,13 +458,32 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-3 ml-6">
                         {editingKey === setting.key ? (
                           <>
-                            <input
-                              type={getInputType(setting.value_type)}
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              className="px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white focus:outline-none focus:border-amber-500 font-mono text-sm w-32"
-                              autoFocus
-                            />
+                            {setting.value_type === 'bool' ? (
+                              <label className="flex items-center gap-2 text-sm text-[#a1a1a6]">
+                                <input
+                                  type="checkbox"
+                                  checked={editValue === 'true' || editValue === '1'}
+                                  onChange={(e) => setEditValue(e.target.checked ? 'true' : 'false')}
+                                  className="h-4 w-4 rounded border border-[#3a3a3f] bg-[#1a1a1f] text-amber-500 focus:ring-amber-500/30"
+                                />
+                                <span>{editValue === 'true' || editValue === '1' ? 'Enabled' : 'Disabled'}</span>
+                              </label>
+                            ) : (
+                              <input
+                                type={getInputType(setting.value_type)}
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                step={
+                                  setting.value_type === 'float'
+                                    ? '0.1'
+                                    : setting.value_type === 'int'
+                                      ? '1'
+                                      : undefined
+                                }
+                                className="px-3 py-2 bg-[#1a1a1f] border border-[#3a3a3f] rounded-lg text-white focus:outline-none focus:border-amber-500 font-mono text-sm w-32"
+                                autoFocus
+                              />
+                            )}
                             <button
                               onClick={() => handleSaveSetting(setting.key)}
                               className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 rounded-lg transition-colors"

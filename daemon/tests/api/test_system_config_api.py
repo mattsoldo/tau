@@ -237,6 +237,8 @@ class TestOtherSettingsNotHotReloaded:
         mock_session.refresh = AsyncMock()
 
         mock_controller = MagicMock()
+        mock_controller.set_dmx_dedupe_enabled = MagicMock()
+        mock_controller.set_dmx_dedupe_ttl_seconds = MagicMock()
         mock_daemon = MagicMock()
         mock_daemon.lighting_controller = mock_controller
 
@@ -249,3 +251,163 @@ class TestOtherSettingsNotHotReloaded:
 
             # set_dim_speed_ms should NOT be called for other settings
             mock_controller.set_dim_speed_ms.assert_not_called()
+            mock_controller.set_dmx_dedupe_enabled.assert_not_called()
+            mock_controller.set_dmx_dedupe_ttl_seconds.assert_not_called()
+
+
+class TestDmxDedupeValidation:
+    """Tests for DMX dedupe system setting validation."""
+
+    @pytest.mark.asyncio
+    async def test_dmx_dedupe_ttl_negative_rejected(self):
+        """Test that negative TTL values are rejected."""
+        from fastapi import HTTPException
+
+        mock_session = AsyncMock()
+        mock_setting = MagicMock()
+        mock_setting.key = "dmx_dedupe_ttl_seconds"
+        mock_setting.value = "1.0"
+        mock_setting.value_type = "float"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_setting
+        mock_session.execute.return_value = mock_result
+
+        with patch("tau.api.routes.system_config.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await update_system_setting(
+                    "dmx_dedupe_ttl_seconds",
+                    SystemSettingUpdateRequest(value="-0.1")
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "zero or positive" in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_dmx_dedupe_ttl_non_float_rejected(self):
+        """Test that non-float TTL values are rejected."""
+        from fastapi import HTTPException
+
+        mock_session = AsyncMock()
+        mock_setting = MagicMock()
+        mock_setting.key = "dmx_dedupe_ttl_seconds"
+        mock_setting.value = "1.0"
+        mock_setting.value_type = "float"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_setting
+        mock_session.execute.return_value = mock_result
+
+        with patch("tau.api.routes.system_config.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await update_system_setting(
+                    "dmx_dedupe_ttl_seconds",
+                    SystemSettingUpdateRequest(value="not_a_number")
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "invalid" in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_dmx_dedupe_enabled_invalid_rejected(self):
+        """Test that invalid boolean values are rejected."""
+        from fastapi import HTTPException
+
+        mock_session = AsyncMock()
+        mock_setting = MagicMock()
+        mock_setting.key = "dmx_dedupe_enabled"
+        mock_setting.value = "true"
+        mock_setting.value_type = "bool"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_setting
+        mock_session.execute.return_value = mock_result
+
+        with patch("tau.api.routes.system_config.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            with pytest.raises(HTTPException) as exc_info:
+                await update_system_setting(
+                    "dmx_dedupe_enabled",
+                    SystemSettingUpdateRequest(value="maybe")
+                )
+
+            assert exc_info.value.status_code == 400
+            assert "boolean" in exc_info.value.detail.lower()
+
+
+class TestDmxDedupeHotReload:
+    """Tests for DMX dedupe hot-reload functionality."""
+
+    @pytest.mark.asyncio
+    async def test_dmx_dedupe_enabled_hot_reload(self):
+        """Test that updating dmx_dedupe_enabled triggers hot-reload."""
+        mock_session = AsyncMock()
+        mock_setting = MagicMock()
+        mock_setting.id = 1
+        mock_setting.key = "dmx_dedupe_enabled"
+        mock_setting.value = "true"
+        mock_setting.value_type = "bool"
+        mock_setting.description = "DMX dedupe toggle"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_setting
+        mock_session.execute.return_value = mock_result
+        mock_session.commit = AsyncMock()
+        mock_session.refresh = AsyncMock()
+
+        mock_controller = MagicMock()
+        mock_daemon = MagicMock()
+        mock_daemon.lighting_controller = mock_controller
+
+        with patch("tau.api.routes.system_config.get_db_session") as mock_get_session, \
+             patch("tau.api.routes.system_config.get_daemon_instance", return_value=mock_daemon):
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            await update_system_setting(
+                "dmx_dedupe_enabled",
+                SystemSettingUpdateRequest(value="false")
+            )
+
+            mock_controller.set_dmx_dedupe_enabled.assert_called_once_with(False)
+
+    @pytest.mark.asyncio
+    async def test_dmx_dedupe_ttl_hot_reload(self):
+        """Test that updating dmx_dedupe_ttl_seconds triggers hot-reload."""
+        mock_session = AsyncMock()
+        mock_setting = MagicMock()
+        mock_setting.id = 1
+        mock_setting.key = "dmx_dedupe_ttl_seconds"
+        mock_setting.value = "1.0"
+        mock_setting.value_type = "float"
+        mock_setting.description = "DMX dedupe TTL"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_setting
+        mock_session.execute.return_value = mock_result
+        mock_session.commit = AsyncMock()
+        mock_session.refresh = AsyncMock()
+
+        mock_controller = MagicMock()
+        mock_daemon = MagicMock()
+        mock_daemon.lighting_controller = mock_controller
+
+        with patch("tau.api.routes.system_config.get_db_session") as mock_get_session, \
+             patch("tau.api.routes.system_config.get_daemon_instance", return_value=mock_daemon):
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            await update_system_setting(
+                "dmx_dedupe_ttl_seconds",
+                SystemSettingUpdateRequest(value="0.5")
+            )
+
+            mock_controller.set_dmx_dedupe_ttl_seconds.assert_called_once_with(0.5)

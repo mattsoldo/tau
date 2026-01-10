@@ -214,6 +214,11 @@ async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
                     status_code=400,
                     detail="dim_speed_ms must be a positive value"
                 )
+            if key == "dmx_dedupe_ttl_seconds" and float(update.value) < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="dmx_dedupe_ttl_seconds must be zero or positive"
+                )
 
             # Update the setting
             old_value = setting.value
@@ -229,15 +234,27 @@ async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
             )
 
             # Hot-reload specific settings that need runtime updates
-            if key == "dim_speed_ms":
+            if key in ("dim_speed_ms", "dmx_dedupe_enabled", "dmx_dedupe_ttl_seconds"):
                 daemon = get_daemon_instance()
                 if daemon and daemon.lighting_controller:
                     try:
-                        daemon.lighting_controller.set_dim_speed_ms(int(update.value))
-                        logger.info("dim_speed_hot_reloaded", new_value=update.value)
+                        if key == "dim_speed_ms":
+                            daemon.lighting_controller.set_dim_speed_ms(int(update.value))
+                            logger.info("dim_speed_hot_reloaded", new_value=update.value)
+                        elif key == "dmx_dedupe_enabled":
+                            enabled = update.value.lower() in ("true", "1", "yes")
+                            daemon.lighting_controller.set_dmx_dedupe_enabled(enabled)
+                            logger.info("dmx_dedupe_enabled_hot_reloaded", new_value=enabled)
+                        elif key == "dmx_dedupe_ttl_seconds":
+                            ttl_seconds = float(update.value)
+                            daemon.lighting_controller.set_dmx_dedupe_ttl_seconds(ttl_seconds)
+                            logger.info(
+                                "dmx_dedupe_ttl_hot_reloaded",
+                                new_value=ttl_seconds
+                            )
                     except Exception as e:
                         # Don't fail the request - setting is saved, will take effect on restart
-                        logger.error("dim_speed_hot_reload_failed", error=str(e), exc_info=True)
+                        logger.error("system_setting_hot_reload_failed", error=str(e), exc_info=True)
 
             return SystemSettingResponse.model_validate(setting)
 
