@@ -43,7 +43,9 @@ class LightingController:
         self,
         state_manager: "StateManager",
         hardware_manager: HardwareManager,
-        dim_speed_ms: int = 700
+        dim_speed_ms: int = 700,
+        dmx_dedupe_enabled: bool = True,
+        dmx_dedupe_ttl_seconds: float = 1.0
     ):
         """
         Initialize lighting controller
@@ -52,9 +54,13 @@ class LightingController:
             state_manager: Reference to state manager
             hardware_manager: Reference to hardware manager
             dim_speed_ms: Time in ms for retractive switch dimming (0-100%)
+            dmx_dedupe_enabled: Whether to skip redundant DMX writes
+            dmx_dedupe_ttl_seconds: How long to cache DMX values before resending
         """
         self.state_manager = state_manager
         self.hardware_manager = hardware_manager
+        self.dmx_dedupe_enabled = dmx_dedupe_enabled
+        self.dmx_dedupe_ttl_seconds = dmx_dedupe_ttl_seconds
 
         # Initialize sub-engines
         self.circadian = CircadianEngine()
