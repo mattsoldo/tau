@@ -1230,11 +1230,11 @@ export default function DashboardPage() {
       }} />
 
       {/* Main content */}
-      <main className="relative z-5 px-10 py-8 max-w-[1800px] mx-auto">
-        <div className="grid grid-cols-[320px_1fr_1fr] gap-5">
+      <main className="relative z-5 px-4 py-4 lg:px-10 lg:py-8 max-w-[1800px] mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr_1fr] gap-5">
 
-          {/* System Health Card */}
-          <div className="row-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6 flex flex-col">
+          {/* System Health Card - hidden on mobile */}
+          <div className="hidden lg:flex lg:row-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6 flex-col">
             <div className="flex justify-between items-center mb-5">
               <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">System Health</span>
               <span className={`font-mono text-[11px] px-2.5 py-1 rounded-md border ${healthFailed > 0 ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' : 'bg-green-500/15 text-green-500 border-green-500/20'}`}>
@@ -1280,8 +1280,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* LabJack Card */}
-          <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          {/* LabJack Card - shown on mobile (second) */}
+          <div className="order-2 lg:order-none bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex items-center gap-3 mb-5">
               <div className="w-11 h-11 rounded-xl bg-[#111113] border border-[#2a2a2f] flex items-center justify-center">
                 <svg className="w-[22px] h-[22px] stroke-amber-500" fill="none" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -1318,8 +1318,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* OLA Card */}
-          <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          {/* OLA Card - hidden on mobile */}
+          <div className="hidden lg:block bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex items-center gap-3 mb-5">
               <div className="w-11 h-11 rounded-xl bg-[#111113] border border-[#2a2a2f] flex items-center justify-center">
                 <svg className="w-[22px] h-[22px] stroke-amber-500" fill="none" strokeWidth="1.5" viewBox="0 0 24 24">
@@ -1350,8 +1350,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Event Loop Card */}
-          <div className="col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          {/* Event Loop Card - hidden on mobile */}
+          <div className="hidden lg:block lg:col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex justify-between items-center mb-5">
               <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Event Loop Performance</span>
               <span className="font-mono text-[11px] px-2.5 py-1 rounded-md bg-green-500/15 text-green-500 border border-green-500/20">
@@ -1378,8 +1378,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* FIO Channels Card with Light Simulators */}
-          <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          {/* FIO Channels Card with Light Simulators - hidden on mobile */}
+          <div className="hidden lg:block bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex justify-between items-center mb-5">
               <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">FIO Channels</span>
               <span className="font-mono text-[10px] text-[#636366]">tap • double • triple • hold</span>
@@ -1459,8 +1459,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Lighting Control Card */}
-          <div className="col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          {/* Lighting Control Card - primary on mobile */}
+          <div className="order-first lg:order-none lg:col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex justify-between items-center mb-5">
               <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Lighting Control</span>
               <div className="flex items-center gap-2">
@@ -2059,8 +2059,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Activity Card */}
-          <div className="col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          {/* Activity Card - hidden on mobile */}
+          <div className="hidden lg:block lg:col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex justify-between items-center mb-5">
               <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Activity</span>
             </div>
@@ -2087,8 +2087,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Active Overrides Card */}
-          <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+          {/* Active Overrides Card - shown on mobile (third) */}
+          <div className="order-3 lg:order-none bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
             <div className="flex justify-between items-center mb-5">
               <div className="flex items-center gap-3">
                 <span className="text-[13px] font-medium uppercase tracking-wider text-[#636366]">Active Overrides</span>
