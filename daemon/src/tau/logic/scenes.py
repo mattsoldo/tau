@@ -267,13 +267,21 @@ class SceneEngine:
             # Convert database brightness (0-1000) to state manager (0.0-1.0)
             brightness = brightness_db / 1000.0 if brightness_db is not None else 0.0
 
-            # Update brightness
-            if self.state_manager.set_fixture_brightness(fixture_id, brightness):
+            # Update brightness (instant for now - fade_duration support TODO)
+            if self.state_manager.set_fixture_brightness(
+                fixture_id,
+                brightness,
+                transition_duration=0.0  # Instant application until fade is implemented
+            ):
                 success_count += 1
 
-            # Update CCT if specified
+            # Update CCT if specified (instant for now - fade_duration support TODO)
             if cct is not None:
-                self.state_manager.set_fixture_color_temp(fixture_id, cct)
+                self.state_manager.set_fixture_color_temp(
+                    fixture_id,
+                    cct,
+                    transition_duration=0.0  # Instant application until fade is implemented
+                )
 
         self.scenes_recalled += 1
         if success_count > 0:

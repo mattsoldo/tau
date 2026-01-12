@@ -534,7 +534,10 @@ class SoftwareUpdateService:
                 progress_callback=backup_progress,
             )
 
-            # Record in version history
+            # Get current schema revision before upgrade
+            pre_upgrade_schema = await self._get_current_schema_revision()
+
+            # Record in version history (with schema revision for future downgrades)
             version_history = VersionHistory(
                 version=current_version,
                 commit_sha=installation.commit_sha,
@@ -543,6 +546,7 @@ class SoftwareUpdateService:
                 backup_path=backup_info.backup_path,
                 backup_valid=True,
                 release_notes=None,
+                schema_revision=pre_upgrade_schema,
             )
             self.db_session.add(version_history)
             await self.db_session.commit()
@@ -606,10 +610,14 @@ class SoftwareUpdateService:
             # Skip verification since services will restart momentarily
             logger.info("skipping_verification", reason="services_restarting")
 
+            # Get current schema revision after migrations
+            current_schema_revision = await self._get_current_schema_revision()
+
             # Step 10: Update installation record
             installation.current_version = target_version
             installation.installed_at = datetime.now(timezone.utc)
             installation.install_method = "update"
+            installation.schema_revision = current_schema_revision
             await self.db_session.commit()
 
             # Step 11: Prune old backups
@@ -689,19 +697,31 @@ class SoftwareUpdateService:
                 f"No valid backup found for version {target_version}" if target_version else "No valid backups available"
             )
 
-        logger.info("starting_rollback", from_version=current_version, to_version=backup_info.version)
+        # Look up schema revision for the target version from version history
+        target_schema_revision = await self._get_version_schema_revision(backup_info.version)
+
+        logger.info(
+            "starting_rollback",
+            from_version=current_version,
+            to_version=backup_info.version,
+            target_schema_revision=target_schema_revision
+        )
 
         self._current_state = "rolling_back"
         self._update_progress = {"stage": "rolling_back", "percent": 0}
 
         try:
-            await self._perform_rollback(backup_info.backup_path)
+            await self._perform_rollback(
+                backup_info.backup_path,
+                target_schema_revision=target_schema_revision
+            )
 
             # Update installation record
             installation = await self._get_installation()
             installation.current_version = backup_info.version
             installation.installed_at = datetime.now(timezone.utc)
             installation.install_method = "rollback"
+            installation.schema_revision = target_schema_revision
             await self.db_session.commit()
 
             self._current_state = "idle"
@@ -713,6 +733,7 @@ class SoftwareUpdateService:
                 "success": True,
                 "from_version": current_version,
                 "to_version": backup_info.version,
+                "schema_revision": target_schema_revision,
                 "message": f"Successfully rolled back from {current_version} to {backup_info.version}",
             }
 
@@ -721,17 +742,304 @@ class SoftwareUpdateService:
             logger.critical("rollback_failed", error=str(e))
             raise RollbackError(f"Rollback failed: {str(e)}. Manual intervention required.") from e
 
-    async def _perform_rollback(self, backup_path: str):
-        """Perform the actual rollback operation"""
-        logger.info("starting_rollback", backup_path=backup_path)
+    async def _get_version_schema_revision(self, version: str) -> Optional[str]:
+        """
+        Look up the schema revision for a specific version from version history.
+
+        Args:
+            version: The version to look up
+
+        Returns:
+            Schema revision string or None if not found
+        """
+        try:
+            result = await self.db_session.execute(
+                select(VersionHistory.schema_revision)
+                .where(VersionHistory.version == version)
+                .order_by(VersionHistory.installed_at.desc())
+                .limit(1)
+            )
+            row = result.scalar_one_or_none()
+            return row
+        except Exception as e:
+            logger.warning("get_version_schema_revision_error", version=version, error=str(e))
+            return None
+
+    async def downgrade(
+        self,
+        target_version: str,
+        progress_callback=None
+    ) -> Dict[str, Any]:
+        """
+        Downgrade to a specific older version.
+
+        This method handles downgrading to any available release, not just
+        versions with local backups. It will:
+        1. Check for local backup first (use rollback if available)
+        2. Otherwise download the release from GitHub
+        3. Downgrade database schema BEFORE installing old code
+        4. Install the older version
+        5. Restart services
+
+        Args:
+            target_version: Version to downgrade to
+            progress_callback: Optional callback(state, progress, message)
+
+        Returns:
+            Dict with downgrade result
+
+        Raises:
+            UpdateError: If downgrade fails
+        """
+        current_version = await self.get_current_version()
+
+        # Validate we're actually downgrading
+        try:
+            if pkg_version.parse(target_version) >= pkg_version.parse(current_version):
+                raise UpdateError(
+                    f"Target version {target_version} is not older than current {current_version}. "
+                    "Use apply_update for upgrades."
+                )
+        except Exception as e:
+            if "UpdateError" in str(type(e)):
+                raise
+            # Version parsing failed, continue anyway
+            logger.warning("version_comparison_failed", error=str(e))
+
+        logger.info(
+            "starting_downgrade",
+            from_version=current_version,
+            to_version=target_version
+        )
+
+        # Check if we have a local backup for this version
+        backup_manager = await self._get_backup_manager()
+        backup_info = await backup_manager.get_backup_for_version(target_version)
+
+        if backup_info and backup_info.valid:
+            # Use existing rollback functionality
+            logger.info("downgrade_using_backup", version=target_version)
+            return await self.rollback(target_version)
+
+        # No backup - need to download from GitHub
+        logger.info("downgrade_downloading_release", version=target_version)
+
+        # Get release info from cache or fetch
+        result = await self.db_session.execute(
+            select(AvailableRelease).where(AvailableRelease.version == target_version)
+        )
+        release = result.scalar_one_or_none()
+
+        if not release:
+            # Try to fetch releases to find it
+            await self.check_for_updates("manual")
+            result = await self.db_session.execute(
+                select(AvailableRelease).where(AvailableRelease.version == target_version)
+            )
+            release = result.scalar_one_or_none()
+
+        if not release:
+            raise UpdateError(
+                f"Release {target_version} not found in GitHub releases. "
+                "Cannot downgrade to unavailable versions."
+            )
+
+        if not release.asset_url:
+            raise UpdateError(f"Release {target_version} has no downloadable asset.")
+
+        # Get schema revision for target version (from release or lookup)
+        target_schema_revision = release.schema_revision
+        if not target_schema_revision:
+            # Try to look up from version history
+            target_schema_revision = await self._get_version_schema_revision(target_version)
+
+        download_path: Optional[Path] = None
+        current_backup: Optional[BackupInfo] = None
+
+        try:
+            # Step 1: Download the older release
+            self._current_state = "downloading"
+            self._update_progress = {"stage": "downloading", "percent": 0}
+            if progress_callback:
+                progress_callback("downloading", 0, "Downloading older version...")
+
+            github = await self._get_github_client()
+            download_dir = Path(tempfile.gettempdir()) / "tau-updates"
+            download_dir.mkdir(parents=True, exist_ok=True)
+            download_path = download_dir / (release.asset_name or f"{target_version}.tar.gz")
+
+            def download_progress(downloaded: int, total: int):
+                if total > 0:
+                    percent = int(downloaded / total * 100)
+                    self._update_progress = {"stage": "downloading", "percent": percent}
+                    if progress_callback:
+                        progress_callback("downloading", percent, f"Downloaded {downloaded}/{total} bytes")
+
+            await github.download_asset(
+                release.asset_url,
+                download_path,
+                checksum=release.asset_checksum,
+                progress_callback=download_progress,
+            )
+
+            # Step 2: Verify checksum
+            self._current_state = "verifying"
+            if progress_callback:
+                progress_callback("verifying", 0, "Verifying download...")
+
+            # Step 3: Create backup of current version
+            self._current_state = "backing_up"
+            if progress_callback:
+                progress_callback("backing_up", 0, "Creating backup of current version...")
+
+            current_backup = await backup_manager.create_backup(
+                version=current_version,
+                progress_callback=lambda p: (
+                    progress_callback("backing_up", p, "Creating backup...") if progress_callback else None
+                ),
+            )
+
+            # Record current version in history before downgrade
+            current_schema = await self._get_current_schema_revision()
+            history_entry = VersionHistory(
+                version=current_version,
+                backup_path=current_backup.backup_path if current_backup else None,
+                backup_valid=True if current_backup else False,
+                schema_revision=current_schema,
+            )
+            self.db_session.add(history_entry)
+            await self.db_session.commit()
+
+            # Step 4: Downgrade database schema BEFORE installing old code
+            # This is critical - we need current migration files to downgrade
+            if target_schema_revision:
+                self._current_state = "migrating"
+                if progress_callback:
+                    progress_callback("migrating", 0, "Downgrading database schema...")
+
+                success = await self._run_migrations_downgrade(target_schema_revision)
+                if not success:
+                    raise UpdateError(
+                        f"Failed to downgrade database schema to {target_schema_revision}"
+                    )
+
+            # Step 5: Install the older version
+            self._current_state = "installing"
+            if progress_callback:
+                progress_callback("installing", 0, "Installing older version...")
+
+            await self._install_package(download_path)
+
+            # Step 6: Build frontend
+            if progress_callback:
+                progress_callback("installing", 50, "Building frontend...")
+            await self._build_frontend()
+
+            # Step 7: Update installation record
+            installation = await self._get_installation()
+            installation.current_version = target_version
+            installation.installed_at = datetime.now(timezone.utc)
+            installation.install_method = "rollback"  # Downgrade is a type of rollback
+            installation.schema_revision = target_schema_revision
+            await self.db_session.commit()
+
+            # Step 8: Schedule service restart
+            logger.info("scheduling_downgrade_restart")
+            subprocess.Popen(
+                ["sh", "-c", "sleep 3 && sudo systemctl restart tau-daemon tau-frontend"],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            self._current_state = "idle"
+            self._update_progress = {}
+
+            logger.info(
+                "downgrade_complete",
+                from_version=current_version,
+                to_version=target_version
+            )
+
+            return {
+                "success": True,
+                "from_version": current_version,
+                "to_version": target_version,
+                "schema_revision": target_schema_revision,
+                "message": f"Successfully downgraded from {current_version} to {target_version}",
+            }
+
+        except Exception as e:
+            logger.error("downgrade_failed", error=str(e))
+            self._current_state = "failed"
+
+            # Attempt rollback to current version if we have a backup
+            if current_backup:
+                try:
+                    logger.info("attempting_rollback_after_failed_downgrade")
+                    await self._perform_rollback(current_backup.backup_path)
+                except Exception as rollback_error:
+                    logger.critical(
+                        "rollback_after_downgrade_failed",
+                        error=str(rollback_error)
+                    )
+
+            raise UpdateError(f"Downgrade failed: {str(e)}") from e
+
+        finally:
+            # Clean up download
+            if download_path and download_path.exists():
+                try:
+                    download_path.unlink()
+                except Exception:
+                    pass
+
+    async def _perform_rollback(
+        self,
+        backup_path: str,
+        target_schema_revision: Optional[str] = None
+    ):
+        """
+        Perform the actual rollback operation.
+
+        Important: Database downgrade must happen BEFORE file restore,
+        while we still have the current migration files available.
+
+        Args:
+            backup_path: Path to the backup directory to restore
+            target_schema_revision: Alembic revision to downgrade to (if needed)
+        """
+        logger.info(
+            "starting_rollback",
+            backup_path=backup_path,
+            target_schema_revision=target_schema_revision
+        )
         backup_manager = await self._get_backup_manager()
 
-        # Restore from backup (don't stop services - we can't stop ourselves)
+        # Step 1: Downgrade database schema FIRST (while we still have current migrations)
+        if target_schema_revision:
+            current_revision = await self._get_current_schema_revision()
+            if current_revision and current_revision != target_schema_revision:
+                logger.info(
+                    "downgrading_database_schema",
+                    from_revision=current_revision,
+                    to_revision=target_schema_revision
+                )
+                success = await self._run_migrations_downgrade(target_schema_revision)
+                if not success:
+                    logger.warning(
+                        "schema_downgrade_failed_continuing",
+                        target_revision=target_schema_revision
+                    )
+                    # Continue with file restore - schema mismatch may cause issues
+                    # but it's better than leaving the system in a broken state
+
+        # Step 2: Restore files from backup
         logger.info("restoring_from_backup", backup_path=backup_path)
         await backup_manager.restore_backup(backup_path)
         logger.info("backup_restored", backup_path=backup_path)
 
-        # Schedule service restart to pick up rolled-back code
+        # Step 3: Schedule service restart to pick up rolled-back code
         logger.info("scheduling_rollback_restart")
         subprocess.Popen(
             ["sh", "-c", "sleep 3 && sudo systemctl restart tau-daemon tau-frontend"],
@@ -931,7 +1239,7 @@ class SoftwareUpdateService:
             raise InstallationError(f"Frontend build timed out after {FRONTEND_BUILD_TIMEOUT}s")
 
     async def _run_migrations(self):
-        """Run database migrations"""
+        """Run database migrations (upgrade to head)"""
         try:
             # Use alembic from the venv
             alembic_path = self.app_root / "daemon" / ".venv" / "bin" / "alembic"
@@ -956,6 +1264,84 @@ class SoftwareUpdateService:
             logger.warning("migration_timeout")
         except Exception as e:
             logger.warning("migration_error", error=str(e))
+
+    async def _run_migrations_downgrade(self, target_revision: str) -> bool:
+        """
+        Run database migrations to downgrade to a specific revision.
+
+        Args:
+            target_revision: Alembic revision identifier to downgrade to
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            alembic_path = self.app_root / "daemon" / ".venv" / "bin" / "alembic"
+            logger.info(
+                "running_migration_downgrade",
+                target_revision=target_revision
+            )
+
+            process = await asyncio.create_subprocess_exec(
+                str(alembic_path),
+                "downgrade",
+                target_revision,
+                cwd=str(self.app_root / "daemon"),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=MIGRATION_TIMEOUT
+            )
+
+            if process.returncode != 0:
+                logger.error(
+                    "migration_downgrade_failed",
+                    stderr=stderr.decode(),
+                    return_code=process.returncode
+                )
+                return False
+
+            logger.info(
+                "migration_downgrade_complete",
+                target_revision=target_revision
+            )
+            return True
+
+        except asyncio.TimeoutError:
+            logger.error("migration_downgrade_timeout")
+            return False
+        except Exception as e:
+            logger.error("migration_downgrade_error", error=str(e))
+            return False
+
+    async def _get_current_schema_revision(self) -> Optional[str]:
+        """Get the current Alembic schema revision from the database"""
+        try:
+            alembic_path = self.app_root / "daemon" / ".venv" / "bin" / "alembic"
+            process = await asyncio.create_subprocess_exec(
+                str(alembic_path),
+                "current",
+                cwd=str(self.app_root / "daemon"),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=10.0
+            )
+
+            if process.returncode == 0:
+                # Output format: "20260111_2100 (head)" or just "20260111_2100"
+                output = stdout.decode().strip()
+                if output:
+                    # Extract revision ID (first word before space or parenthesis)
+                    revision = output.split()[0] if output.split() else None
+                    return revision
+            return None
+
+        except Exception as e:
+            logger.warning("get_schema_revision_error", error=str(e))
+            return None
 
     async def _verify_installation(self, expected_version: str) -> bool:
         """Verify the installation is working correctly"""

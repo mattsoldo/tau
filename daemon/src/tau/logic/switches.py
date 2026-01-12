@@ -352,7 +352,8 @@ class SwitchHandler:
             self.state_manager.set_fixture_brightness(
                 switch.target_fixture_id,
                 brightness,
-                current_time
+                transition_duration=0.0,  # Instant toggle
+                timestamp=current_time
             )
             logger.debug(
                 "switch_toggled_fixture",
@@ -507,7 +508,8 @@ class SwitchHandler:
             self.state_manager.set_fixture_brightness(
                 switch.target_fixture_id,
                 brightness,
-                current_time
+                transition_duration=0.1,  # Short transition for smooth dimming
+                timestamp=current_time
             )
             logger.debug(
                 "rotary_adjusted_fixture",
@@ -738,6 +740,7 @@ class SwitchHandler:
                 self.state_manager.set_group_brightness(
                     switch.target_group_id,
                     0.0,
+                    transition_duration=0.0,  # Instant toggle
                     timestamp=current_time
                 )
                 logger.debug(
@@ -752,6 +755,7 @@ class SwitchHandler:
                 self.state_manager.set_group_brightness(
                     switch.target_group_id,
                     brightness,
+                    transition_duration=0.0,  # Instant toggle
                     timestamp=current_time
                 )
 
@@ -760,6 +764,7 @@ class SwitchHandler:
                     self.state_manager.set_group_color_temp(
                         switch.target_group_id,
                         cct,
+                        transition_duration=0.0,  # Instant toggle
                         timestamp=current_time
                     )
 
@@ -844,6 +849,7 @@ class SwitchHandler:
             self.state_manager.set_group_brightness(
                 switch.target_group_id,
                 new_brightness,
+                transition_duration=0.0,  # Instant - continuous dimming updates
                 timestamp=current_time
             )
 

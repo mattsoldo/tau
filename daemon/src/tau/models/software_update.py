@@ -47,6 +47,9 @@ class Installation(Base):
     )
     install_method: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
+    # Schema tracking for downgrade support
+    schema_revision: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     # Constraints
     __table_args__ = (
         CheckConstraint("id = 1", name="installation_single_row_check"),
@@ -92,6 +95,9 @@ class VersionHistory(Base):
     # Release Information
     release_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Schema tracking for downgrade support
+    schema_revision: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
     # Indexes
     __table_args__ = (
         Index("idx_version_history_version", "version"),
@@ -130,6 +136,9 @@ class AvailableRelease(Base):
     # Release Type
     prerelease: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     draft: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+    # Schema tracking for downgrade support
+    schema_revision: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Cache Metadata
     checked_at: Mapped[datetime] = mapped_column(

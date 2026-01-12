@@ -254,10 +254,12 @@ async def all_off():
             detail="State manager not available"
         )
 
-    # Set all fixtures to 0 brightness
+    # Set all fixtures to 0 brightness (instant for emergency)
     count = 0
     for fixture_id in daemon.state_manager.fixtures.keys():
-        success = daemon.state_manager.set_fixture_brightness(fixture_id, 0.0)
+        success = daemon.state_manager.set_fixture_brightness(
+            fixture_id, 0.0, transition_duration=0.0
+        )
         if success:
             count += 1
 
@@ -277,10 +279,12 @@ async def panic_mode():
             detail="State manager not available"
         )
 
-    # Set all fixtures to 100% brightness
+    # Set all fixtures to 100% brightness (instant for emergency)
     count = 0
     for fixture_id in daemon.state_manager.fixtures.keys():
-        success = daemon.state_manager.set_fixture_brightness(fixture_id, 1.0)
+        success = daemon.state_manager.set_fixture_brightness(
+            fixture_id, 1.0, transition_duration=0.0
+        )
         if success:
             count += 1
 

@@ -77,6 +77,23 @@ class RollbackResponse(BaseModel):
     from_version: str = Field(..., description="Version before rollback")
     to_version: str = Field(..., description="Version after rollback")
     message: str = Field(..., description="Status message")
+    schema_revision: Optional[str] = Field(None, description="Database schema revision after rollback")
+
+
+class DowngradeRequest(BaseModel):
+    """Request to downgrade to an older version"""
+
+    target_version: str = Field(..., description="Version to downgrade to")
+
+
+class DowngradeResponse(BaseModel):
+    """Downgrade result"""
+
+    success: bool = Field(..., description="Whether downgrade was successful")
+    from_version: str = Field(..., description="Version before downgrade")
+    to_version: str = Field(..., description="Version after downgrade")
+    schema_revision: Optional[str] = Field(None, description="Database schema revision after downgrade")
+    message: str = Field(..., description="Status message")
 
 
 class ReleaseInfo(BaseModel):
@@ -279,6 +296,50 @@ async def rollback(
     except Exception as e:
         logger.error("rollback_error", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to rollback: {str(e)}")
+
+
+@router.post(
+    "/downgrade",
+    response_model=DowngradeResponse,
+    summary="Downgrade to Older Version",
+    description="Downgrade to a specific older version, downloading from GitHub if needed",
+)
+async def downgrade(
+    request: DowngradeRequest,
+    service: SoftwareUpdateService = Depends(get_update_service),
+):
+    """
+    Downgrade to a specific older version.
+
+    This will:
+    1. Check for local backup (use if available)
+    2. Otherwise download the release from GitHub
+    3. Create backup of current installation
+    4. Downgrade database schema (before code change)
+    5. Install the older version
+    6. Restart services
+
+    If the target version has a local backup, this is equivalent to rollback.
+    If not, the release is downloaded from GitHub.
+
+    Database schema is downgraded BEFORE installing old code to ensure
+    compatibility (we need the current migration files to downgrade).
+    """
+    try:
+        result = await service.downgrade(target_version=request.target_version)
+        return DowngradeResponse(**result)
+    except UpdateError as e:
+        logger.warning("downgrade_failed", error=str(e), target=request.target_version)
+        raise HTTPException(status_code=400, detail=str(e))
+    except RollbackError as e:
+        logger.error("downgrade_and_rollback_failed", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"CRITICAL: Downgrade failed and rollback also failed. Manual intervention required. {str(e)}",
+        )
+    except Exception as e:
+        logger.error("downgrade_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to downgrade: {str(e)}")
 
 
 @router.get(
