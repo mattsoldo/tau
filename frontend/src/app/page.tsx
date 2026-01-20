@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Menu, X, Sun, LayoutDashboard, Sliders, Settings, Cpu, Radio, Plus, GripVertical, Pencil, Check, Power, PowerOff } from 'lucide-react';
+import { Menu, X, Sun, Moon, Monitor, LayoutDashboard, Settings, Cpu, Radio, Plus, GripVertical, Pencil, Check, Power, PowerOff } from 'lucide-react';
+import { useTheme } from '@/contexts/ThemeContext';
 import { LightGroup } from '@/components/mobile/LightGroup';
 import { SceneCard } from '@/components/mobile/SceneCard';
 import { SceneCaptureModal } from '@/components/mobile/SceneCaptureModal';
@@ -623,9 +624,9 @@ export default function HomePage() {
     sendFixtureControl(fixtureId, brightness);
   }, [sendFixtureControl]);
 
-  // Get scenes for a specific group
+  // Get scenes for a specific group (only group-scoped scenes, not global)
   const getScenesForGroup = (groupId: number): Scene[] => {
-    return scenes.filter(s => s.scope_group_id === groupId || s.scope_group_id === null);
+    return scenes.filter(s => s.scope_group_id === groupId);
   };
 
   if (isLoading) {
@@ -647,9 +648,10 @@ export default function HomePage() {
   // Global scenes (not scoped to any group)
   const globalScenes = scenes.filter(s => s.scope_group_id === null);
 
+  const { theme, setTheme } = useTheme();
+
   const navItems = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/test', label: 'Test Controls', icon: Sliders },
     { href: '/labjack', label: 'LabJack Monitor', icon: Cpu },
     { href: '/config', label: 'Configuration', icon: Settings },
   ];
@@ -706,6 +708,46 @@ export default function HomePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
             </a>
+          </div>
+
+          {/* Theme Toggle */}
+          <div className="mt-6 pt-6 border-t border-gray-100 dark:border-[#2a2a2f]">
+            <p className="px-4 text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Appearance</p>
+            <div className="flex gap-2 px-4">
+              <button
+                onClick={() => setTheme('light')}
+                className={`flex-1 flex flex-col items-center gap-1 py-3 px-2 rounded-xl transition-colors ${
+                  theme === 'light'
+                    ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                    : 'bg-gray-100 dark:bg-[#2a2a2f] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#3a3a3f]'
+                }`}
+              >
+                <Sun className="w-5 h-5" />
+                <span className="text-xs font-medium">Light</span>
+              </button>
+              <button
+                onClick={() => setTheme('dark')}
+                className={`flex-1 flex flex-col items-center gap-1 py-3 px-2 rounded-xl transition-colors ${
+                  theme === 'dark'
+                    ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                    : 'bg-gray-100 dark:bg-[#2a2a2f] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#3a3a3f]'
+                }`}
+              >
+                <Moon className="w-5 h-5" />
+                <span className="text-xs font-medium">Dark</span>
+              </button>
+              <button
+                onClick={() => setTheme('system')}
+                className={`flex-1 flex flex-col items-center gap-1 py-3 px-2 rounded-xl transition-colors ${
+                  theme === 'system'
+                    ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                    : 'bg-gray-100 dark:bg-[#2a2a2f] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#3a3a3f]'
+                }`}
+              >
+                <Monitor className="w-5 h-5" />
+                <span className="text-xs font-medium">Auto</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

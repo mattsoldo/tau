@@ -16,6 +16,7 @@ from tau.api.schemas import (
     SceneCaptureRequest,
     SceneRecallRequest,
     SceneReorderRequest,
+    SceneValuesUpdateRequest,
 )
 import structlog
 
@@ -116,6 +117,147 @@ async def delete_scene(
     await session.commit()
 
 
+@router.put("/{scene_id}/values", response_model=SceneResponse)
+async def update_scene_values(
+    scene_id: int,
+    values_data: SceneValuesUpdateRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Update scene fixture values (brightness/CCT levels)
+
+    Replaces existing values for specified fixtures. To remove a fixture
+    from the scene, omit it from the values list.
+    """
+    scene = await session.get(
+        Scene,
+        scene_id,
+        options=[selectinload(Scene.values)]
+    )
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Build a map of existing values by fixture_id
+    existing_values = {v.fixture_id: v for v in scene.values}
+
+    # Update or create values for each fixture in the request
+    for value_update in values_data.values:
+        if value_update.fixture_id in existing_values:
+            # Update existing value
+            existing = existing_values[value_update.fixture_id]
+            if value_update.target_brightness is not None:
+                existing.target_brightness = value_update.target_brightness
+            if value_update.target_cct_kelvin is not None:
+                existing.target_cct_kelvin = value_update.target_cct_kelvin
+        else:
+            # Create new value
+            new_value = SceneValue(
+                scene_id=scene_id,
+                fixture_id=value_update.fixture_id,
+                target_brightness=value_update.target_brightness,
+                target_cct_kelvin=value_update.target_cct_kelvin
+            )
+            session.add(new_value)
+
+    await session.commit()
+    await session.refresh(scene, attribute_names=["values"])
+
+    logger.info(
+        "scene_values_updated",
+        scene_id=scene_id,
+        fixture_count=len(values_data.values)
+    )
+
+    return scene
+
+
+@router.delete("/{scene_id}/values/{fixture_id}", response_model=SceneResponse)
+async def remove_fixture_from_scene(
+    scene_id: int,
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """Remove a fixture from a scene"""
+    scene = await session.get(
+        Scene,
+        scene_id,
+        options=[selectinload(Scene.values)]
+    )
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Find and remove the fixture value
+    value_to_remove = None
+    for value in scene.values:
+        if value.fixture_id == fixture_id:
+            value_to_remove = value
+            break
+
+    if not value_to_remove:
+        raise HTTPException(status_code=404, detail="Fixture not in scene")
+
+    await session.delete(value_to_remove)
+    await session.commit()
+    await session.refresh(scene, attribute_names=["values"])
+
+    logger.info(
+        "fixture_removed_from_scene",
+        scene_id=scene_id,
+        fixture_id=fixture_id
+    )
+
+    return scene
+
+
+@router.post("/{scene_id}/values/{fixture_id}", response_model=SceneResponse)
+async def add_fixture_to_scene(
+    scene_id: int,
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    """Add a fixture to a scene using its current state"""
+    daemon = get_daemon_instance()
+    if not daemon or not daemon.state_manager:
+        raise HTTPException(status_code=503, detail="State manager not available")
+
+    scene = await session.get(
+        Scene,
+        scene_id,
+        options=[selectinload(Scene.values)]
+    )
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Check if fixture already in scene
+    for value in scene.values:
+        if value.fixture_id == fixture_id:
+            raise HTTPException(status_code=400, detail="Fixture already in scene")
+
+    # Get current fixture state
+    fixture_state = daemon.state_manager.fixtures.get(fixture_id)
+    if not fixture_state:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+
+    # Create new scene value from current state
+    new_value = SceneValue(
+        scene_id=scene_id,
+        fixture_id=fixture_id,
+        target_brightness=int(fixture_state.goal_brightness * 1000),
+        target_cct_kelvin=fixture_state.goal_color_temp
+    )
+    session.add(new_value)
+    await session.commit()
+    await session.refresh(scene, attribute_names=["values"])
+
+    logger.info(
+        "fixture_added_to_scene",
+        scene_id=scene_id,
+        fixture_id=fixture_id,
+        brightness=new_value.target_brightness
+    )
+
+    return scene
+
+
 @router.post("/capture", response_model=SceneResponse, status_code=201)
 async def capture_scene(
     capture_data: SceneCaptureRequest,
@@ -188,22 +330,46 @@ async def recall_scene(
     if scene.scene_type == "toggle" and daemon.state_manager:
         # Check if all fixtures are at their scene levels
         all_at_scene_level = True
+        scene_values_count = len(scene.values)
+        logger.info(
+            "toggle_scene_checking",
+            scene_id=scene.id,
+            scene_name=scene.name,
+            values_count=scene_values_count
+        )
+
         for scene_value in scene.values:
             fixture_state = daemon.state_manager.fixtures.get(scene_value.fixture_id)
             if fixture_state:
-                current_brightness = fixture_state.goal_brightness
+                # Convert goal_brightness (0.0-1.0) to 0-1000 scale for comparison
+                current_brightness_1000 = int(fixture_state.goal_brightness * 1000)
                 scene_brightness = scene_value.target_brightness or 0
-                # Allow small tolerance (5 units out of 1000)
-                if abs(current_brightness - scene_brightness) > 5:
+                diff = abs(current_brightness_1000 - scene_brightness)
+
+                logger.info(
+                    "toggle_fixture_compare",
+                    fixture_id=scene_value.fixture_id,
+                    current_brightness_1000=current_brightness_1000,
+                    scene_brightness=scene_brightness,
+                    diff=diff,
+                    matches=(diff <= 50)
+                )
+
+                # Allow small tolerance (50 units out of 1000 = 5%)
+                if diff > 50:
                     all_at_scene_level = False
                     break
             else:
+                logger.info(
+                    "toggle_fixture_not_found",
+                    fixture_id=scene_value.fixture_id
+                )
                 all_at_scene_level = False
                 break
 
         should_turn_off = all_at_scene_level
         logger.info(
-            "toggle_scene_check",
+            "toggle_scene_result",
             scene_id=scene.id,
             all_at_scene_level=all_at_scene_level,
             should_turn_off=should_turn_off

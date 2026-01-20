@@ -157,6 +157,7 @@ class SceneBase(BaseModel):
     name: str = Field(..., max_length=100)
     scope_group_id: Optional[int] = None
     scene_type: str = Field(default="idempotent", pattern="^(toggle|idempotent)$", description="Scene type: toggle or idempotent")
+    icon: Optional[str] = Field(None, max_length=50, description="Lucide icon name for the scene")
 
 
 class SceneCreate(SceneBase):
@@ -165,7 +166,9 @@ class SceneCreate(SceneBase):
 
 class SceneUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
+    scope_group_id: Optional[int] = Field(None, description="Group ID for scoping, or null for global")
     scene_type: Optional[str] = Field(None, pattern="^(toggle|idempotent)$", description="Scene type: toggle or idempotent")
+    icon: Optional[str] = Field(None, max_length=50, description="Lucide icon name for the scene")
     display_order: Optional[int] = Field(None, ge=0, description="Display order for UI sorting")
 
 
@@ -195,6 +198,19 @@ class SceneCaptureRequest(BaseModel):
     exclude_group_ids: Optional[List[int]] = None
     scope_group_id: Optional[int] = None
     scene_type: str = Field(default="idempotent", pattern="^(toggle|idempotent)$", description="Scene type: toggle or idempotent")
+    icon: Optional[str] = Field(None, max_length=50, description="Lucide icon name for the scene")
+
+
+class SceneValueUpdate(BaseModel):
+    """Update a scene value (fixture brightness/CCT level)"""
+    fixture_id: int = Field(..., gt=0)
+    target_brightness: Optional[int] = Field(None, ge=0, le=1000)
+    target_cct_kelvin: Optional[int] = Field(None, ge=1000, le=10000)
+
+
+class SceneValuesUpdateRequest(BaseModel):
+    """Update multiple scene values at once"""
+    values: List[SceneValueUpdate] = Field(..., description="List of fixture values to update")
 
 
 class SceneRecallRequest(BaseModel):

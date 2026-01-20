@@ -96,12 +96,19 @@ export default function SoftwareUpdatePanel() {
 
   const [reconnectCountdown, setReconnectCountdown] = useState(0);
 
-  // Fetch initial data
+  // Fetch initial data and check for updates on mount
   useEffect(() => {
     fetchStatus();
     fetchHistory();
     fetchBackups();
     fetchConfig();
+
+    // Auto-check for updates after a short delay to not block initial render
+    const checkTimer = setTimeout(() => {
+      checkForUpdates();
+    }, 1000);
+
+    return () => clearTimeout(checkTimer);
   }, []);
 
   const fetchStatus = useCallback(async () => {

@@ -45,6 +45,11 @@ class Scene(Base):
         String(20), nullable=False, server_default="idempotent"
     )
 
+    # Icon name (from Lucide icon library)
+    icon: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )
+
     # Display order for UI sorting
     display_order: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True
