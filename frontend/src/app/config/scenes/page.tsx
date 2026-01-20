@@ -13,6 +13,8 @@ interface Scene {
   id: number;
   name: string;
   scope_group_id: number | null;
+  scene_type: 'toggle' | 'idempotent';
+  display_order?: number;
   values?: SceneValue[];
 }
 
@@ -52,6 +54,11 @@ export default function ScenesPage() {
   const [excludeFixtureIds, setExcludeFixtureIds] = useState<Set<number>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+
+  // Edit state
+  const [editingScene, setEditingScene] = useState<Scene | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSceneType, setEditSceneType] = useState<'toggle' | 'idempotent'>('idempotent');
 
   const groupNameById = useMemo(() => {
     return groups.reduce((acc, group) => {
@@ -200,6 +207,52 @@ export default function ScenesPage() {
     }
   };
 
+  const handleEditClick = (scene: Scene) => {
+    setEditingScene(scene);
+    setEditName(scene.name);
+    setEditSceneType(scene.scene_type || 'idempotent');
+  };
+
+  const handleEditSave = async () => {
+    if (!editingScene) return;
+    if (!editName.trim()) {
+      setError('Scene name is required');
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/scenes/${editingScene.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          scene_type: editSceneType,
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to update scene');
+      }
+
+      setEditingScene(null);
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update scene');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleEditCancel = () => {
+    setEditingScene(null);
+    setEditName('');
+    setEditSceneType('idempotent');
+  };
+
   if (isLoading) {
     return (
       <div className="p-8">
@@ -262,6 +315,7 @@ export default function ScenesPage() {
             <thead>
               <tr className="border-b border-[#2a2a2f]">
                 <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">Name</th>
+                <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">Type</th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">Scope</th>
                 <th className="px-6 py-4 text-left text-xs font-medium text-[#636366] uppercase tracking-wider">Fixtures</th>
                 <th className="px-6 py-4 text-right text-xs font-medium text-[#636366] uppercase tracking-wider">Actions</th>
@@ -272,6 +326,15 @@ export default function ScenesPage() {
                 <tr key={scene.id} className="hover:bg-white/[0.02] transition-colors">
                   <td className="px-6 py-4">
                     <div className="font-medium">{scene.name}</div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      scene.scene_type === 'toggle'
+                        ? 'bg-purple-500/15 text-purple-400'
+                        : 'bg-blue-500/15 text-blue-400'
+                    }`}>
+                      {scene.scene_type === 'toggle' ? 'Toggle' : 'Standard'}
+                    </span>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-[#a1a1a6]">
@@ -288,6 +351,15 @@ export default function ScenesPage() {
                         className="px-3 py-1.5 text-xs bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 rounded-lg transition-colors"
                       >
                         Recall
+                      </button>
+                      <button
+                        onClick={() => handleEditClick(scene)}
+                        className="p-2 text-[#636366] hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors"
+                        title="Edit scene"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                        </svg>
                       </button>
                       {deleteConfirm === scene.id ? (
                         <div className="flex items-center gap-1">
@@ -308,6 +380,7 @@ export default function ScenesPage() {
                         <button
                           onClick={() => setDeleteConfirm(scene.id)}
                           className="p-2 text-[#636366] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                          title="Delete scene"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
@@ -505,6 +578,74 @@ export default function ScenesPage() {
                 className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors"
               >
                 {isSaving ? 'Capturing...' : 'Capture Scene'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editingScene && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[#161619] rounded-xl border border-[#2a2a2f] w-full max-w-md mx-4">
+            <div className="px-6 py-4 border-b border-[#2a2a2f]">
+              <h2 className="text-lg font-semibold">Edit Scene</h2>
+              <p className="text-sm text-[#636366]">Update scene name and behavior.</p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Scene Name</label>
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="e.g., Movie Night"
+                  className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white placeholder:text-[#636366] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Scene Type</label>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setEditSceneType('idempotent')}
+                    className={`flex-1 px-4 py-3 rounded-lg border transition-colors ${
+                      editSceneType === 'idempotent'
+                        ? 'bg-blue-500/15 border-blue-500/50 text-blue-400'
+                        : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
+                    }`}
+                  >
+                    <div className="font-medium">Standard</div>
+                    <div className="text-xs mt-1 opacity-70">Always applies the saved state</div>
+                  </button>
+                  <button
+                    onClick={() => setEditSceneType('toggle')}
+                    className={`flex-1 px-4 py-3 rounded-lg border transition-colors ${
+                      editSceneType === 'toggle'
+                        ? 'bg-purple-500/15 border-purple-500/50 text-purple-400'
+                        : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
+                    }`}
+                  >
+                    <div className="font-medium">Toggle</div>
+                    <div className="text-xs mt-1 opacity-70">Turns off if already active</div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#2a2a2f] bg-[#161619]">
+              <button
+                onClick={handleEditCancel}
+                className="px-4 py-2.5 text-[#a1a1a6] hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                disabled={isSaving}
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors"
+              >
+                {isSaving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
