@@ -120,15 +120,22 @@ class GroupUpdate(BaseModel):
     circadian_profile_id: Optional[int] = None
     default_max_brightness: Optional[int] = Field(None, ge=0, le=1000, description="Default maximum brightness (0-1000) when switch turns group on")
     default_cct_kelvin: Optional[int] = Field(None, ge=1000, le=10000, description="Default color temperature in Kelvin when switch turns group on")
+    display_order: Optional[int] = Field(None, ge=0, description="Display order for UI sorting")
 
 
 class GroupResponse(GroupBase):
     id: int
     is_system: Optional[bool] = False
+    display_order: Optional[int] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class GroupReorderRequest(BaseModel):
+    """Request to reorder groups"""
+    group_ids: List[int] = Field(..., description="List of group IDs in desired display order")
 
 
 class GroupFixtureAdd(BaseModel):
@@ -149,6 +156,7 @@ class GroupStateResponse(BaseModel):
 class SceneBase(BaseModel):
     name: str = Field(..., max_length=100)
     scope_group_id: Optional[int] = None
+    scene_type: str = Field(default="idempotent", pattern="^(toggle|idempotent)$", description="Scene type: toggle or idempotent")
 
 
 class SceneCreate(SceneBase):
@@ -157,6 +165,8 @@ class SceneCreate(SceneBase):
 
 class SceneUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
+    scene_type: Optional[str] = Field(None, pattern="^(toggle|idempotent)$", description="Scene type: toggle or idempotent")
+    display_order: Optional[int] = Field(None, ge=0, description="Display order for UI sorting")
 
 
 class SceneValueResponse(BaseModel):
@@ -170,6 +180,7 @@ class SceneValueResponse(BaseModel):
 
 class SceneResponse(SceneBase):
     id: int
+    display_order: Optional[int] = None
     values: List[SceneValueResponse] = []
 
     class Config:
@@ -183,11 +194,17 @@ class SceneCaptureRequest(BaseModel):
     exclude_fixture_ids: Optional[List[int]] = None
     exclude_group_ids: Optional[List[int]] = None
     scope_group_id: Optional[int] = None
+    scene_type: str = Field(default="idempotent", pattern="^(toggle|idempotent)$", description="Scene type: toggle or idempotent")
 
 
 class SceneRecallRequest(BaseModel):
     scene_id: int = Field(..., gt=0)
     fade_duration: float = Field(default=0.0, ge=0.0, le=10.0)
+
+
+class SceneReorderRequest(BaseModel):
+    """Request to reorder scenes"""
+    scene_ids: List[int] = Field(..., description="List of scene IDs in desired display order")
 
 
 # Control Schemas

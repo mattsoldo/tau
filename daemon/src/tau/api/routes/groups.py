@@ -17,6 +17,7 @@ from tau.api.schemas import (
     GroupCreate,
     GroupUpdate,
     GroupResponse,
+    GroupReorderRequest,
     GroupFixtureAdd,
     GroupStateResponse,
     FixtureResponse,
@@ -289,3 +290,24 @@ async def remove_fixture_from_group(
                 group_id=group_id,
                 error=str(e)
             )
+
+
+@router.post("/reorder", response_model=List[GroupResponse])
+async def reorder_groups(
+    reorder_data: GroupReorderRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Reorder groups by setting display_order based on the provided order"""
+    # Update display_order for each group
+    for index, group_id in enumerate(reorder_data.group_ids):
+        group = await session.get(Group, group_id)
+        if group:
+            group.display_order = index
+
+    await session.commit()
+
+    # Return updated groups
+    result = await session.execute(select(Group).order_by(Group.display_order.asc().nullslast()))
+    groups = result.scalars().all()
+    logger.info("groups_reordered", group_ids=reorder_data.group_ids)
+    return groups

@@ -71,6 +71,11 @@ class Group(Base):
         Integer, nullable=True
     )
 
+    # Display order for UI sorting
+    display_order: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,

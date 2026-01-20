@@ -38,6 +38,18 @@ class Scene(Base):
         nullable=True,
     )
 
+    # Scene type: 'toggle' or 'idempotent'
+    # - toggle: selecting again turns fixtures off if at scene level
+    # - idempotent: always sets fixtures to scene level
+    scene_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="idempotent"
+    )
+
+    # Display order for UI sorting
+    display_order: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+
     # Relationships
     scope_group: Mapped[Optional["Group"]] = relationship(
         "Group",

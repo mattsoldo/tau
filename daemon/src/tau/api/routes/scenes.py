@@ -15,7 +15,11 @@ from tau.api.schemas import (
     SceneResponse,
     SceneCaptureRequest,
     SceneRecallRequest,
+    SceneReorderRequest,
 )
+import structlog
+
+logger = structlog.get_logger(__name__)
 from tau.api import get_daemon_instance
 from tau.api.websocket import broadcast_scene_recalled
 
@@ -135,6 +139,12 @@ async def capture_scene(
     if not scene_id:
         raise HTTPException(status_code=500, detail="Failed to capture scene")
 
+    # Update scene_type if specified
+    scene = await session.get(Scene, scene_id)
+    if scene and capture_data.scene_type:
+        scene.scene_type = capture_data.scene_type
+        await session.commit()
+
     # Return the created scene
     scene = await session.get(
         Scene,
@@ -149,7 +159,11 @@ async def recall_scene(
     recall_data: SceneRecallRequest,
     session: AsyncSession = Depends(get_session)
 ):
-    """Recall a scene (apply its values to fixtures)"""
+    """Recall a scene (apply its values to fixtures)
+
+    For toggle scenes: If all fixtures are at their scene levels, turn them off instead.
+    For idempotent scenes: Always apply the scene values.
+    """
     daemon = get_daemon_instance()
     if not daemon or not daemon.lighting_controller:
         raise HTTPException(
@@ -157,12 +171,58 @@ async def recall_scene(
             detail="Lighting controller not available"
         )
 
-    # Get scene name for broadcast
-    scene = await session.get(Scene, recall_data.scene_id)
+    # Get scene with values for toggle check
+    scene = await session.get(
+        Scene,
+        recall_data.scene_id,
+        options=[selectinload(Scene.values)]
+    )
     if not scene:
         raise HTTPException(status_code=404, detail="Scene not found")
 
-    # Use scene engine to recall
+    # Check for toggle behavior
+    should_turn_off = False
+    if scene.scene_type == "toggle" and daemon.state_manager:
+        # Check if all fixtures are at their scene levels
+        all_at_scene_level = True
+        for scene_value in scene.values:
+            fixture_state = daemon.state_manager.fixtures.get(scene_value.fixture_id)
+            if fixture_state:
+                current_brightness = fixture_state.goal_brightness
+                scene_brightness = scene_value.target_brightness or 0
+                # Allow small tolerance (5 units out of 1000)
+                if abs(current_brightness - scene_brightness) > 5:
+                    all_at_scene_level = False
+                    break
+            else:
+                all_at_scene_level = False
+                break
+
+        should_turn_off = all_at_scene_level
+        logger.info(
+            "toggle_scene_check",
+            scene_id=scene.id,
+            all_at_scene_level=all_at_scene_level,
+            should_turn_off=should_turn_off
+        )
+
+    if should_turn_off:
+        # Turn off all fixtures in this scene
+        for scene_value in scene.values:
+            await daemon.lighting_controller.control.set_fixture_brightness(
+                fixture_id=scene_value.fixture_id,
+                brightness=0.0,
+                transition_duration=recall_data.fade_duration
+            )
+
+        # Broadcast scene turned off
+        await broadcast_scene_recalled(
+            scene_id=recall_data.scene_id,
+            scene_name=scene.name
+        )
+        return {"message": "Toggle scene turned off", "toggled_off": True}
+
+    # Normal recall - apply scene values
     success = await daemon.lighting_controller.scenes.recall_scene(
         scene_id=recall_data.scene_id,
         fade_duration=recall_data.fade_duration
@@ -177,4 +237,29 @@ async def recall_scene(
         scene_name=scene.name
     )
 
-    return {"message": "Scene recalled successfully"}
+    return {"message": "Scene recalled successfully", "toggled_off": False}
+
+
+@router.post("/reorder", response_model=List[SceneResponse])
+async def reorder_scenes(
+    reorder_data: SceneReorderRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """Reorder scenes by setting display_order based on the provided order"""
+    # Update display_order for each scene
+    for index, scene_id in enumerate(reorder_data.scene_ids):
+        scene = await session.get(Scene, scene_id)
+        if scene:
+            scene.display_order = index
+
+    await session.commit()
+
+    # Return updated scenes
+    result = await session.execute(
+        select(Scene)
+        .options(selectinload(Scene.values))
+        .order_by(Scene.display_order.asc().nullslast())
+    )
+    scenes = result.scalars().all()
+    logger.info("scenes_reordered", scene_ids=reorder_data.scene_ids)
+    return scenes
