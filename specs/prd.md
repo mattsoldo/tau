@@ -199,18 +199,39 @@ Lower-level assignments override higher-level ones.
 A scene:
 - Has a name
 - May be scoped to a group
+- Has a type: **toggle** or **idempotent**
+- Has an optional display order for UI sorting
 - Defines per-fixture target values:
   - Brightness
   - CCT (if applicable)
 
 Scenes do not store group-level values.
 
-### 8.2 Behavior
+### 8.2 Scene Types
+
+**Toggle Scenes:**
+- First activation: Sets all defined fixture values
+- Second activation (when all fixtures are at scene level): Turns off all fixtures in the scene
+- Useful for quick on/off control of preset lighting states
+
+**Idempotent Scenes:**
+- Always sets all defined fixture values
+- Multiple activations have the same effect
+- Traditional scene behavior
+
+### 8.3 Behavior
 
 - Activating a scene sets all defined fixture values.
 - Scenes do not include fade times in v1.
+- Scene capture creates a new scene from current fixture states.
 
-### 8.3 Scene Deviation Tracking
+### 8.4 Scene Ordering
+
+- Scenes can be reordered via drag-and-drop in edit mode.
+- Order persists via the `display_order` field.
+- Scenes without explicit order are sorted by name.
+
+### 8.5 Scene Deviation Tracking
 
 - The system tracks how far current fixture state differs from the active scene.
 - Deviation is displayed:
@@ -392,15 +413,37 @@ System behavior:
 - Modern, minimal design
 - Light and dark modes
 - Responsive on desktop, tablet, and mobile
+- Header displays "tau lighting@[address]" when street address is configured
 
-### 15.2 Default View
+### 15.2 Default View (Mobile/Touch)
 
-- Displays all groups
-- Group on/off control
-- Scene selection
-- Expandable to show fixtures with override indicators
+The mobile UI provides a touch-optimized interface:
 
-### 15.3 Fixture Controls
+**Room Cards:**
+- Brightness slider covers most of card width
+- Leftmost 10% of slider is "off zone" for easy turn-off
+- Clicking anywhere on slider sets that brightness level (no separate toggle)
+- Dedicated expand button (...) on right side reveals fixtures and room scenes
+- Percentage display shows current brightness or "Off"
+
+**Scene Cards:**
+- Grid of scene buttons in global area and within rooms
+- Scene capture (+) button creates new scenes from current state
+- Toggle scenes indicated (tap again to turn off if at scene level)
+
+**Edit Mode:**
+- "Edit Order" button at bottom of rooms section
+- Drag handles appear for reordering rooms
+- Scenes can also be dragged to reorder
+- Order persists to database
+
+### 15.3 Default View (Desktop)
+
+- Two-column layout: rooms on left, scenes on right
+- Same brightness slider interaction as mobile
+- Inline scene grid with capture button
+
+### 15.4 Fixture Controls
 
 - Non-dimmable: on/off
 - Dimmable: on/off + brightness slider
@@ -409,12 +452,19 @@ System behavior:
 - Value indicators show current targets
 - Override badge with time remaining when active
 
-### 15.4 Developer Mode
+### 15.5 Scene Capture
+
+- Global capture: Creates scene with all lights at current levels
+- Room capture: Creates scene scoped to specific room
+- Name dialog prompts for scene name
+- Toggle checkbox determines scene type
+
+### 15.6 Developer Mode
 
 - Optional
 - Exposes diagnostics such as DMX values and input state
 
-### 15.5 Dashboard
+### 15.7 Dashboard
 
 - System health monitoring
 - Active overrides card with remove functionality

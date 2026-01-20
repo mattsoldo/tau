@@ -100,6 +100,13 @@ CREATE TABLE groups (
     circadian_enabled BOOLEAN DEFAULT FALSE,
     circadian_profile_id INT, -- FK to a profiles table (defined later)
 
+    -- Default settings when switch turns on the group
+    default_max_brightness INT DEFAULT 1000 CHECK (default_max_brightness BETWEEN 0 AND 1000),
+    default_cct_kelvin INT CHECK (default_cct_kelvin BETWEEN 1000 AND 10000),
+
+    -- Display order for UI sorting (null = sort by name)
+    display_order INT,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -166,9 +173,18 @@ INSERT INTO circadian_profiles (name, description, curve_points) VALUES
 CREATE TABLE scenes (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    
+
     -- Scope: Does this scene belong to a specific group? (Optional)
-    scope_group_id INT REFERENCES groups(id) ON DELETE CASCADE
+    scope_group_id INT REFERENCES groups(id) ON DELETE CASCADE,
+
+    -- Scene type: 'toggle' or 'idempotent'
+    -- toggle: activating again turns off fixtures if at scene level
+    -- idempotent: always sets fixtures to scene level
+    scene_type VARCHAR(20) NOT NULL DEFAULT 'idempotent'
+        CHECK (scene_type IN ('toggle', 'idempotent')),
+
+    -- Display order for UI sorting (null = sort by name)
+    display_order INT
 );
 
 -- Stores the actual values for lights in a scene [cite: 129-131]
@@ -229,4 +245,10 @@ INSERT INTO system_settings (key, value, description, value_type) VALUES
     '2000',
     'Time in milliseconds for a full 0-100% brightness transition when dimming',
     'int'
+),
+(
+    'street_address',
+    '',
+    'Street address for home location display in header',
+    'str'
 );

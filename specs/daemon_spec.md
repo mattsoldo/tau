@@ -299,16 +299,70 @@ Behavior:
 	•	Update each fixture_state
 	•	Output DMX
 
-10.5 Activate scene
+10.5 Scene recall (with toggle support)
 
-POST /control/scenes/:id/activate
+POST /api/scenes/recall
+Request:
+{
+  "scene_id": 1,
+  "fade_duration": 0.5  // Optional, seconds
+}
+
 Behavior:
-	•	Apply scene_values
-	•	Update fixture_state
+	•	For idempotent scenes: Apply scene_values, update fixture_state
+	•	For toggle scenes: If all fixtures are at scene level (within 5 units tolerance), turn them off instead
 	•	Update group_state.last_active_scene_id (scope group)
 	•	Output DMX
 
-10.6 Circadian pause/resume
+Response:
+{
+  "message": "Scene recalled successfully",
+  "toggled_off": false  // true if toggle scene was turned off
+}
+
+10.5.1 Scene capture
+
+POST /api/scenes/capture
+Request:
+{
+  "name": "My Scene",
+  "scene_type": "toggle",  // or "idempotent"
+  "scope_group_id": 5,     // Optional - scopes to specific group
+  "include_group_ids": [5], // Optional - only capture these groups
+  "exclude_fixture_ids": [], // Optional
+  "exclude_group_ids": []   // Optional
+}
+
+Behavior:
+	•	Creates new scene with current fixture brightness/CCT values
+	•	If include_group_ids specified, only captures fixtures in those groups
+	•	Returns created scene with id
+
+10.5.2 Scene reorder
+
+POST /api/scenes/reorder
+Request:
+{
+  "scene_ids": [3, 1, 2, 5]  // New order of scene IDs
+}
+
+Behavior:
+	•	Sets display_order for each scene based on array position
+	•	Returns updated scenes sorted by new order
+
+10.6 Group reorder
+
+POST /api/groups/reorder
+Request:
+{
+  "group_ids": [3, 1, 2, 5]  // New order of group IDs
+}
+
+Behavior:
+	•	Sets display_order for each group based on array position
+	•	Returns updated groups sorted by new order
+
+10.7 Circadian pause/resume
 
 POST /groups/:id/circadian/pause
 Sets group_state.circadian_suspended=true and timestamp.
@@ -316,7 +370,7 @@ Sets group_state.circadian_suspended=true and timestamp.
 POST /groups/:id/circadian/resume
 Sets group_state.circadian_suspended=false.
 
-10.7 Fixture merge/unmerge
+10.8 Fixture merge/unmerge
 
 POST /fixtures/merge
 Request:
