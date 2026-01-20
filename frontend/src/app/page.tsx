@@ -310,7 +310,7 @@ export default function HomePage() {
     }
   }, []);
 
-  // All On / All Off handlers
+  // All On / All Off handlers - use dedicated endpoints for simultaneous control
   const handleAllOn = useCallback(async () => {
     // Update local state immediately for responsiveness
     setGroupsWithFixtures(prev =>
@@ -323,11 +323,13 @@ export default function HomePage() {
       }))
     );
 
-    // Send commands to all groups
-    for (const group of groupsWithFixtures) {
-      sendGroupControl(group.id, 100);
+    // Single API call to turn on all fixtures simultaneously
+    try {
+      await fetch(`${API_URL}/api/control/all-on`, { method: 'POST' });
+    } catch (error) {
+      console.error('Failed to turn all on:', error);
     }
-  }, [groupsWithFixtures, sendGroupControl]);
+  }, []);
 
   const handleAllOff = useCallback(async () => {
     // Update local state immediately for responsiveness
@@ -341,11 +343,13 @@ export default function HomePage() {
       }))
     );
 
-    // Send commands to all groups
-    for (const group of groupsWithFixtures) {
-      sendGroupControl(group.id, 0);
+    // Single API call to turn off all fixtures simultaneously
+    try {
+      await fetch(`${API_URL}/api/control/all-off`, { method: 'POST' });
+    } catch (error) {
+      console.error('Failed to turn all off:', error);
     }
-  }, [groupsWithFixtures, sendGroupControl]);
+  }, []);
 
   const activateScene = useCallback(async (sceneId: number) => {
     setActiveSceneId(sceneId);

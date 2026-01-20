@@ -269,6 +269,31 @@ async def all_off():
     }
 
 
+@router.post("/all-on")
+async def all_on():
+    """Turn on all fixtures to 100% brightness"""
+    daemon = get_daemon_instance()
+    if not daemon or not daemon.state_manager:
+        raise HTTPException(
+            status_code=503,
+            detail="State manager not available"
+        )
+
+    # Set all fixtures to 100% brightness (instant for responsiveness)
+    count = 0
+    for fixture_id in daemon.state_manager.fixtures.keys():
+        success = daemon.state_manager.set_fixture_brightness(
+            fixture_id, 1.0, transition_duration=0.0
+        )
+        if success:
+            count += 1
+
+    return {
+        "message": f"Turned on {count} fixtures",
+        "count": count
+    }
+
+
 @router.post("/panic")
 async def panic_mode():
     """Emergency full bright mode - turn all fixtures to 100%"""
