@@ -141,7 +141,7 @@ class UpdateService:
                     update_available=commits_behind > 0,
                     current_version=current_version,
                     available_version=latest_version if commits_behind > 0 else None,
-                    last_check_at=datetime.now(timezone.utc),
+                    last_check_at=datetime.utcnow(),
                 )
 
             result = {
