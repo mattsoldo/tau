@@ -326,8 +326,17 @@ class LightingController:
         Uses the Planckian locus color mixing algorithm for tunable white
         fixtures when chromaticity parameters are available. Falls back to
         simple linear mixing otherwise.
+
+        IMPORTANT: All DMX values are batched by universe and sent in a single
+        call per universe to ensure synchronized fixture updates. This prevents
+        visible stagger when multiple fixtures change at once.
         """
-        # For each registered fixture, calculate effective state and output
+        # Batch all DMX updates by universe for synchronized output
+        # Key: universe, Value: dict of channel -> value
+        universe_batches: dict[int, dict[int, int]] = {}
+        now = time.time()
+
+        # For each registered fixture, calculate effective state and accumulate DMX values
         for fixture_id, fixture_state in self.state_manager.fixtures.items():
             # Get effective state (includes group and circadian modifiers)
             effective_state = self.state_manager.get_effective_fixture_state(fixture_id)
@@ -372,6 +381,9 @@ class LightingController:
 
                 if cct is None:
                     cct = fixture_state.cct_max or 4000
+
+            # Calculate DMX channel values
+            channel_values: dict[int, int] = {}
 
             # For tunable white fixtures, calculate warm/cool channel values
             if supports_cct and cct is not None:
@@ -443,28 +455,18 @@ class LightingController:
                         gamma=gamma,
                     )
 
-                if cool_channel == start_channel + 1:
-                    dmx_values = [warm_level, cool_level]
-                    channel_map = None
-                else:
-                    dmx_values = [warm_level, cool_level]
-                    channel_map = {start_channel: warm_level, cool_channel: cool_level}
+                channel_values[start_channel] = warm_level
+                channel_values[cool_channel] = cool_level
             else:
                 # Single channel fixture or no CCT info - just use brightness
                 dmx_brightness = int(effective_state.brightness * 255)
-                dmx_values = [dmx_brightness]
-                channel_map = None
+                channel_values[start_channel] = dmx_brightness
                 if secondary_channel is not None:
-                    dmx_values.append(dmx_brightness)
+                    channel_values[secondary_channel] = dmx_brightness
 
             # Skip redundant DMX writes when dedupe is enabled and within TTL
-            values_tuple = (
-                tuple(sorted(channel_map.items()))
-                if channel_map is not None
-                else tuple(dmx_values)
-            )
-            key = (universe, start_channel, len(values_tuple), channel_map is not None)
-            now = time.time()
+            values_tuple = tuple(sorted(channel_values.items()))
+            key = (universe, start_channel, fixture_id)
             if self.dmx_dedupe_enabled:
                 last_entry = self._last_dmx_output.get(key)
                 if last_entry:
@@ -472,26 +474,28 @@ class LightingController:
                     if values_tuple == last_values and (now - last_time) < self.dmx_dedupe_ttl_seconds:
                         continue
 
-            # Send to hardware
+            # Accumulate into universe batch
+            if universe not in universe_batches:
+                universe_batches[universe] = {}
+            universe_batches[universe].update(channel_values)
+
+            # Update dedupe cache
+            if self.dmx_dedupe_enabled:
+                self._last_dmx_output[key] = (values_tuple, now)
+
+        # Send batched DMX values - one call per universe for synchronized output
+        for universe, channels in universe_batches.items():
             try:
-                if channel_map:
-                    await self.hardware_manager.set_dmx_output(
-                        universe=universe,
-                        channels=channel_map
-                    )
-                else:
-                    await self.hardware_manager.set_fixture_dmx(
-                        universe=universe,
-                        start_channel=start_channel,
-                        values=dmx_values
-                    )
+                await self.hardware_manager.set_dmx_output(
+                    universe=universe,
+                    channels=channels
+                )
                 self.hardware_updates += 1
-                if self.dmx_dedupe_enabled:
-                    self._last_dmx_output[key] = (values_tuple, now)
             except Exception as e:
                 logger.error(
                     "hardware_update_failed",
-                    fixture_id=fixture_id,
+                    universe=universe,
+                    channel_count=len(channels),
                     error=str(e),
                 )
 
