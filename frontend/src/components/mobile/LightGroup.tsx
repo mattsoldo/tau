@@ -148,7 +148,7 @@ export function LightGroup({
   const visualPosition = brightnessToPosition(brightness);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+    <div className="bg-white dark:bg-[#1a1a1f] rounded-xl shadow-sm border border-gray-100 dark:border-[#2a2a2f]">
       <div className="flex">
         {/* Slider area - takes up most of the width */}
         <div
@@ -164,7 +164,7 @@ export function LightGroup({
           {/* Off zone indicator - subtle left border when light is on */}
           {!isExpanded && (
             <div
-              className="absolute left-0 top-0 bottom-0 border-r border-dashed border-gray-200"
+              className="absolute left-0 top-0 bottom-0 border-r border-dashed border-gray-200 dark:border-gray-700"
               style={{ width: `${OFF_ZONE_PERCENT}%` }}
             />
           )}
@@ -186,11 +186,11 @@ export function LightGroup({
 
           <div className="relative flex items-center gap-3">
             <div className="flex-1 min-w-0 text-left">
-              <h3 className="font-semibold text-gray-900 text-sm truncate">{name}</h3>
-              {description && <p className="text-xs text-gray-500">{description}</p>}
+              <h3 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</h3>
+              {description && <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>}
             </div>
             {!isExpanded && (
-              <div className="text-sm font-medium text-gray-900 tabular-nums min-w-[3rem] text-right">
+              <div className="text-sm font-medium text-gray-900 dark:text-white tabular-nums min-w-[3rem] text-right">
                 {isOn ? `${brightness}%` : 'Off'}
               </div>
             )}
@@ -200,12 +200,12 @@ export function LightGroup({
         {/* Expand button area - dedicated touch target */}
         <button
           onClick={() => setIsExpanded(!isExpanded)}
-          className={`flex items-center justify-center w-12 border-l border-gray-100 hover:bg-gray-50 active:bg-gray-100 transition-colors ${
-            isExpanded ? 'bg-gray-50' : ''
+          className={`flex items-center justify-center w-12 border-l border-gray-100 dark:border-[#2a2a2f] hover:bg-gray-50 dark:hover:bg-[#2a2a2f] active:bg-gray-100 dark:active:bg-[#3a3a3f] transition-colors ${
+            isExpanded ? 'bg-gray-50 dark:bg-[#2a2a2f]' : ''
           }`}
         >
           <MoreHorizontal
-            className={`w-5 h-5 text-gray-400 transition-transform ${
+            className={`w-5 h-5 text-gray-400 dark:text-gray-500 transition-transform ${
               isExpanded ? 'rotate-90' : ''
             }`}
           />
@@ -231,7 +231,7 @@ export function LightGroup({
               {onCaptureScene && (
                 <button
                   onClick={onCaptureScene}
-                  className="flex-shrink-0 w-8 h-8 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 flex items-center justify-center hover:border-amber-400 hover:text-amber-500 transition-colors"
+                  className="flex-shrink-0 w-8 h-8 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500 flex items-center justify-center hover:border-amber-400 hover:text-amber-500 transition-colors"
                   title="Capture room scene"
                 >
                   <Plus className="w-4 h-4" />

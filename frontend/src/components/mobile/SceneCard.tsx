@@ -29,15 +29,15 @@ export function SceneCard({ name, icon = "lightbulb", isActive, onActivate }: Sc
       className={`flex flex-col items-center justify-center p-4 rounded-2xl transition-all active:scale-95 ${
         isActive
           ? "bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg"
-          : "bg-white text-gray-700 shadow-sm border border-gray-100 hover:shadow-md"
+          : "bg-white dark:bg-[#1a1a1f] text-gray-700 dark:text-gray-300 shadow-sm border border-gray-100 dark:border-[#2a2a2f] hover:shadow-md"
       }`}
     >
       <div
         className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 ${
-          isActive ? "bg-white/20" : "bg-gray-100"
+          isActive ? "bg-white/20" : "bg-gray-100 dark:bg-[#2a2a2f]"
         }`}
       >
-        <Icon className={`w-6 h-6 ${isActive ? "text-white" : "text-gray-600"}`} />
+        <Icon className={`w-6 h-6 ${isActive ? "text-white" : "text-gray-600 dark:text-gray-400"}`} />
       </div>
       <span className="text-sm font-medium">{name}</span>
     </button>

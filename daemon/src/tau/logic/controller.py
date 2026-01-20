@@ -564,6 +564,17 @@ class LightingController:
         """
         self.switches.set_dim_speed_ms(dim_speed_ms)
 
+    async def reload_switches(self) -> int:
+        """
+        Hot-reload switch configurations from database.
+
+        Call this after switch CRUD operations or switch model changes.
+
+        Returns:
+            Number of switches loaded
+        """
+        return await self.switches.reload_switches()
+
     def get_statistics(self) -> dict:
         """
         Get controller statistics

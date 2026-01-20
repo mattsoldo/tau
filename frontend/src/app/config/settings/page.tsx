@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Sun, Moon, Monitor } from 'lucide-react';
 import { API_URL } from '@/utils/api';
+import { useTheme } from '@/contexts/ThemeContext';
 import SoftwareUpdatePanel from '../../../components/SoftwareUpdatePanel';
 
 interface HardwareAvailability {
@@ -56,6 +58,9 @@ interface DTWCurveInfo {
 }
 
 export default function SettingsPage() {
+  // Theme
+  const { theme, setTheme } = useTheme();
+
   // State
   const [hardware, setHardware] = useState<HardwareAvailability | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -263,6 +268,67 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Appearance Section */}
+          <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#2a2a2f]">
+              <h2 className="text-lg font-semibold">Appearance</h2>
+              <p className="text-sm text-[#636366] mt-1">
+                Choose your preferred color theme
+              </p>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  onClick={() => setTheme('light')}
+                  className={`flex flex-col items-center gap-3 p-4 rounded-lg border-2 transition-all ${
+                    theme === 'light'
+                      ? 'border-amber-500 bg-amber-500/10'
+                      : 'border-[#3a3a3f] hover:border-[#4a4a4f] bg-[#0f0f14]'
+                  }`}
+                >
+                  <div className={`p-3 rounded-full ${theme === 'light' ? 'bg-amber-500/20' : 'bg-[#2a2a2f]'}`}>
+                    <Sun className={`w-6 h-6 ${theme === 'light' ? 'text-amber-400' : 'text-[#8e8e93]'}`} />
+                  </div>
+                  <span className={`text-sm font-medium ${theme === 'light' ? 'text-amber-400' : 'text-[#a1a1a6]'}`}>
+                    Light
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setTheme('dark')}
+                  className={`flex flex-col items-center gap-3 p-4 rounded-lg border-2 transition-all ${
+                    theme === 'dark'
+                      ? 'border-amber-500 bg-amber-500/10'
+                      : 'border-[#3a3a3f] hover:border-[#4a4a4f] bg-[#0f0f14]'
+                  }`}
+                >
+                  <div className={`p-3 rounded-full ${theme === 'dark' ? 'bg-amber-500/20' : 'bg-[#2a2a2f]'}`}>
+                    <Moon className={`w-6 h-6 ${theme === 'dark' ? 'text-amber-400' : 'text-[#8e8e93]'}`} />
+                  </div>
+                  <span className={`text-sm font-medium ${theme === 'dark' ? 'text-amber-400' : 'text-[#a1a1a6]'}`}>
+                    Dark
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setTheme('system')}
+                  className={`flex flex-col items-center gap-3 p-4 rounded-lg border-2 transition-all ${
+                    theme === 'system'
+                      ? 'border-amber-500 bg-amber-500/10'
+                      : 'border-[#3a3a3f] hover:border-[#4a4a4f] bg-[#0f0f14]'
+                  }`}
+                >
+                  <div className={`p-3 rounded-full ${theme === 'system' ? 'bg-amber-500/20' : 'bg-[#2a2a2f]'}`}>
+                    <Monitor className={`w-6 h-6 ${theme === 'system' ? 'text-amber-400' : 'text-[#8e8e93]'}`} />
+                  </div>
+                  <span className={`text-sm font-medium ${theme === 'system' ? 'text-amber-400' : 'text-[#a1a1a6]'}`}>
+                    System
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Software Updates Section */}
           <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] overflow-hidden">
             <div className="px-6 py-4 border-b border-[#2a2a2f]">

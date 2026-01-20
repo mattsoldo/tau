@@ -1,6 +1,5 @@
 "use client";
 
-import { Switch } from "@/components/ui/switch";
 import { useRef } from "react";
 
 interface IndividualLightProps {
@@ -11,18 +10,40 @@ interface IndividualLightProps {
   onBrightnessChange: (value: number) => void;
 }
 
+// The leftmost portion of the slider is reserved for "off" (0% brightness)
+// This makes it easier to turn off lights by tapping the left side
+const OFF_ZONE_PERCENT = 10;
+
 export function IndividualLight({
   name,
   isOn,
   brightness,
-  onToggle,
   onBrightnessChange,
 }: IndividualLightProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const handleSliderInteraction = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isOn) return;
+  // Convert slider position (0-100% of slider width) to brightness (0-100)
+  // The first OFF_ZONE_PERCENT% of the slider maps to 0 brightness
+  // The remaining area maps to 1-100% brightness
+  const positionToBrightness = (positionPercent: number): number => {
+    if (positionPercent <= OFF_ZONE_PERCENT) {
+      return 0;
+    }
+    // Map (OFF_ZONE_PERCENT, 100] to (0, 100]
+    const adjustedPercent = ((positionPercent - OFF_ZONE_PERCENT) / (100 - OFF_ZONE_PERCENT)) * 100;
+    return Math.max(1, Math.min(100, Math.round(adjustedPercent)));
+  };
 
+  // Convert brightness (0-100) to slider position (0-100% of slider width)
+  const brightnessToPosition = (brightnessValue: number): number => {
+    if (brightnessValue === 0) {
+      return 0;
+    }
+    // Map (0, 100] to (OFF_ZONE_PERCENT, 100]
+    return OFF_ZONE_PERCENT + ((brightnessValue / 100) * (100 - OFF_ZONE_PERCENT));
+  };
+
+  const handleSliderInteraction = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     const card = cardRef.current;
     if (!card) return;
@@ -30,25 +51,25 @@ export function IndividualLight({
     const rect = card.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const x = clientX - rect.left;
-    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    const positionPercent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    const newBrightness = positionToBrightness(positionPercent);
 
-    onBrightnessChange(Math.round(percentage));
+    onBrightnessChange(newBrightness);
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    if (!isOn) return;
     const card = cardRef.current;
     if (!card) return;
 
     const rect = card.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    const positionPercent = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    const newBrightness = positionToBrightness(positionPercent);
 
-    onBrightnessChange(Math.round(percentage));
+    onBrightnessChange(newBrightness);
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isOn) return;
     e.preventDefault();
     handleSliderInteraction(e);
 
@@ -62,25 +83,28 @@ export function IndividualLight({
   };
 
   // Calculate gradient colors based on brightness (dim to warm)
-  const getGradientColors = (brightness: number) => {
-    if (brightness < 40) {
+  const getGradientColors = (brightnessVal: number) => {
+    if (brightnessVal < 40) {
       return 'from-amber-200/70 via-amber-100/50';
-    } else if (brightness < 70) {
+    } else if (brightnessVal < 70) {
       return 'from-amber-100/60 via-amber-50/40';
     } else {
       return 'from-sky-50/60 via-slate-50/40';
     }
   };
 
-  const getDividerColor = (brightness: number) => {
-    if (brightness < 40) {
+  const getDividerColor = (brightnessVal: number) => {
+    if (brightnessVal < 40) {
       return 'bg-amber-500/50';
-    } else if (brightness < 70) {
+    } else if (brightnessVal < 70) {
       return 'bg-amber-400/50';
     } else {
       return 'bg-sky-400/50';
     }
   };
+
+  // Calculate the visual position for the brightness indicator
+  const visualPosition = brightnessToPosition(brightness);
 
   return (
     <div
@@ -88,39 +112,36 @@ export function IndividualLight({
       onMouseDown={handleMouseDown}
       onTouchStart={handleSliderInteraction}
       onTouchMove={handleSliderInteraction}
-      className={`relative overflow-hidden bg-gray-50 rounded-lg p-3 transition-all ${
-        isOn ? 'cursor-ew-resize' : 'cursor-default'
-      }`}
-      style={{ touchAction: isOn ? 'none' : 'auto' }}
+      className="relative overflow-hidden bg-gray-50 dark:bg-[#0f0f14] rounded-lg p-3 cursor-ew-resize"
+      style={{ touchAction: 'none' }}
     >
+      {/* Off zone indicator - subtle left border */}
+      <div
+        className="absolute left-0 top-0 bottom-0 border-r border-dashed border-gray-200 dark:border-gray-700"
+        style={{ width: `${OFF_ZONE_PERCENT}%` }}
+      />
+
       {/* Brightness indicator background - no transition for instant response */}
       {isOn && (
         <>
           <div
-            className={`absolute inset-0 bg-gradient-to-r ${getGradientColors(brightness)}`}
-            style={{ width: `${brightness}%` }}
+            className={`absolute inset-0 bg-gradient-to-r ${getGradientColors(brightness)} to-transparent`}
+            style={{ width: `${visualPosition}%` }}
           />
           {/* Slider divider line */}
           <div
             className={`absolute top-0 bottom-0 w-0.5 ${getDividerColor(brightness)}`}
-            style={{ left: `${brightness}%` }}
+            style={{ left: `${visualPosition}%` }}
           />
         </>
       )}
 
       <div className="relative flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 flex-1 pointer-events-none">
-          <div className="flex-1 min-w-0">
-            <h4 className="font-medium text-gray-900 text-xs truncate">{name}</h4>
-          </div>
-          {isOn && (
-            <div className="text-xs font-medium text-gray-700 tabular-nums">
-              {brightness}%
-            </div>
-          )}
+        <div className="flex-1 min-w-0">
+          <h4 className="font-medium text-gray-900 dark:text-white text-xs truncate">{name}</h4>
         </div>
-        <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-          <Switch checked={isOn} onCheckedChange={onToggle} />
+        <div className="text-xs font-medium text-gray-700 dark:text-gray-300 tabular-nums min-w-[3rem] text-right">
+          {isOn ? `${brightness}%` : 'Off'}
         </div>
       </div>
     </div>

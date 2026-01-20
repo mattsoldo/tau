@@ -54,17 +54,17 @@ export function SceneCaptureModal({
       />
 
       {/* Modal */}
-      <div className="relative bg-white rounded-2xl shadow-2xl w-[90%] max-w-sm mx-4 overflow-hidden">
+      <div className="relative bg-white dark:bg-[#1a1a1f] rounded-2xl shadow-2xl w-[90%] max-w-sm mx-4 overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h2 className="text-lg font-semibold text-gray-900">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-[#2a2a2f]">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
             {groupName ? `Capture ${groupName} Scene` : "Capture Scene"}
           </h2>
           <button
             onClick={handleClose}
-            className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+            className="w-8 h-8 rounded-full bg-gray-100 dark:bg-[#2a2a2f] flex items-center justify-center hover:bg-gray-200 dark:hover:bg-[#3a3a3f] transition-colors"
           >
-            <X className="w-4 h-4 text-gray-600" />
+            <X className="w-4 h-4 text-gray-600 dark:text-gray-400" />
           </button>
         </div>
 
@@ -73,7 +73,7 @@ export function SceneCaptureModal({
           <div>
             <label
               htmlFor="scene-name"
-              className="block text-sm font-medium text-gray-700 mb-1.5"
+              className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
             >
               Scene Name
             </label>
@@ -86,7 +86,7 @@ export function SceneCaptureModal({
                 setError(null);
               }}
               placeholder="e.g., Movie Night, Dinner Party"
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-amber-400 focus:ring-2 focus:ring-amber-100 outline-none transition-all text-gray-900 placeholder-gray-400"
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-[#3a3a3f] bg-white dark:bg-[#0f0f14] focus:border-amber-400 focus:ring-2 focus:ring-amber-100 dark:focus:ring-amber-500/20 outline-none transition-all text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
               autoFocus
             />
             {error && <p className="mt-1.5 text-sm text-red-500">{error}</p>}
@@ -98,25 +98,25 @@ export function SceneCaptureModal({
               type="checkbox"
               checked={isToggle}
               onChange={(e) => setIsToggle(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-amber-500 focus:ring-amber-400"
+              className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-amber-500 focus:ring-amber-400 bg-white dark:bg-[#2a2a2f]"
             />
             <label
               htmlFor="toggle-scene"
-              className="text-sm text-gray-700 cursor-pointer"
+              className="text-sm text-gray-700 dark:text-gray-300 cursor-pointer"
             >
               <span className="font-medium">Toggle scene</span>
-              <span className="text-gray-500 ml-1">
+              <span className="text-gray-500 dark:text-gray-400 ml-1">
                 (tap again to turn off)
               </span>
             </label>
           </div>
 
           {groupName ? (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               This scene will only affect lights in {groupName}.
             </p>
           ) : (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               This scene will capture all lights at their current levels.
             </p>
           )}
@@ -126,7 +126,7 @@ export function SceneCaptureModal({
             <button
               type="button"
               onClick={handleClose}
-              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 font-medium hover:bg-gray-50 transition-colors"
+              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-[#3a3a3f] text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-[#2a2a2f] transition-colors"
             >
               Cancel
             </button>

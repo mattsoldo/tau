@@ -31,11 +31,14 @@ async def list_scenes(
     scope_group_id: int = None,
     session: AsyncSession = Depends(get_session)
 ):
-    """List all scenes, optionally filtered by scope"""
+    """List all scenes, optionally filtered by scope, sorted by display_order"""
     query = select(Scene).options(selectinload(Scene.values))
 
     if scope_group_id is not None:
         query = query.where(Scene.scope_group_id == scope_group_id)
+
+    # Sort by display_order (nulls last), then by name
+    query = query.order_by(Scene.display_order.asc().nullslast(), Scene.name)
 
     result = await session.execute(query)
     scenes = result.scalars().all()

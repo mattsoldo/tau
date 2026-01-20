@@ -49,6 +49,11 @@ export default function Header() {
 
   const isHealthy = status?.hardware?.overall_healthy && status?.event_loop?.running;
 
+  // Hide header on home page (mobile UI has its own header)
+  if (pathname === '/') {
+    return null;
+  }
+
   const tabs = [
     {
       name: 'Dashboard',

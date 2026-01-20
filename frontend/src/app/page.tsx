@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { Menu, X, Sun, LayoutDashboard, Sliders, Settings, Cpu, Radio, Plus, GripVertical, Pencil, Check } from 'lucide-react';
+import { Menu, X, Sun, LayoutDashboard, Sliders, Settings, Cpu, Radio, Plus, GripVertical, Pencil, Check, Power, PowerOff } from 'lucide-react';
 import { LightGroup } from '@/components/mobile/LightGroup';
 import { SceneCard } from '@/components/mobile/SceneCard';
 import { SceneCaptureModal } from '@/components/mobile/SceneCaptureModal';
@@ -310,6 +310,43 @@ export default function HomePage() {
     }
   }, []);
 
+  // All On / All Off handlers
+  const handleAllOn = useCallback(async () => {
+    // Update local state immediately for responsiveness
+    setGroupsWithFixtures(prev =>
+      prev.map(g => ({
+        ...g,
+        fixtures: g.fixtures.map(f => ({
+          ...f,
+          state: f.state ? { ...f.state, is_on: true, goal_brightness: 1000 } : f.state,
+        })),
+      }))
+    );
+
+    // Send commands to all groups
+    for (const group of groupsWithFixtures) {
+      sendGroupControl(group.id, 100);
+    }
+  }, [groupsWithFixtures, sendGroupControl]);
+
+  const handleAllOff = useCallback(async () => {
+    // Update local state immediately for responsiveness
+    setGroupsWithFixtures(prev =>
+      prev.map(g => ({
+        ...g,
+        fixtures: g.fixtures.map(f => ({
+          ...f,
+          state: f.state ? { ...f.state, is_on: false, goal_brightness: 0 } : f.state,
+        })),
+      }))
+    );
+
+    // Send commands to all groups
+    for (const group of groupsWithFixtures) {
+      sendGroupControl(group.id, 0);
+    }
+  }, [groupsWithFixtures, sendGroupControl]);
+
   const activateScene = useCallback(async (sceneId: number) => {
     setActiveSceneId(sceneId);
     try {
@@ -589,15 +626,15 @@ export default function HomePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex items-center justify-center">
-        <div className="text-gray-500">Loading...</div>
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-[#0a0a0b] dark:to-[#0f0f14] flex items-center justify-center">
+        <div className="text-gray-500 dark:text-gray-400">Loading...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-[#0a0a0b] dark:to-[#0f0f14] flex items-center justify-center">
         <div className="text-red-500">{error}</div>
       </div>
     );
@@ -614,7 +651,7 @@ export default function HomePage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 dark:from-[#0a0a0b] dark:to-[#0f0f14]">
       {/* Mobile: Slide-out menu overlay */}
       {menuOpen && (
         <div
@@ -625,18 +662,18 @@ export default function HomePage() {
 
       {/* Mobile: Slide-out menu */}
       <div
-        className={`fixed top-0 right-0 h-full w-72 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out lg:hidden ${
+        className={`fixed top-0 right-0 h-full w-72 bg-white dark:bg-[#1a1a1f] shadow-2xl z-50 transform transition-transform duration-300 ease-in-out lg:hidden ${
           menuOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
         <div className="p-5">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-900">Menu</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Menu</h2>
             <button
               onClick={() => setMenuOpen(false)}
-              className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              className="w-10 h-10 rounded-full bg-gray-100 dark:bg-[#2a2a2f] flex items-center justify-center hover:bg-gray-200 dark:hover:bg-[#3a3a3f] transition-colors"
             >
-              <X className="w-5 h-5 text-gray-600" />
+              <X className="w-5 h-5 text-gray-600 dark:text-gray-400" />
             </button>
           </div>
           <nav className="space-y-2">
@@ -645,21 +682,21 @@ export default function HomePage() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
+                className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#2a2a2f] transition-colors"
               >
-                <item.icon className="w-5 h-5 text-gray-500" />
+                <item.icon className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                 <span className="font-medium">{item.label}</span>
               </Link>
             ))}
           </nav>
-          <div className="mt-6 pt-6 border-t border-gray-100">
+          <div className="mt-6 pt-6 border-t border-gray-100 dark:border-[#2a2a2f]">
             <a
               href="/ola/"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
+              className="flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#2a2a2f] transition-colors"
             >
-              <Radio className="w-5 h-5 text-gray-500" />
+              <Radio className="w-5 h-5 text-gray-500 dark:text-gray-400" />
               <span className="font-medium">OLA Dashboard</span>
               <svg className="w-4 h-4 text-gray-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -670,7 +707,7 @@ export default function HomePage() {
       </div>
 
       {/* Container - mobile: centered card, desktop: full width */}
-      <div className="max-w-md mx-auto bg-white min-h-screen shadow-xl lg:max-w-none lg:shadow-none">
+      <div className="max-w-md mx-auto bg-white dark:bg-[#0f0f14] min-h-screen shadow-xl lg:max-w-none lg:shadow-none">
         {/* Header */}
         <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-5 lg:px-8">
           <div className="flex items-center justify-between lg:max-w-7xl lg:mx-auto">
@@ -714,6 +751,26 @@ export default function HomePage() {
           </div>
         </div>
 
+        {/* Quick Actions Bar */}
+        <div className="bg-white dark:bg-[#1a1a1f] border-b border-gray-100 dark:border-[#2a2a2f] px-5 py-3 lg:px-8">
+          <div className="lg:max-w-7xl lg:mx-auto flex items-center gap-3">
+            <button
+              onClick={handleAllOn}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors text-sm font-medium"
+            >
+              <Power className="w-4 h-4" />
+              All On
+            </button>
+            <button
+              onClick={handleAllOff}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-100 dark:bg-[#2a2a2f] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a3a3f] transition-colors text-sm font-medium"
+            >
+              <PowerOff className="w-4 h-4" />
+              All Off
+            </button>
+          </div>
+        </div>
+
         {/* Content - mobile: stacked, desktop: two columns */}
         <div className="p-5 lg:px-8 lg:py-8">
           <div className="lg:max-w-7xl lg:mx-auto lg:flex lg:gap-8">
@@ -723,10 +780,10 @@ export default function HomePage() {
               {/* Mobile only: Scenes at top */}
               <section className="mb-6 lg:hidden">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold text-gray-900">Scenes</h2>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Scenes</h2>
                   <button
                     onClick={openGlobalCapture}
-                    className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center hover:bg-amber-200 transition-colors"
+                    className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center hover:bg-amber-200 dark:hover:bg-amber-500/20 transition-colors"
                     title="Capture scene"
                   >
                     <Plus className="w-4 h-4" />
@@ -755,7 +812,7 @@ export default function HomePage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-sm text-gray-500 italic">
+                  <div className="text-sm text-gray-500 dark:text-gray-400 italic">
                     No scenes yet. Tap + to capture the current lighting.
                   </div>
                 )}
@@ -763,7 +820,7 @@ export default function HomePage() {
 
               {/* Light Groups */}
               <section>
-                <h2 className="text-lg font-semibold text-gray-900 mb-3 lg:text-xl">Rooms</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3 lg:text-xl">Rooms</h2>
                 <div className="space-y-3 lg:space-y-4">
                   {groupsWithFixtures.map((group) => {
                     const groupScenes = getScenesForGroup(group.id).map(s => ({
@@ -786,12 +843,12 @@ export default function HomePage() {
                           }`}
                         >
                           <div className="flex-shrink-0 cursor-grab active:cursor-grabbing touch-none">
-                            <GripVertical className="w-5 h-5 text-gray-400" />
+                            <GripVertical className="w-5 h-5 text-gray-400 dark:text-gray-500" />
                           </div>
-                          <div className="flex-1 min-w-0 bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                            <h3 className="font-semibold text-gray-900 text-sm">{group.name}</h3>
+                          <div className="flex-1 min-w-0 bg-white dark:bg-[#1a1a1f] rounded-xl shadow-sm border border-gray-100 dark:border-[#2a2a2f] p-4">
+                            <h3 className="font-semibold text-gray-900 dark:text-white text-sm">{group.name}</h3>
                             {group.description && (
-                              <p className="text-xs text-gray-500">{group.description}</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400">{group.description}</p>
                             )}
                           </div>
                         </div>
@@ -833,7 +890,7 @@ export default function HomePage() {
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                       isEditMode
                         ? 'bg-amber-500 text-white hover:bg-amber-600'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        : 'bg-gray-100 dark:bg-[#2a2a2f] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#3a3a3f]'
                     }`}
                   >
                     {isEditMode ? (
@@ -856,16 +913,16 @@ export default function HomePage() {
             <aside className="hidden lg:block lg:w-80 lg:flex-shrink-0">
               <div className="sticky top-8">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-gray-900">Scenes</h2>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Scenes</h2>
                   <button
                     onClick={openGlobalCapture}
-                    className="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center hover:bg-amber-200 transition-colors"
+                    className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center hover:bg-amber-200 dark:hover:bg-amber-500/20 transition-colors"
                     title="Capture scene"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                <div className="bg-white dark:bg-[#1a1a1f] rounded-xl shadow-sm border border-gray-100 dark:border-[#2a2a2f] p-4">
                   {globalScenes.length > 0 ? (
                     <div className="grid grid-cols-2 gap-3">
                       {globalScenes.map((scene) => (
@@ -889,7 +946,7 @@ export default function HomePage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="text-sm text-gray-500 italic text-center py-4">
+                    <div className="text-sm text-gray-500 dark:text-gray-400 italic text-center py-4">
                       No scenes yet. Click + to capture.
                     </div>
                   )}

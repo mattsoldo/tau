@@ -5,6 +5,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+import structlog
 
 from tau.database import get_session
 from tau.models.switches import Switch, SwitchModel
@@ -19,8 +20,26 @@ from tau.api.schemas import (
     SwitchUpdate,
     SwitchResponse,
 )
+from tau.api import get_daemon_instance
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
+
+
+async def _reload_switches() -> int:
+    """
+    Hot-reload switches in the lighting controller.
+
+    Returns:
+        Number of switches loaded, or -1 if controller unavailable
+    """
+    daemon = get_daemon_instance()
+    if not daemon or not daemon.lighting_controller:
+        logger.warning("switch_reload_skipped", reason="controller_unavailable")
+        return -1
+
+    count = await daemon.lighting_controller.reload_switches()
+    return count
 
 
 # ============================================================================
@@ -113,6 +132,10 @@ async def update_switch_model(
 
     await session.commit()
     await session.refresh(model)
+
+    # Hot-reload switches since model changes affect switch behavior
+    await _reload_switches()
+
     return model
 
 
@@ -231,6 +254,10 @@ async def create_switch(
     session.add(switch)
     await session.commit()
     await session.refresh(switch)
+
+    # Hot-reload switches in the lighting controller
+    await _reload_switches()
+
     return switch
 
 
@@ -351,6 +378,10 @@ async def update_switch(
 
     await session.commit()
     await session.refresh(switch)
+
+    # Hot-reload switches in the lighting controller
+    await _reload_switches()
+
     return switch
 
 
@@ -366,6 +397,9 @@ async def delete_switch(
 
     await session.delete(switch)
     await session.commit()
+
+    # Hot-reload switches in the lighting controller
+    await _reload_switches()
 
     return {"status": "deleted"}
 

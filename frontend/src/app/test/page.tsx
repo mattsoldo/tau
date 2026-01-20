@@ -404,8 +404,7 @@ export default function LightTestPage() {
       groupsWithFixtures.forEach(group => {
         group.fixtures.forEach(fixture => {
           if (!next.has(fixture.id)) {
-            const defaultMode: CctMode = fixture.model?.type === 'dim_to_warm' ? 'dim_to_warm' : 'manual';
-            next.set(fixture.id, defaultMode);
+            next.set(fixture.id, 'dim_to_warm');
           }
         });
       });
@@ -418,7 +417,7 @@ export default function LightTestPage() {
       const next = new Map(prev);
       groupsWithFixtures.forEach(group => {
         if (!next.has(group.id)) {
-          next.set(group.id, 'manual');
+          next.set(group.id, 'dim_to_warm');
         }
       });
       return next;

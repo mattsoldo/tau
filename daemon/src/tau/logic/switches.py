@@ -174,6 +174,38 @@ class SwitchHandler:
             )
             return 0
 
+    async def reload_switches(self) -> int:
+        """
+        Hot-reload all switch configurations from database.
+
+        Clears existing switch state and reloads everything fresh.
+        Call this after switch CRUD operations or switch model changes.
+
+        Returns:
+            Number of switches loaded
+        """
+        old_count = len(self.switches)
+
+        # Clear existing state
+        self.switches.clear()
+        self.switch_states.clear()
+        self.group_defaults_cache.clear()
+
+        # Reload from database
+        new_count = await self.load_switches()
+
+        # Also reload LabJack switch config (for inversion settings)
+        if hasattr(self.hardware_manager.labjack, 'load_switch_config'):
+            await self.hardware_manager.labjack.load_switch_config()
+
+        logger.info(
+            "switches_reloaded",
+            old_count=old_count,
+            new_count=new_count
+        )
+
+        return new_count
+
     async def _configure_hardware_channels(self) -> None:
         """
         Configure LabJack channels based on switch requirements
