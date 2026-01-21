@@ -1171,6 +1171,108 @@ sudo systemctl reload nginx
 
 ---
 
+## Raspberry Pi File Structure & Permissions
+
+### Directory Structure
+
+The production system on the Raspberry Pi has two key locations:
+
+```
+/opt/tau-daemon/              # Production installation (owned by tau:tau)
+├── daemon/
+│   ├── .venv/                # Python virtual environment
+│   ├── src/tau/              # Python source code
+│   ├── alembic/              # Database migrations
+│   └── ...
+├── frontend/
+│   ├── .next/                # Next.js build output (CRITICAL - see permissions below)
+│   ├── node_modules/
+│   ├── src/
+│   ├── out/                  # Static export
+│   └── ...
+├── specs/
+└── ...
+
+/opt/tau-backups/             # Update system backups (owned by tau:tau)
+├── 1.4.1_20260120T170321Z/   # Backup before each update
+└── ...
+
+~/code/tau/                   # Development checkout (owned by soldo:soldo)
+└── ...                       # Mirror of repository structure
+```
+
+### User Accounts & Ownership
+
+| User | Purpose | Owns |
+|------|---------|------|
+| `tau` | Service account for production | `/opt/tau-daemon/`, `/opt/tau-backups/` |
+| `soldo` | Human user for SSH access | `~/code/tau/` |
+
+**CRITICAL**: The `tau` user runs the systemd service and the auto-update process. All files in `/opt/tau-daemon/` must be owned by `tau:tau`.
+
+### Common Permission Issues
+
+#### Issue: Frontend build fails with EACCES during auto-update
+
+**Symptom**:
+```
+Error: EACCES: permission denied, unlink '/opt/tau-daemon/frontend/.next/server/app-paths-manifest.json'
+```
+
+**Cause**: The `.next` directory was created or modified by a different user (e.g., `soldo` during manual deployment) and the `tau` user running the update cannot delete/modify files.
+
+**Fix**:
+```bash
+ssh soldo@tau
+sudo chown -R tau:tau /opt/tau-daemon/frontend/.next
+sudo chmod -R 755 /opt/tau-daemon/frontend/.next
+```
+
+#### Issue: Daemon fails to start after manual file copy
+
+**Cause**: Files copied via `scp` from the `soldo` user may have wrong ownership.
+
+**Fix**:
+```bash
+ssh soldo@tau
+sudo chown -R tau:tau /opt/tau-daemon/
+```
+
+### Best Practices for Deployment
+
+1. **Prefer auto-update**: Use the built-in software update feature instead of manual `scp` deployments. It handles permissions correctly.
+
+2. **If manual deployment is necessary**:
+   ```bash
+   # After copying files, fix ownership
+   ssh soldo@tau "sudo chown -R tau:tau /opt/tau-daemon/"
+   ```
+
+3. **Never run npm/pip as root in /opt/tau-daemon**: This creates root-owned files that break the update process.
+
+4. **Check permissions after troubleshooting**:
+   ```bash
+   ssh soldo@tau "ls -la /opt/tau-daemon/frontend/.next/"
+   # Should show tau:tau ownership
+   ```
+
+### Verifying Correct Permissions
+
+```bash
+# Check production directory ownership
+ssh soldo@tau "ls -la /opt/tau-daemon/"
+# All entries should show: tau tau
+
+# Check .next build directory specifically
+ssh soldo@tau "ls -la /opt/tau-daemon/frontend/.next/"
+# All entries should show: tau tau
+
+# Fix if needed
+ssh soldo@tau "sudo chown -R tau:tau /opt/tau-daemon/"
+```
+
+---
+
 ## Summary
 
 This codebase follows modern best practices for a professional lighting control system:
