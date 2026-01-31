@@ -209,12 +209,12 @@ export default function GPIOPinDiagram({
   const handlePinClick = (pin: HeaderPin) => {
     if (pin.type !== 'gpio') return;
     if (pin.in_use) return;
-    if (pin.bcm === undefined) return;
+    if (pin.bcm == null) return;  // Check for both null and undefined
     onPinSelect(pin.bcm, pin.physical);
   };
 
   const getShortLabel = (pin: HeaderPin): string => {
-    if (pin.bcm !== undefined) {
+    if (pin.bcm != null) {  // Check for both null and undefined
       return pin.bcm.toString();
     }
     if (pin.type === 'ground') return 'GND';
@@ -305,7 +305,7 @@ export default function GPIOPinDiagram({
             fontWeight: isSelected || isSuggestedGround ? 600 : 400,
           }}
         >
-          {pin.bcm !== undefined ? `GPIO${pin.bcm}` : pin.label.replace('GPIO', '').replace(/\(.*\)/, '').trim()}
+          {pin.bcm != null ? `GPIO${pin.bcm}` : pin.label.replace('GPIO', '').replace(/\(.*\)/, '').trim()}
           {isSuggestedGround && ' (use this)'}
         </span>
       </div>
