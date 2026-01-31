@@ -96,6 +96,13 @@ export default function SoftwareUpdatePanel() {
 
   const [reconnectCountdown, setReconnectCountdown] = useState(0);
   const reconnectPollingActive = useRef(false);
+  const healthSawFailure = useRef(false);
+  const fetchStatusRef = useRef<null | (() => Promise<void>)>(null);
+
+  const clearUpdateFlags = useCallback(() => {
+    localStorage.removeItem('tau_update_in_progress');
+    localStorage.removeItem('tau_update_target_version');
+  }, []);
 
   // Fetch initial data and check for updates on mount
   useEffect(() => {
@@ -122,15 +129,33 @@ export default function SoftwareUpdatePanel() {
 
       if (data.state === 'failed') {
         setError((data.progress as any)?.message || 'Update failed');
-        localStorage.removeItem('tau_update_in_progress');
+        clearUpdateFlags();
+        return;
       }
+
+      const targetVersion = localStorage.getItem('tau_update_target_version');
+      if (
+        targetVersion &&
+        (data.state === 'complete' || data.state === 'idle') &&
+        data.current_version === targetVersion
+      ) {
+        clearUpdateFlags();
+        setSuccessMessage(`Updated to v${data.current_version}`);
+        setTimeout(() => setSuccessMessage(null), 4000);
+      }
+
+      setError(null);
     } catch (err: any) {
       console.error('Failed to fetch status:', err);
       if (localStorage.getItem('tau_update_in_progress') === 'true') {
         startReconnectPolling();
       }
     }
-  }, []);
+  }, [clearUpdateFlags, startReconnectPolling]);
+
+  useEffect(() => {
+    fetchStatusRef.current = fetchStatus;
+  }, [fetchStatus]);
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -160,6 +185,9 @@ export default function SoftwareUpdatePanel() {
   }, []);
 
   const checkForUpdates = useCallback(async () => {
+    if (localStorage.getItem('tau_update_in_progress') === 'true') {
+      return;
+    }
     setIsChecking(true);
     setError(null);
     setUpdateCheckResult(null);
@@ -174,7 +202,13 @@ export default function SoftwareUpdatePanel() {
         setTimeout(() => setSuccessMessage(null), 3000);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to check for updates');
+      const status = (err as any)?.status;
+      const updateInProgress = localStorage.getItem('tau_update_in_progress') === 'true';
+      if (updateInProgress && (status === 502 || status === 503 || status === 504)) {
+        setError(null);
+      } else {
+        setError(err.message || 'Failed to check for updates');
+      }
     } finally {
       setIsChecking(false);
     }
@@ -190,6 +224,7 @@ export default function SoftwareUpdatePanel() {
 
     // Mark update as in progress for other components
     localStorage.setItem('tau_update_in_progress', 'true');
+    localStorage.setItem('tau_update_target_version', version);
 
     try {
       await api.softwareUpdate.apply(version);
@@ -199,9 +234,9 @@ export default function SoftwareUpdatePanel() {
       setError(err.message || 'Failed to apply update');
       setIsUpdating(false);
       // Clear flag on error
-      localStorage.removeItem('tau_update_in_progress');
+      clearUpdateFlags();
     }
-  }, [fetchStatus]);
+  }, [clearUpdateFlags]);
 
   const rollback = useCallback(async (version?: string) => {
     const msg = version
@@ -241,19 +276,27 @@ export default function SoftwareUpdatePanel() {
   const startReconnectPolling = useCallback(() => {
     if (reconnectPollingActive.current) return;
     reconnectPollingActive.current = true;
+    healthSawFailure.current = false;
     setReconnectCountdown(60);
 
     const interval = setInterval(async () => {
       try {
         const response = await fetch(`${API_URL}/health`);
-        if (response.ok) {
+        if (!response.ok) {
+          healthSawFailure.current = true;
+          return;
+        }
+        if (healthSawFailure.current) {
           clearInterval(interval);
-          // Clear update flag before reloading
-          localStorage.removeItem('tau_update_in_progress');
+          clearUpdateFlags();
           window.location.reload();
+          return;
+        }
+        if (fetchStatusRef.current) {
+          await fetchStatusRef.current();
         }
       } catch {
-        // Still down, keep polling
+        healthSawFailure.current = true;
       }
     }, 2000);
 
@@ -272,7 +315,7 @@ export default function SoftwareUpdatePanel() {
       clearInterval(countdownInterval);
       reconnectPollingActive.current = false;
     };
-  }, []);
+  }, [clearUpdateFlags, fetchStatus]);
 
   useEffect(() => {
     if (!isUpdating) return;
