@@ -70,7 +70,7 @@ class TestBackupManagerInit:
     def test_init_with_defaults(self):
         """BackupManager initializes with default values."""
         manager = BackupManager()
-        assert manager.backup_location == Path("/var/lib/tau-lighting/backup")
+        assert manager.backup_location == Path("/opt/tau-backups")
         assert manager.app_root == Path("/opt/tau-daemon")
         assert manager.max_backups == 3
         assert manager.min_free_space_mb == 500

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   api,
   API_URL,
@@ -95,6 +95,7 @@ export default function SoftwareUpdatePanel() {
   const [updateCheckResult, setUpdateCheckResult] = useState<SoftwareUpdateCheckResponse | null>(null);
 
   const [reconnectCountdown, setReconnectCountdown] = useState(0);
+  const reconnectPollingActive = useRef(false);
 
   // Fetch initial data and check for updates on mount
   useEffect(() => {
@@ -116,13 +117,18 @@ export default function SoftwareUpdatePanel() {
       const data = await api.softwareUpdate.getStatus();
       setStatus(data);
 
-      if (data.state === 'downloading' || data.state === 'installing' || data.state === 'rolling_back') {
-        setIsUpdating(true);
-      } else {
-        setIsUpdating(false);
+      const inactiveStates = ['idle', 'complete', 'failed'];
+      setIsUpdating(!inactiveStates.includes(data.state));
+
+      if (data.state === 'failed') {
+        setError((data.progress as any)?.message || 'Update failed');
+        localStorage.removeItem('tau_update_in_progress');
       }
     } catch (err: any) {
       console.error('Failed to fetch status:', err);
+      if (localStorage.getItem('tau_update_in_progress') === 'true') {
+        startReconnectPolling();
+      }
     }
   }, []);
 
@@ -187,15 +193,15 @@ export default function SoftwareUpdatePanel() {
 
     try {
       await api.softwareUpdate.apply(version);
-      // System will restart, start polling for reconnection
-      startReconnectPolling();
+      // Start status polling to show progress until restart
+      await fetchStatus();
     } catch (err: any) {
       setError(err.message || 'Failed to apply update');
       setIsUpdating(false);
       // Clear flag on error
       localStorage.removeItem('tau_update_in_progress');
     }
-  }, []);
+  }, [fetchStatus]);
 
   const rollback = useCallback(async (version?: string) => {
     const msg = version
@@ -233,6 +239,8 @@ export default function SoftwareUpdatePanel() {
   }, []);
 
   const startReconnectPolling = useCallback(() => {
+    if (reconnectPollingActive.current) return;
+    reconnectPollingActive.current = true;
     setReconnectCountdown(60);
 
     const interval = setInterval(async () => {
@@ -262,8 +270,24 @@ export default function SoftwareUpdatePanel() {
     return () => {
       clearInterval(interval);
       clearInterval(countdownInterval);
+      reconnectPollingActive.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isUpdating) return;
+    const interval = setInterval(() => {
+      fetchStatus();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [fetchStatus, isUpdating]);
+
+  useEffect(() => {
+    if (!status) return;
+    if (status.state === 'starting_services' || status.state === 'complete') {
+      startReconnectPolling();
+    }
+  }, [startReconnectPolling, status]);
 
   // Render update available banner
   const renderUpdateBanner = () => {

@@ -21,6 +21,7 @@ from tau.models.software_update import (
     AvailableRelease,
     UpdateCheck,
     UpdateConfig,
+    SoftwareUpdateJob,
     DEFAULT_UPDATE_CONFIG,
 )
 from tau.models.override import Override, TargetType, OverrideType, OverrideSource
@@ -47,6 +48,7 @@ __all__ = [
     "AvailableRelease",
     "UpdateCheck",
     "UpdateConfig",
+    "SoftwareUpdateJob",
     "DEFAULT_UPDATE_CONFIG",
     "Override",
     "TargetType",

@@ -233,6 +233,51 @@ class UpdateConfig(Base):
         return f"<UpdateConfig(key={self.key}, value={self.value})>"
 
 
+class SoftwareUpdateJob(Base):
+    """
+    Software Update Job - Persisted update execution state
+
+    Tracks the current state and progress of OTA updates so status
+    survives process restarts and long-running operations.
+    """
+
+    __tablename__ = "software_update_jobs"
+
+    # Primary Key
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    # Operation details
+    operation: Mapped[str] = mapped_column(String(20), nullable=False)  # apply/rollback/downgrade
+    target_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    from_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    to_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    # Progress tracking
+    state: Mapped[str] = mapped_column(String(50), nullable=False)
+    stage: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    progress_percent: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_software_update_jobs_created_at", "created_at"),
+        Index("idx_software_update_jobs_state", "state"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SoftwareUpdateJob(id={self.id}, operation={self.operation}, state={self.state})>"
+
+
 # Default configuration values
 DEFAULT_UPDATE_CONFIG = {
     "auto_check_enabled": ("true", "Enable automatic update checks"),
@@ -241,7 +286,7 @@ DEFAULT_UPDATE_CONFIG = {
     "max_backups": ("3", "Maximum number of version backups to retain"),
     "github_repo": ("", "GitHub repository in owner/repo format"),
     "github_token": ("", "GitHub API token for private repos or higher rate limits"),
-    "backup_location": ("/var/lib/tau-lighting/backup", "Directory for version backups"),
+    "backup_location": ("/opt/tau-backups", "Directory for version backups"),
     "min_free_space_mb": ("500", "Minimum free disk space required for updates (MB)"),
     "download_timeout_seconds": ("300", "Timeout for downloading update assets"),
     "verify_after_install": ("true", "Verify installation after applying updates"),

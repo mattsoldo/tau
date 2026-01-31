@@ -39,6 +39,7 @@ def _import_models():
             AvailableRelease,
             UpdateCheck,
             UpdateConfig,
+            SoftwareUpdateJob,
             Override,
             TargetType,
             OverrideType,

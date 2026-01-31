@@ -108,6 +108,8 @@ echo ""
 echo "6. Setting up installation directory..."
 sudo mkdir -p /opt/tau-daemon
 sudo chown tau:tau /opt/tau-daemon
+sudo mkdir -p /opt/tau-backups
+sudo chown tau:tau /opt/tau-backups
 
 # Clone or update repository
 cd /opt/tau-daemon

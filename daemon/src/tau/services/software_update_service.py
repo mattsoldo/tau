@@ -28,14 +28,13 @@ from tau.models.software_update import (
     AvailableRelease,
     UpdateCheck,
     UpdateConfig,
+    SoftwareUpdateJob,
     DEFAULT_UPDATE_CONFIG,
 )
 from tau.services.github_client import GitHubClient, GitHubRelease, GitHubAPIError, RateLimitError
 from tau.services.backup_manager import (
     BackupManager,
     BackupInfo,
-    BackupError,
-    InsufficientSpaceError,
 )
 
 logger = structlog.get_logger(__name__)
@@ -57,6 +56,10 @@ UPDATE_STATES = [
     "rolling_back",
 ]
 
+# Persisted job states
+UPDATE_JOB_ACTIVE_STATES = {"queued", "running", "rolling_back"}
+UPDATE_JOB_TERMINAL_STATES = {"complete", "failed"}
+
 # Services to manage during updates
 # Note: Only tau-daemon needs to be restarted - frontend is served via nginx/static build
 SERVICES = ["tau-daemon"]
@@ -65,6 +68,7 @@ SERVICES = ["tau-daemon"]
 SERVICE_STOP_TIMEOUT = 30.0
 SERVICE_START_TIMEOUT = 30.0
 PACKAGE_INSTALL_TIMEOUT = 120.0
+DEPENDENCY_UPDATE_TIMEOUT = 300.0
 MIGRATION_TIMEOUT = 60.0
 SERVICE_HEALTH_CHECK_TIMEOUT = 10.0
 FRONTEND_BUILD_TIMEOUT = 600.0
@@ -120,6 +124,118 @@ class SoftwareUpdateService:
         self._backup_manager: Optional[BackupManager] = None
         self._current_state = "idle"
         self._update_progress: Dict[str, Any] = {}
+
+    async def _get_latest_job(self) -> Optional[SoftwareUpdateJob]:
+        """Get the most recent software update job."""
+        result = await self.db_session.execute(
+            select(SoftwareUpdateJob).order_by(SoftwareUpdateJob.created_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_active_job(self) -> Optional[SoftwareUpdateJob]:
+        """Get the most recent active update job, if any."""
+        result = await self.db_session.execute(
+            select(SoftwareUpdateJob)
+            .where(SoftwareUpdateJob.state.in_(UPDATE_JOB_ACTIVE_STATES))
+            .order_by(SoftwareUpdateJob.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def has_active_job(self) -> bool:
+        """Return True if an update job is currently active."""
+        return await self._get_active_job() is not None
+
+    async def start_update_job(self, operation: str, target_version: Optional[str]) -> SoftwareUpdateJob:
+        """Create a new update job if none are active."""
+        if await self.has_active_job():
+            raise UpdateError("Another update is already in progress.")
+        return await self._create_update_job(operation, target_version)
+
+    async def _create_update_job(self, operation: str, target_version: Optional[str]) -> SoftwareUpdateJob:
+        """Create a persisted update job record."""
+        from_version = await self.get_current_version()
+        job = SoftwareUpdateJob(
+            operation=operation,
+            target_version=target_version,
+            from_version=from_version,
+            state="queued",
+            stage="queued",
+            progress_percent=0,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        self.db_session.add(job)
+        await self.db_session.commit()
+        return job
+
+    async def _update_job(
+        self,
+        job_id: int,
+        *,
+        state: Optional[str] = None,
+        stage: Optional[str] = None,
+        progress_percent: Optional[int] = None,
+        message: Optional[str] = None,
+        error_message: Optional[str] = None,
+        to_version: Optional[str] = None,
+        completed: bool = False,
+    ) -> None:
+        """Persist update job progress."""
+        values: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
+        if state is not None:
+            values["state"] = state
+        if stage is not None:
+            values["stage"] = stage
+        if progress_percent is not None:
+            values["progress_percent"] = progress_percent
+        if message is not None:
+            values["message"] = message
+        if error_message is not None:
+            values["error_message"] = error_message
+        if to_version is not None:
+            values["to_version"] = to_version
+        if completed:
+            values["completed_at"] = datetime.now(timezone.utc)
+
+        await self.db_session.execute(
+            sql_update(SoftwareUpdateJob).where(SoftwareUpdateJob.id == job_id).values(**values)
+        )
+        await self.db_session.commit()
+
+    async def _set_state(
+        self,
+        state: str,
+        *,
+        stage: Optional[str] = None,
+        percent: Optional[int] = None,
+        message: Optional[str] = None,
+        error_message: Optional[str] = None,
+        job_id: Optional[int] = None,
+    ) -> None:
+        """Update in-memory and persisted state."""
+        self._current_state = state
+        progress: Dict[str, Any] = {"stage": stage or state}
+        if percent is not None:
+            progress["percent"] = percent
+        if message is not None:
+            progress["message"] = message
+        self._update_progress = progress
+
+        if job_id is not None:
+            if state in UPDATE_JOB_ACTIVE_STATES or state in UPDATE_JOB_TERMINAL_STATES:
+                job_state = state
+            else:
+                job_state = "running"
+            await self._update_job(
+                job_id,
+                state=job_state,
+                stage=stage or state,
+                progress_percent=percent,
+                message=message,
+                error_message=error_message,
+                completed=job_state in UPDATE_JOB_TERMINAL_STATES,
+            )
 
     async def _get_config(self, key: str) -> str:
         """Get a configuration value from the database"""
@@ -190,6 +306,31 @@ class SoftwareUpdateService:
                 min_free_space_mb=min_free_space,
             )
         return self._backup_manager
+
+    async def _preflight_check(self) -> None:
+        """Run preflight checks before starting an update."""
+        backup_location = Path(await self._get_config("backup_location"))
+
+        try:
+            if not backup_location.exists():
+                backup_location.mkdir(parents=True, exist_ok=True)
+            if not os.access(backup_location, os.W_OK):
+                raise UpdateError(
+                    f"Backup directory is not writable: {backup_location}. "
+                    "Update the backup_location setting or fix permissions."
+                )
+        except OSError as e:
+            raise UpdateError(
+                f"Failed to access backup directory {backup_location}: {str(e)}. "
+                "Update the backup_location setting or fix permissions."
+            ) from e
+
+        backup_manager = await self._get_backup_manager()
+        if not await backup_manager.check_space_for_backup():
+            raise UpdateError(
+                "Insufficient disk space for backup. "
+                "Free up space or adjust min_free_space_mb."
+            )
 
     async def _get_installation(self) -> Installation:
         """Get or create the installation record"""
@@ -313,7 +454,7 @@ class SoftwareUpdateService:
         except RateLimitError as e:
             await self._log_update_check(
                 source=source,
-                result="rate_limited",
+                result="error",
                 error_message=f"Rate limited until {e.reset_at.isoformat()}",
             )
             self._current_state = "idle"
@@ -434,6 +575,26 @@ class SoftwareUpdateService:
         )
         last_check = check_result.scalar_one_or_none()
 
+        job_state = "idle"
+        job_progress: Dict[str, Any] = {}
+
+        latest_job = await self._get_latest_job()
+        if latest_job:
+            if latest_job.state in UPDATE_JOB_ACTIVE_STATES:
+                job_state = latest_job.stage or latest_job.state
+                job_progress = {
+                    "stage": latest_job.stage or latest_job.state,
+                    "percent": latest_job.progress_percent or 0,
+                    "message": latest_job.message,
+                }
+            elif latest_job.state in UPDATE_JOB_TERMINAL_STATES:
+                job_state = latest_job.state
+                job_progress = {
+                    "stage": latest_job.stage or latest_job.state,
+                    "percent": latest_job.progress_percent or 100,
+                    "message": latest_job.message or latest_job.error_message,
+                }
+
         return {
             "current_version": installation.current_version,
             "installed_at": installation.installed_at.isoformat(),
@@ -442,14 +603,15 @@ class SoftwareUpdateService:
             "available_version": available_version,
             "release_notes": release_notes,
             "last_check_at": last_check.checked_at.isoformat() if last_check else None,
-            "state": self._current_state,
-            "progress": self._update_progress,
+            "state": job_state,
+            "progress": job_progress,
         }
 
     async def apply_update(
         self,
         target_version: str,
         progress_callback: Optional[callable] = None,
+        job_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Apply an update to a specific version
@@ -473,26 +635,69 @@ class SoftwareUpdateService:
         release = result.scalar_one_or_none()
 
         if not release:
+            if job_id is not None:
+                await self._set_state(
+                    "failed",
+                    stage="failed",
+                    percent=100,
+                    message="Update failed",
+                    error_message=f"Release {target_version} not found. Run check first.",
+                    job_id=job_id,
+                )
             raise UpdateError(f"Release {target_version} not found. Run check first.")
 
         if not release.asset_url:
+            if job_id is not None:
+                await self._set_state(
+                    "failed",
+                    stage="failed",
+                    percent=100,
+                    message="Update failed",
+                    error_message=f"Release {target_version} has no downloadable asset.",
+                    job_id=job_id,
+                )
             raise UpdateError(f"Release {target_version} has no downloadable asset.")
+
+        if release.asset_name and release.asset_name.endswith(".deb") and os.geteuid() != 0:
+            if job_id is not None:
+                await self._set_state(
+                    "failed",
+                    stage="failed",
+                    percent=100,
+                    message="Update failed",
+                    error_message=(
+                        "Debian package installs require root privileges. "
+                        "Publish a tarball release asset or configure a privileged installer."
+                    ),
+                    job_id=job_id,
+                )
+            raise UpdateError(
+                "Debian package installs require root privileges. "
+                "Publish a tarball release asset or configure a privileged installer."
+            )
 
         current_version = await self.get_current_version()
         backup_info: Optional[BackupInfo] = None
         download_path: Optional[Path] = None
 
         try:
+            await self._preflight_check()
+
             # Step 1: Download asset
-            self._current_state = "downloading"
-            self._update_progress = {"stage": "downloading", "percent": 0}
+            await self._set_state(
+                "downloading",
+                stage="downloading",
+                percent=0,
+                message="Downloading update package...",
+                job_id=job_id,
+            )
             if progress_callback:
                 progress_callback("downloading", 0, "Downloading update package...")
 
             github = await self._get_github_client()
             download_dir = Path(tempfile.gettempdir()) / "tau-updates"
             download_dir.mkdir(parents=True, exist_ok=True)
-            download_path = download_dir / (release.asset_name or f"{target_version}.deb")
+            download_path = download_dir / (release.asset_name or f"{target_version}.tar.gz")
 
             def download_progress(downloaded: int, total: int):
                 if total > 0:
@@ -509,14 +714,24 @@ class SoftwareUpdateService:
             )
 
             # Step 2: Verify checksum (already done during download if checksum provided)
-            self._current_state = "verifying"
-            self._update_progress = {"stage": "verifying", "percent": 100}
+            await self._set_state(
+                "verifying",
+                stage="verifying",
+                percent=100,
+                message="Package verified",
+                job_id=job_id,
+            )
             if progress_callback:
                 progress_callback("verifying", 100, "Package verified")
 
             # Step 3: Create backup
-            self._current_state = "backing_up"
-            self._update_progress = {"stage": "backing_up", "percent": 0}
+            await self._set_state(
+                "backing_up",
+                stage="backing_up",
+                percent=0,
+                message="Creating backup...",
+                job_id=job_id,
+            )
             if progress_callback:
                 progress_callback("backing_up", 0, "Creating backup...")
 
@@ -532,6 +747,14 @@ class SoftwareUpdateService:
                 version=current_version,
                 commit_sha=installation.commit_sha,
                 progress_callback=backup_progress,
+            )
+
+            await self._set_state(
+                "backing_up",
+                stage="backing_up",
+                percent=100,
+                message="Backup complete",
+                job_id=job_id,
             )
 
             # Get current schema revision before upgrade
@@ -554,33 +777,75 @@ class SoftwareUpdateService:
             # Step 4: Skip stopping services
             # Note: We can't stop tau-daemon from within itself
             # The scheduled restart will handle stopping and starting with new code
-            self._current_state = "preparing_install"
-            self._update_progress = {"stage": "preparing_install", "percent": 0}
+            await self._set_state(
+                "installing",
+                stage="installing",
+                percent=0,
+                message="Preparing installation...",
+                job_id=job_id,
+            )
             if progress_callback:
-                progress_callback("preparing_install", 0, "Preparing installation...")
+                progress_callback("installing", 0, "Preparing installation...")
 
             logger.info("skipping_service_stop", reason="will_restart_after_install")
 
             # Step 5: Install package
-            self._current_state = "installing"
-            self._update_progress = {"stage": "installing", "percent": 0}
+            await self._set_state(
+                "installing",
+                stage="installing",
+                percent=0,
+                message="Installing update...",
+                job_id=job_id,
+            )
             if progress_callback:
                 progress_callback("installing", 0, "Installing update...")
 
             await self._install_package(download_path)
 
+            is_tarball = download_path.name.endswith(".tar.gz") or download_path.name.endswith(".tgz")
+
+            if is_tarball:
+                await self._set_state(
+                    "installing",
+                    stage="installing",
+                    percent=25,
+                    message="Updating backend dependencies...",
+                    job_id=job_id,
+                )
+                if progress_callback:
+                    progress_callback("installing", 25, "Updating backend dependencies...")
+
+                await self._update_backend_dependencies()
+
             # Step 6: Build frontend static assets
-            self._update_progress = {"stage": "installing", "percent": 50}
+            await self._set_state(
+                "installing",
+                stage="installing",
+                percent=60,
+                message="Building frontend...",
+                job_id=job_id,
+            )
             if progress_callback:
-                progress_callback("installing", 50, "Building frontend...")
+                progress_callback("installing", 60, "Building frontend...")
 
             await self._build_frontend()
 
-            self._update_progress = {"stage": "installing", "percent": 100}
+            await self._set_state(
+                "installing",
+                stage="installing",
+                percent=100,
+                message="Install complete",
+                job_id=job_id,
+            )
 
             # Step 7: Run migrations
-            self._current_state = "migrating"
-            self._update_progress = {"stage": "migrating", "percent": 0}
+            await self._set_state(
+                "migrating",
+                stage="migrating",
+                percent=0,
+                message="Running database migrations...",
+                job_id=job_id,
+            )
             if progress_callback:
                 progress_callback("migrating", 0, "Running database migrations...")
 
@@ -588,22 +853,27 @@ class SoftwareUpdateService:
 
             # Step 8: Schedule service restart
             # Note: We can't restart tau-daemon from within itself, so we schedule a delayed restart
-            self._current_state = "scheduling_restart"
-            self._update_progress = {"stage": "scheduling_restart", "percent": 0}
+            await self._set_state(
+                "starting_services",
+                stage="starting_services",
+                percent=0,
+                message="Scheduling service restart...",
+                job_id=job_id,
+            )
             if progress_callback:
-                progress_callback("scheduling_restart", 0, "Scheduling service restart...")
+                progress_callback("starting_services", 0, "Scheduling service restart...")
 
             # Spawn a background process that will restart services after this process exits
-            subprocess.Popen(
-                ["sh", "-c", "sleep 3 && sudo systemctl restart tau-daemon tau-frontend"],
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            self._schedule_restart()
 
             # Step 9: Verify installation (skip service checks since we're restarting)
-            self._current_state = "verifying_install"
-            self._update_progress = {"stage": "verifying_install", "percent": 0}
+            await self._set_state(
+                "verifying_install",
+                stage="verifying_install",
+                percent=0,
+                message="Verifying installation...",
+                job_id=job_id,
+            )
             if progress_callback:
                 progress_callback("verifying_install", 0, "Verifying installation...")
 
@@ -620,6 +890,9 @@ class SoftwareUpdateService:
             installation.schema_revision = current_schema_revision
             await self.db_session.commit()
 
+            if job_id is not None:
+                await self._update_job(job_id, to_version=target_version)
+
             # Step 11: Prune old backups
             await backup_manager.prune_old_backups()
 
@@ -627,8 +900,13 @@ class SoftwareUpdateService:
             if download_path and download_path.exists():
                 download_path.unlink()
 
-            self._current_state = "complete"
-            self._update_progress = {"stage": "complete", "percent": 100}
+            await self._set_state(
+                "complete",
+                stage="complete",
+                percent=100,
+                message="Update complete!",
+                job_id=job_id,
+            )
             if progress_callback:
                 progress_callback("complete", 100, "Update complete!")
 
@@ -646,8 +924,13 @@ class SoftwareUpdateService:
 
             # Attempt rollback
             if backup_info and backup_info.backup_path:
-                self._current_state = "rolling_back"
-                self._update_progress = {"stage": "rolling_back", "percent": 0}
+                await self._set_state(
+                    "rolling_back",
+                    stage="rolling_back",
+                    percent=0,
+                    message=f"Update failed: {str(e)}. Rolling back...",
+                    job_id=job_id,
+                )
                 if progress_callback:
                     progress_callback("rolling_back", 0, f"Update failed: {str(e)}. Rolling back...")
 
@@ -659,13 +942,29 @@ class SoftwareUpdateService:
                     logger.critical("rollback_failed", error=str(re))
                     if progress_callback:
                         progress_callback("failed", 100, f"CRITICAL: Rollback failed! {str(re)}")
+                    if job_id is not None:
+                        await self._update_job(
+                            job_id,
+                            state="failed",
+                            stage="rolling_back",
+                            progress_percent=100,
+                            error_message=str(re),
+                            completed=True,
+                        )
                     raise RollbackError(f"Update and rollback both failed: {str(re)}") from e
 
             # Cleanup download
             if download_path and download_path.exists():
                 download_path.unlink(missing_ok=True)
 
-            self._current_state = "failed"
+            await self._set_state(
+                "failed",
+                stage="failed",
+                percent=100,
+                message="Update failed",
+                error_message=str(e),
+                job_id=job_id,
+            )
             raise UpdateError(f"Update failed: {str(e)}") from e
 
     async def rollback(self, target_version: Optional[str] = None) -> Dict[str, Any]:
@@ -847,6 +1146,12 @@ class SoftwareUpdateService:
         if not release.asset_url:
             raise UpdateError(f"Release {target_version} has no downloadable asset.")
 
+        if release.asset_name and release.asset_name.endswith(".deb") and os.geteuid() != 0:
+            raise UpdateError(
+                "Debian package installs require root privileges. "
+                "Publish a tarball release asset or configure a privileged installer."
+            )
+
         # Get schema revision for target version (from release or lookup)
         target_schema_revision = release.schema_revision
         if not target_schema_revision:
@@ -857,6 +1162,8 @@ class SoftwareUpdateService:
         current_backup: Optional[BackupInfo] = None
 
         try:
+            await self._preflight_check()
+
             # Step 1: Download the older release
             self._current_state = "downloading"
             self._update_progress = {"stage": "downloading", "percent": 0}
@@ -878,7 +1185,7 @@ class SoftwareUpdateService:
             await github.download_asset(
                 release.asset_url,
                 download_path,
-                checksum=release.asset_checksum,
+                expected_checksum=release.asset_checksum,
                 progress_callback=download_progress,
             )
 
@@ -930,6 +1237,10 @@ class SoftwareUpdateService:
 
             await self._install_package(download_path)
 
+            is_tarball = download_path.name.endswith(".tar.gz") or download_path.name.endswith(".tgz")
+            if is_tarball:
+                await self._update_backend_dependencies()
+
             # Step 6: Build frontend
             if progress_callback:
                 progress_callback("installing", 50, "Building frontend...")
@@ -945,12 +1256,7 @@ class SoftwareUpdateService:
 
             # Step 8: Schedule service restart
             logger.info("scheduling_downgrade_restart")
-            subprocess.Popen(
-                ["sh", "-c", "sleep 3 && sudo systemctl restart tau-daemon tau-frontend"],
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            self._schedule_restart()
 
             self._current_state = "idle"
             self._update_progress = {}
@@ -1041,12 +1347,7 @@ class SoftwareUpdateService:
 
         # Step 3: Schedule service restart to pick up rolled-back code
         logger.info("scheduling_rollback_restart")
-        subprocess.Popen(
-            ["sh", "-c", "sleep 3 && sudo systemctl restart tau-daemon tau-frontend"],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        self._schedule_restart()
 
     async def _stop_services(self):
         """Stop lighting control services"""
@@ -1182,6 +1483,51 @@ class SoftwareUpdateService:
         except asyncio.TimeoutError:
             raise InstallationError(f"Package installation timed out after {PACKAGE_INSTALL_TIMEOUT}s")
 
+    async def _update_backend_dependencies(self) -> None:
+        """Update backend Python dependencies after a tarball install."""
+        requirements_path = self.app_root / "daemon" / "requirements.txt"
+        pip_path = self.app_root / "daemon" / ".venv" / "bin" / "pip"
+
+        if not pip_path.exists():
+            raise InstallationError("Backend virtual environment not found for dependency update")
+
+        if not requirements_path.exists():
+            logger.warning("backend_requirements_missing", path=str(requirements_path))
+            return
+
+        process = await asyncio.create_subprocess_exec(
+            str(pip_path),
+            "install",
+            "-r",
+            str(requirements_path),
+            "--upgrade",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=DEPENDENCY_UPDATE_TIMEOUT
+        )
+
+        if process.returncode != 0:
+            raise InstallationError(
+                f"Backend dependency update failed: {stderr.decode().strip()}"
+            )
+
+        logger.info("backend_dependencies_updated", output=stdout.decode().strip())
+
+    def _schedule_restart(self) -> None:
+        """Schedule a service restart using sudoers-allowed commands."""
+        subprocess.Popen(
+            [
+                "sh",
+                "-c",
+                "sleep 3 && sudo systemctl restart tau-daemon && sudo systemctl restart tau-frontend",
+            ],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
     async def _build_frontend(self) -> None:
         """Build frontend static assets after update install."""
         frontend_dir = self.app_root / "frontend"
@@ -1256,14 +1602,18 @@ class SoftwareUpdateService:
             )
 
             if process.returncode != 0:
-                logger.warning("migration_warning", stderr=stderr.decode())
+                error_output = stderr.decode().strip()
+                logger.error("migration_failed", stderr=error_output)
+                raise InstallationError(f"Database migration failed: {error_output}")
 
-            logger.info("migrations_complete")
+            logger.info("migrations_complete", output=stdout.decode().strip())
 
         except asyncio.TimeoutError:
-            logger.warning("migration_timeout")
+            logger.error("migration_timeout")
+            raise InstallationError(f"Database migration timed out after {MIGRATION_TIMEOUT}s")
         except Exception as e:
-            logger.warning("migration_error", error=str(e))
+            logger.error("migration_error", error=str(e))
+            raise
 
     async def _run_migrations_downgrade(self, target_revision: str) -> bool:
         """

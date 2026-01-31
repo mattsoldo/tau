@@ -10,17 +10,33 @@ Provides endpoints for:
 - Configuring update settings
 """
 from typing import Optional, List, AsyncGenerator
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from tau.database import get_session
+from tau.config import get_settings
+from tau.database import get_session, get_db_session
 from tau.services.software_update_service import SoftwareUpdateService, UpdateError, RollbackError
+from tau.models.software_update import AvailableRelease
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter()
+def verify_update_token(x_update_token: str | None = Header(None)) -> None:
+    """
+    Enforce shared-secret auth for update endpoints when configured.
+
+    If UPDATES_AUTH_TOKEN is set, requests must provide X-Update-Token header.
+    """
+    token = get_settings().updates_auth_token
+    if not token:
+        return
+    if x_update_token != token:
+        raise HTTPException(status_code=401, detail="Invalid or missing update token")
+
+
+router = APIRouter(dependencies=[Depends(verify_update_token)])
 
 
 # Request/Response Models
@@ -62,6 +78,7 @@ class ApplyUpdateResponse(BaseModel):
     from_version: str = Field(..., description="Version before update")
     to_version: str = Field(..., description="Version after update")
     message: str = Field(..., description="Status message")
+    job_id: Optional[int] = Field(None, description="Background update job ID")
 
 
 class RollbackRequest(BaseModel):
@@ -176,6 +193,20 @@ async def get_update_service(
             await service._github_client.close()
 
 
+async def _run_update_job(job_id: int, target_version: str) -> None:
+    """Background task to apply updates with its own DB session."""
+    try:
+        async with get_db_session() as db:
+            service = SoftwareUpdateService(db_session=db)
+            try:
+                await service.apply_update(target_version=target_version, job_id=job_id)
+            finally:
+                if service._github_client:
+                    await service._github_client.close()
+    except Exception as e:
+        logger.error("update_job_failed", job_id=job_id, error=str(e))
+
+
 # Endpoints
 @router.get(
     "/status",
@@ -250,11 +281,30 @@ async def apply_update(
     If any step fails, an automatic rollback will be attempted.
     """
     try:
-        result = await service.apply_update(target_version=request.target_version)
-        return ApplyUpdateResponse(**result)
+        # Ensure the target release exists before starting a background job
+        release_result = await service.db_session.execute(
+            select(AvailableRelease).where(AvailableRelease.version == request.target_version)
+        )
+        release = release_result.scalar_one_or_none()
+        if not release:
+            raise UpdateError(f"Release {request.target_version} not found. Run check first.")
+        if not release.asset_url:
+            raise UpdateError(f"Release {request.target_version} has no downloadable asset.")
+
+        job = await service.start_update_job("apply", request.target_version)
+        background_tasks.add_task(_run_update_job, job.id, request.target_version)
+
+        return ApplyUpdateResponse(
+            success=True,
+            from_version=job.from_version or "",
+            to_version=request.target_version,
+            message="Update started in background.",
+            job_id=job.id,
+        )
     except UpdateError as e:
         logger.warning("update_apply_failed", error=str(e), target=request.target_version)
-        raise HTTPException(status_code=400, detail=str(e))
+        status = 409 if "already in progress" in str(e).lower() else 400
+        raise HTTPException(status_code=status, detail=str(e))
     except RollbackError as e:
         logger.error("update_and_rollback_failed", error=str(e))
         raise HTTPException(

@@ -197,6 +197,33 @@ class GitHubClient:
 
         return None
 
+    def _select_asset(self, assets: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Select the best release asset.
+
+        Prefer tarballs for non-privileged installs, then architecture-specific .deb.
+        """
+        best_asset: Dict[str, Any] = {}
+        best_score = -1
+
+        for asset in assets:
+            name = asset.get("name", "")
+            name_lower = name.lower()
+            score = 0
+
+            if name_lower.endswith(".tar.gz") or name_lower.endswith(".tgz"):
+                score = 300
+            elif name_lower.endswith(".deb"):
+                score = 200
+                if "arm" in name_lower or "all" in name_lower:
+                    score += 10
+
+            if score > best_score:
+                best_score = score
+                best_asset = asset
+
+        return best_asset if best_score > 0 else {}
+
     async def get_releases(
         self,
         include_prereleases: bool = False,
@@ -231,28 +258,15 @@ class GitHubClient:
             if is_prerelease and not include_prereleases:
                 continue
 
-            # Find the appropriate asset (look for .deb or .tar.gz)
+            # Find the appropriate asset (prefer tarball, then .deb)
             asset_url = None
             asset_name = None
             asset_size = None
-            for asset in release_data.get("assets", []):
-                name = asset.get("name", "")
-                # Prefer .deb packages for Raspberry Pi
-                if name.endswith(".deb") and ("arm" in name.lower() or "all" in name.lower()):
-                    asset_url = asset.get("browser_download_url")
-                    asset_name = name
-                    asset_size = asset.get("size")
-                    break
-                # Fallback to any .deb
-                elif name.endswith(".deb") and not asset_url:
-                    asset_url = asset.get("browser_download_url")
-                    asset_name = name
-                    asset_size = asset.get("size")
-                # Or .tar.gz as last resort
-                elif name.endswith(".tar.gz") and not asset_url:
-                    asset_url = asset.get("browser_download_url")
-                    asset_name = name
-                    asset_size = asset.get("size")
+            selected_asset = self._select_asset(release_data.get("assets", []))
+            if selected_asset:
+                asset_url = selected_asset.get("browser_download_url")
+                asset_name = selected_asset.get("name")
+                asset_size = selected_asset.get("size")
 
             release_notes = release_data.get("body", "") or ""
             asset_checksum = self._extract_checksum_from_notes(release_notes, asset_name)
@@ -309,13 +323,11 @@ class GitHubClient:
             asset_url = None
             asset_name = None
             asset_size = None
-            for asset in release_data.get("assets", []):
-                name = asset.get("name", "")
-                if name.endswith(".deb"):
-                    asset_url = asset.get("browser_download_url")
-                    asset_name = name
-                    asset_size = asset.get("size")
-                    break
+            selected_asset = self._select_asset(release_data.get("assets", []))
+            if selected_asset:
+                asset_url = selected_asset.get("browser_download_url")
+                asset_name = selected_asset.get("name")
+                asset_size = selected_asset.get("size")
 
             release_notes = release_data.get("body", "") or ""
             asset_checksum = self._extract_checksum_from_notes(release_notes, asset_name)
@@ -361,13 +373,11 @@ class GitHubClient:
             asset_url = None
             asset_name = None
             asset_size = None
-            for asset in release_data.get("assets", []):
-                name = asset.get("name", "")
-                if name.endswith(".deb"):
-                    asset_url = asset.get("browser_download_url")
-                    asset_name = name
-                    asset_size = asset.get("size")
-                    break
+            selected_asset = self._select_asset(release_data.get("assets", []))
+            if selected_asset:
+                asset_url = selected_asset.get("browser_download_url")
+                asset_name = selected_asset.get("name")
+                asset_size = selected_asset.get("size")
 
             release_notes = release_data.get("body", "") or ""
             asset_checksum = self._extract_checksum_from_notes(release_notes, asset_name)

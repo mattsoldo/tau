@@ -500,6 +500,7 @@ export interface SoftwareUpdateApplyResponse {
   from_version: string;
   to_version: string;
   message: string;
+  job_id?: number;
 }
 
 export interface SoftwareUpdateRollbackResponse {

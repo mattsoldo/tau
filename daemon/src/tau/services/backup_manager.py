@@ -22,7 +22,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 # Default backup configuration
-DEFAULT_BACKUP_LOCATION = "/var/lib/tau-lighting/backup"
+DEFAULT_BACKUP_LOCATION = "/opt/tau-backups"
 DEFAULT_MAX_BACKUPS = 3
 DEFAULT_MIN_FREE_SPACE_MB = 500
 

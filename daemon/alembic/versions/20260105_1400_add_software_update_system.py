@@ -152,7 +152,7 @@ def upgrade() -> None:
         ("max_backups", "3", "Maximum number of version backups to retain"),
         ("github_repo", "", "GitHub repository in owner/repo format"),
         ("github_token", "", "GitHub API token for private repos or higher rate limits"),
-        ("backup_location", "/var/lib/tau-lighting/backup", "Directory for version backups"),
+        ("backup_location", "/opt/tau-backups", "Directory for version backups"),
         ("min_free_space_mb", "500", "Minimum free disk space required for updates (MB)"),
         ("download_timeout_seconds", "300", "Timeout for downloading update assets"),
         ("verify_after_install", "true", "Verify installation after applying updates"),
