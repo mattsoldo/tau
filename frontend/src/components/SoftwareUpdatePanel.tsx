@@ -97,7 +97,8 @@ export default function SoftwareUpdatePanel() {
   const [reconnectCountdown, setReconnectCountdown] = useState(0);
   const reconnectPollingActive = useRef(false);
   const healthSawFailure = useRef(false);
-  const fetchStatusRef = useRef<null | (() => Promise<void>)>(null);
+  const fetchStatusRef = useRef<(() => Promise<void>) | null>(null);
+  const startReconnectPollingRef = useRef<(() => void) | null>(null);
 
   const clearUpdateFlags = useCallback(() => {
     localStorage.removeItem('tau_update_in_progress');
@@ -148,10 +149,10 @@ export default function SoftwareUpdatePanel() {
     } catch (err: any) {
       console.error('Failed to fetch status:', err);
       if (localStorage.getItem('tau_update_in_progress') === 'true') {
-        startReconnectPolling();
+        startReconnectPollingRef.current?.();
       }
     }
-  }, [clearUpdateFlags, startReconnectPolling]);
+  }, [clearUpdateFlags]);
 
   useEffect(() => {
     fetchStatusRef.current = fetchStatus;
@@ -315,7 +316,13 @@ export default function SoftwareUpdatePanel() {
       clearInterval(countdownInterval);
       reconnectPollingActive.current = false;
     };
-  }, [clearUpdateFlags, fetchStatus]);
+  // Note: fetchStatus is accessed via fetchStatusRef.current, not directly
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearUpdateFlags]);
+
+  useEffect(() => {
+    startReconnectPollingRef.current = startReconnectPolling;
+  }, [startReconnectPolling]);
 
   useEffect(() => {
     if (!isUpdating) return;
