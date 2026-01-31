@@ -335,116 +335,342 @@ export default function CircadianPage() {
     }
   };
 
-  // Preview curve component
-  const CurvePreview = ({ keyframes }: { keyframes: KeyframeFormData[] }) => {
+  // Catmull-Rom to Bezier conversion for smooth curves
+  const catmullRomToBezier = (points: { x: number; y: number }[], tension = 0.5) => {
+    if (points.length < 2) return '';
+    if (points.length === 2) {
+      return `M ${points[0].x},${points[0].y} L ${points[1].x},${points[1].y}`;
+    }
+
+    // Pad the points array for proper curve at endpoints
+    const paddedPoints = [
+      { x: points[0].x - (points[1].x - points[0].x), y: points[0].y },
+      ...points,
+      { x: points[points.length - 1].x + (points[points.length - 1].x - points[points.length - 2].x), y: points[points.length - 1].y },
+    ];
+
+    let path = `M ${points[0].x},${points[0].y}`;
+
+    for (let i = 1; i < paddedPoints.length - 2; i++) {
+      const p0 = paddedPoints[i - 1];
+      const p1 = paddedPoints[i];
+      const p2 = paddedPoints[i + 1];
+      const p3 = paddedPoints[i + 2];
+
+      // Calculate control points
+      const cp1x = p1.x + (p2.x - p0.x) * tension / 6;
+      const cp1y = p1.y + (p2.y - p0.y) * tension / 6;
+      const cp2x = p2.x - (p3.x - p1.x) * tension / 6;
+      const cp2y = p2.y - (p3.y - p1.y) * tension / 6;
+
+      path += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+    }
+
+    return path;
+  };
+
+  // Get current time as percentage of day
+  const getCurrentTimePercent = () => {
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    return (minutes / 1440) * 100;
+  };
+
+  // Preview curve component - smooth area chart
+  const CurvePreview = ({ keyframes, showCurrentTime = true }: { keyframes: KeyframeFormData[]; showCurrentTime?: boolean }) => {
+    const [currentTime, setCurrentTime] = useState(getCurrentTimePercent());
+
+    useEffect(() => {
+      if (!showCurrentTime) return;
+      const interval = setInterval(() => {
+        setCurrentTime(getCurrentTimePercent());
+      }, 60000); // Update every minute
+      return () => clearInterval(interval);
+    }, [showCurrentTime]);
+
     const sortedKf = [...keyframes].sort(
       (a, b) => timeToMinutesValue(a.time) - timeToMinutesValue(b.time)
     );
 
+    // Chart dimensions with padding
+    const padding = { top: 8, right: 8, bottom: 24, left: 36 };
+    const width = 400;
+    const height = 140;
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+
     const points = sortedKf.map((kf) => ({
-      x: (timeToMinutesValue(kf.time) / 1440) * 100, // Percentage of day
-      y: 100 - parseFloat(kf.brightness || '0'), // Invert for SVG
+      x: padding.left + (timeToMinutesValue(kf.time) / 1440) * chartWidth,
+      y: padding.top + chartHeight - (parseFloat(kf.brightness || '0') / 100) * chartHeight,
       cct: parseInt(kf.cct, 10) || 4000,
+      brightness: parseFloat(kf.brightness || '0'),
+      time: kf.time,
     }));
 
-    // Create SVG path
-    const pathD =
-      points.length > 0
-        ? `M ${points.map((p) => `${p.x},${p.y}`).join(' L ')}`
-        : '';
+    // Create smooth curve path
+    const curvePath = catmullRomToBezier(points.map(p => ({ x: p.x, y: p.y })));
+
+    // Create area path (curve + close to bottom)
+    const areaPath = points.length > 0
+      ? `${curvePath} L ${points[points.length - 1].x},${padding.top + chartHeight} L ${points[0].x},${padding.top + chartHeight} Z`
+      : '';
+
+    // Current time x position
+    const currentTimeX = padding.left + (currentTime / 100) * chartWidth;
+
+    // Time labels
+    const timeLabels = [
+      { time: '00:00', x: padding.left },
+      { time: '06:00', x: padding.left + chartWidth * 0.25 },
+      { time: '12:00', x: padding.left + chartWidth * 0.5 },
+      { time: '18:00', x: padding.left + chartWidth * 0.75 },
+      { time: '24:00', x: padding.left + chartWidth },
+    ];
+
+    // Brightness labels
+    const brightnessLabels = [
+      { label: '100%', y: padding.top },
+      { label: '50%', y: padding.top + chartHeight / 2 },
+      { label: '0%', y: padding.top + chartHeight },
+    ];
+
+    const gradientId = useMemo(() => `curve-gradient-${Math.random().toString(36).substr(2, 9)}`, []);
 
     return (
-      <div className="bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg p-4">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium text-[#a1a1a6]">Brightness Curve Preview</span>
-          <div className="flex items-center gap-4 text-xs text-[#636366]">
-            <span>0:00</span>
-            <span>6:00</span>
-            <span>12:00</span>
-            <span>18:00</span>
-            <span>24:00</span>
-          </div>
+      <div className="bg-[#0a0a0b] border border-[#2a2a2f] rounded-xl p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-[#8e8e93]">Brightness Curve</span>
+          {showCurrentTime && (
+            <span className="text-xs text-amber-500/70">
+              Now: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
         </div>
-        <svg className="w-full h-32" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {/* Grid lines */}
-          <line x1="0" y1="0" x2="100" y2="0" stroke="#2a2a2f" strokeWidth="0.5" />
-          <line x1="0" y1="50" x2="100" y2="50" stroke="#2a2a2f" strokeWidth="0.5" />
-          <line x1="0" y1="100" x2="100" y2="100" stroke="#2a2a2f" strokeWidth="0.5" />
-          <line x1="25" y1="0" x2="25" y2="100" stroke="#2a2a2f" strokeWidth="0.5" />
-          <line x1="50" y1="0" x2="50" y2="100" stroke="#2a2a2f" strokeWidth="0.5" />
-          <line x1="75" y1="0" x2="75" y2="100" stroke="#2a2a2f" strokeWidth="0.5" />
+        <svg
+          className="w-full"
+          viewBox={`0 0 ${width} ${height}`}
+          preserveAspectRatio="xMidYMid meet"
+          style={{ maxHeight: '160px' }}
+        >
+          <defs>
+            {/* Gradient for area fill */}
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.02" />
+            </linearGradient>
+            {/* Glow filter for current time indicator */}
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="2" result="coloredBlur" />
+              <feMerge>
+                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
 
-          {/* Curve line */}
-          {pathD && (
+          {/* Grid lines - horizontal */}
+          {[0, 0.5, 1].map((ratio, i) => (
+            <line
+              key={`h-${i}`}
+              x1={padding.left}
+              y1={padding.top + chartHeight * ratio}
+              x2={padding.left + chartWidth}
+              y2={padding.top + chartHeight * ratio}
+              stroke="#2a2a2f"
+              strokeWidth="1"
+              strokeDasharray={ratio === 0.5 ? "4,4" : "0"}
+            />
+          ))}
+
+          {/* Grid lines - vertical (time markers) */}
+          {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => (
+            <line
+              key={`v-${i}`}
+              x1={padding.left + chartWidth * ratio}
+              y1={padding.top}
+              x2={padding.left + chartWidth * ratio}
+              y2={padding.top + chartHeight}
+              stroke="#2a2a2f"
+              strokeWidth="1"
+              strokeDasharray={ratio === 0.5 ? "4,4" : "0"}
+            />
+          ))}
+
+          {/* Area fill with gradient */}
+          {areaPath && (
             <path
-              d={pathD}
+              d={areaPath}
+              fill={`url(#${gradientId})`}
+            />
+          )}
+
+          {/* Main curve line */}
+          {curvePath && (
+            <path
+              d={curvePath}
               fill="none"
               stroke="#f59e0b"
-              strokeWidth="2"
+              strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
           )}
 
-          {/* Points */}
+          {/* Current time indicator */}
+          {showCurrentTime && (
+            <>
+              <line
+                x1={currentTimeX}
+                y1={padding.top - 4}
+                x2={currentTimeX}
+                y2={padding.top + chartHeight + 4}
+                stroke="#f59e0b"
+                strokeWidth="2"
+                strokeDasharray="4,3"
+                opacity="0.7"
+                filter="url(#glow)"
+              />
+              <circle
+                cx={currentTimeX}
+                cy={padding.top - 4}
+                r="3"
+                fill="#f59e0b"
+              />
+            </>
+          )}
+
+          {/* Keyframe points with CCT colors */}
           {points.map((point, i) => (
-            <circle
+            <g key={i}>
+              {/* Outer glow */}
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="6"
+                fill={cctToColor(point.cct)}
+                opacity="0.3"
+              />
+              {/* Inner point */}
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="4"
+                fill={cctToColor(point.cct)}
+                stroke="#0a0a0b"
+                strokeWidth="1.5"
+              />
+            </g>
+          ))}
+
+          {/* Y-axis labels (brightness) */}
+          {brightnessLabels.map((label, i) => (
+            <text
               key={i}
-              cx={point.x}
-              cy={point.y}
-              r="3"
-              fill={cctToColor(point.cct)}
-              stroke="#0a0a0b"
-              strokeWidth="1"
-            />
+              x={padding.left - 6}
+              y={label.y + 3}
+              textAnchor="end"
+              className="text-[10px] fill-[#636366]"
+            >
+              {label.label}
+            </text>
+          ))}
+
+          {/* X-axis labels (time) */}
+          {timeLabels.map((label, i) => (
+            <text
+              key={i}
+              x={label.x}
+              y={height - 4}
+              textAnchor="middle"
+              className="text-[10px] fill-[#636366]"
+            >
+              {label.time}
+            </text>
           ))}
         </svg>
-        <div className="flex justify-between mt-2 text-xs text-[#636366]">
-          <span>100%</span>
-          <span className="text-center flex-1">Brightness</span>
-          <span>0%</span>
-        </div>
       </div>
     );
   };
 
-  // Profile mini curve for table
+  // Mini curve for table - compact sparkline style
   const MiniCurve = ({ profile }: { profile: CircadianProfile }) => {
     const sortedKf = [...profile.keyframes].sort(
       (a, b) => timeToMinutesValue(a.time) - timeToMinutesValue(b.time)
     );
 
+    const padding = 4;
+    const width = 120;
+    const height = 36;
+    const chartWidth = width - padding * 2;
+    const chartHeight = height - padding * 2;
+
     const points = sortedKf.map((kf) => ({
-      x: (timeToMinutesValue(kf.time) / 1440) * 100,
-      y: 100 - kf.brightness * 100,
+      x: padding + (timeToMinutesValue(kf.time) / 1440) * chartWidth,
+      y: padding + chartHeight - kf.brightness * chartHeight,
       cct: kf.cct,
     }));
 
-    const pathD =
-      points.length > 0
-        ? `M ${points.map((p) => `${p.x},${p.y}`).join(' L ')}`
-        : '';
+    const curvePath = catmullRomToBezier(points.map(p => ({ x: p.x, y: p.y })));
+    const areaPath = points.length > 0
+      ? `${curvePath} L ${points[points.length - 1].x},${padding + chartHeight} L ${points[0].x},${padding + chartHeight} Z`
+      : '';
+
+    const gradientId = useMemo(() => `mini-gradient-${profile.id}`, [profile.id]);
 
     return (
-      <svg className="w-24 h-8" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <rect x="0" y="0" width="100" height="100" fill="#0a0a0b" rx="4" />
-        {pathD && (
+      <svg
+        className="w-[120px] h-9 rounded-md overflow-hidden"
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
+
+        {/* Background */}
+        <rect x="0" y="0" width={width} height={height} fill="#0a0a0b" rx="6" />
+
+        {/* Subtle grid line at 50% */}
+        <line
+          x1={padding}
+          y1={padding + chartHeight / 2}
+          x2={width - padding}
+          y2={padding + chartHeight / 2}
+          stroke="#2a2a2f"
+          strokeWidth="1"
+          strokeDasharray="2,2"
+        />
+
+        {/* Area fill */}
+        {areaPath && (
+          <path d={areaPath} fill={`url(#${gradientId})`} />
+        )}
+
+        {/* Curve line */}
+        {curvePath && (
           <path
-            d={pathD}
+            d={curvePath}
             fill="none"
             stroke="#f59e0b"
-            strokeWidth="4"
+            strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
         )}
+
+        {/* Keyframe points - smaller for mini view */}
         {points.map((point, i) => (
           <circle
             key={i}
             cx={point.x}
             cy={point.y}
-            r="5"
+            r="2.5"
             fill={cctToColor(point.cct)}
+            stroke="#0a0a0b"
+            strokeWidth="1"
           />
         ))}
       </svg>
