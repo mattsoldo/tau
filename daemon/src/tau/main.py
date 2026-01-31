@@ -47,7 +47,7 @@ class TauDaemon:
 
     async def startup(self):
         """Initialize all daemon components"""
-        logger.info("tau_daemon_starting", version="0.1.0")
+        logger.info("tau_daemon_starting", version="1.6.0")
 
         # Initialize database
         logger.info("initializing_database")
