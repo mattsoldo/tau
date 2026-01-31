@@ -605,34 +605,98 @@ Pre-release versions use suffixes: `v2.0.0-beta.1`, `v2.0.0-rc.1`
 
 **Never** reference git commits or branch state for versioning in user-facing code. Always use release tags.
 
+### Creating Releases with cut-release.sh
+
+**IMPORTANT**: Use the `scripts/cut-release.sh` script for all releases. This script automates the entire release workflow and ensures consistency.
+
+**Basic usage (recommended)**:
+```bash
+# Bump patch version (e.g., 1.5.0 → 1.5.1)
+./scripts/cut-release.sh --bump patch
+
+# Bump minor version (e.g., 1.5.1 → 1.6.0)
+./scripts/cut-release.sh --bump minor
+
+# Bump major version (e.g., 1.6.0 → 2.0.0)
+./scripts/cut-release.sh --bump major
+```
+
+**What the script does automatically**:
+1. Validates you're on `main` branch with clean working tree
+2. Fetches latest tags and determines next version
+3. Updates version in all files (`pyproject.toml`, `package.json`, `__init__.py`, `main.py`)
+4. Commits the version bump as "Release vX.Y.Z"
+5. Creates an annotated git tag
+6. Pushes commit and tag to origin
+7. Creates tarball via `git archive`
+8. Computes SHA256 checksum
+9. Creates GitHub Release with tarball attached and auto-generated release notes
+
+**Advanced options**:
+```bash
+# Explicit version (skips auto-bump)
+./scripts/cut-release.sh --version 2.0.0
+
+# Custom release title
+./scripts/cut-release.sh --bump minor --title "v1.7.0 - New Dashboard"
+
+# Custom release notes from file
+./scripts/cut-release.sh --bump patch --notes-file CHANGELOG.md
+
+# Pre-release flag
+./scripts/cut-release.sh --bump minor --prerelease
+
+# Skip GitHub release (local tag only)
+./scripts/cut-release.sh --bump patch --skip-gh
+
+# Don't push (dry run for local testing)
+./scripts/cut-release.sh --bump patch --no-push
+```
+
+**Prerequisites**:
+- Must be on `main` branch
+- Working tree must be clean (no uncommitted changes)
+- `gh` CLI must be authenticated (`gh auth login`)
+- Local main must be up-to-date with origin
+
+**Version files updated by the script**:
+- `daemon/pyproject.toml` - `version = "X.Y.Z"`
+- `daemon/src/tau/__init__.py` - `__version__ = "X.Y.Z"`
+- `daemon/src/tau/main.py` - Version in startup log
+- `frontend/package.json` - `"version": "X.Y.Z"`
+- `frontend/package-lock.json` - `"version": "X.Y.Z"`
+
 ### Release Artifacts
 
 **CRITICAL**: Every version release requires BOTH a git tag AND a GitHub Release with downloadable assets. The auto-update system uses the GitHub Releases API, which only sees actual Releases, not bare git tags.
 
 Every release must include:
 
-1. **Git tag**: `git tag -a v1.x.x -m "description"` and `git push origin v1.x.x`
+1. **Git tag**: Annotated tag `v1.x.x`
 2. **GitHub Release**: Created via `gh release create` with assets attached
 3. **Tarball asset**: `tau-v{version}.tar.gz` (created with `git archive`)
-4. **Release notes** in the GitHub release body (not a separate file)
+4. **Release notes** in the GitHub release body
+5. **SHA256 checksum** in release notes (for verification)
 
-**Creating a release**:
+The `cut-release.sh` script handles all of this automatically.
+
+**Manual release process** (only if script cannot be used):
 ```bash
-# 1. Tag the release
-git tag -a v1.1.3 -m "v1.1.3 - Description of changes"
-git push origin v1.1.3
+# 1. Update version in all files manually
+# 2. Commit and tag
+git add -A && git commit -m "Release v1.1.3"
+git tag -a v1.1.3 -m "v1.1.3"
+git push origin main v1.1.3
 
-# 2. Create tarball
+# 3. Create tarball
 git archive --format=tar.gz --prefix=tau/ -o /tmp/tau-v1.1.3.tar.gz v1.1.3
 
-# 3. Create GitHub Release with asset
+# 4. Create GitHub Release with asset
 gh release create v1.1.3 /tmp/tau-v1.1.3.tar.gz \
   --repo mattsoldo/tau \
-  --title "v1.1.3 - Title" \
-  --notes "Release notes here"
+  --title "v1.1.3" \
+  --notes-file release-notes.md
 ```
-
-When modifying build scripts or CI workflows, ensure these artifacts are generated and attached to releases.
 
 ### Release Notes Format
 
@@ -692,11 +756,22 @@ When writing migration code:
 
 ### Service Management
 
-The lighting system runs as systemd services. The update system stops services before installation and restarts them after.
+The lighting system runs as systemd services. The update process schedules a restart after installation completes.
 
 **Service names** (do not change without updating update system):
-- `lighting-control.service` — Main daemon
-- `lighting-web.service` — Web UI server
+- `tau-daemon` — Main Python daemon
+- `tau-frontend` — Frontend service (if running as service; otherwise nginx serves static build)
+
+**Update restart behavior**: Since the daemon cannot restart itself from within, updates schedule a delayed restart:
+```python
+# In software_update_service.py
+subprocess.Popen([
+    "sh", "-c",
+    "sleep 3 && sudo systemctl restart tau-daemon && sudo systemctl restart tau-frontend"
+], start_new_session=True)
+```
+
+This spawns a detached process that waits 3 seconds, then restarts services after the current request completes.
 
 **Health check endpoint**: The update system verifies installation by calling `GET /api/health`. This endpoint must:
 - Return HTTP 200 when services are operational
@@ -744,30 +819,100 @@ check_interval = config['updates']['check_interval_hours']
 ### Update System Code Locations
 
 ```
-src/
-  update/
-    __init__.py
-    daemon.py          # Scheduled check daemon
-    github_client.py   # GitHub API interactions
-    version.py         # Version comparison, semver parsing
-    backup.py          # Backup creation and restoration
-    installer.py       # Package installation logic
-    state.py           # State machine, database operations
-    cli.py             # CLI commands (lighting-ctl update ...)
+daemon/src/tau/
+  services/
+    software_update_service.py  # Main update orchestration, state machine
+    github_client.py            # GitHub API interactions, release fetching
+    backup_manager.py           # Backup creation and restoration
+  models/
+    software_update.py          # SQLAlchemy models (Installation, VersionHistory, etc.)
+  api/routes/
+    software_updates.py         # REST API endpoints for update operations
 
-tests/
-  update/
-    test_version.py
-    test_backup.py
-    test_state_machine.py
-    fixtures/
-      mock_releases.json
+daemon/alembic/versions/
+    20260105_1400_add_software_update_system.py  # Initial update tables
+    20260131_1200_add_software_update_jobs.py    # Background job tracking
+
+scripts/
+    cut-release.sh              # Release automation script
+
+frontend/src/components/
+    SoftwareUpdatePanel.tsx     # Update UI component
 ```
 
+**Key database tables**:
+- `installation` — Singleton tracking current version, install method
+- `version_history` — History of installed versions with backup paths
+- `available_releases` — Cached releases from GitHub
+- `update_checks` — Log of update check operations
+- `update_config` — Configuration settings (github_repo, backup_location, etc.)
+- `software_update_jobs` — Background job state persistence
+
 When modifying update system code:
-- Maintain state machine transitions in `state.py`
+- Maintain state machine transitions in `software_update_service.py`
 - Test interrupted update recovery scenarios
 - Verify rollback works after your changes
+- Update job state in database for UI visibility
+
+### Update Workflow
+
+The update system runs updates as **background jobs** with persisted state, allowing the UI to track progress across requests.
+
+**Update states** (in order):
+1. `idle` — No update in progress
+2. `checking` — Checking GitHub for releases
+3. `downloading` — Downloading tarball asset
+4. `verifying` — Verifying checksum
+5. `backing_up` — Creating backup of current installation
+6. `installing` — Extracting tarball, updating dependencies
+7. `migrating` — Running Alembic migrations
+8. `starting_services` — Scheduling service restart
+9. `verifying_install` — Verifying installation health
+10. `complete` — Update finished successfully
+11. `failed` — Update failed (may have rolled back)
+12. `rolling_back` — Rollback in progress
+
+**Background job model**:
+```python
+# Job states persisted in software_update_jobs table
+UPDATE_JOB_ACTIVE_STATES = {"queued", "running", "rolling_back"}
+UPDATE_JOB_TERMINAL_STATES = {"complete", "failed"}
+```
+
+**Update flow**:
+1. API receives `/api/system/update/apply` request
+2. Service validates release exists and creates `SoftwareUpdateJob` record
+3. Background task starts via FastAPI `BackgroundTasks`
+4. Each step updates job state in database
+5. Frontend polls `/api/system/update/status` to show progress
+6. On completion or failure, job marked as terminal
+
+**Tarball installation process**:
+1. Extract to temp directory
+2. Copy files to `/opt/tau-daemon/` (preserving ownership)
+3. Run `pip install -r requirements.txt --upgrade` for backend deps
+4. Run `npm ci && npm run build` for frontend
+5. Run `alembic upgrade head` for migrations
+6. Schedule delayed service restart
+
+### Downgrade Support
+
+The system supports downgrading to older versions with proper schema handling:
+
+1. **With local backup**: Uses existing rollback mechanism
+2. **Without backup**: Downloads release from GitHub, creates backup of current version
+
+**Critical**: Database schema must be downgraded BEFORE installing old code (while current migration files are still available):
+```python
+# In downgrade():
+target_schema_revision = await self._get_version_schema_revision(target_version)
+if target_schema_revision:
+    await self._run_migrations_downgrade(target_schema_revision)
+# Then install old code
+await self._install_package(download_path)
+```
+
+Schema revisions are stored in `version_history.schema_revision` for each version.
 
 ### Update Error Handling
 
@@ -806,40 +951,65 @@ def restore_from_backup(backup_path: Path) -> None:
 
 Before merging changes that affect the update system:
 
-1. **Unit tests pass**: `pytest tests/update/`
+1. **Unit tests pass**: `pytest daemon/tests/services/`
 2. **State machine coverage**: All transitions have tests
 3. **Rollback tested**: Verify rollback works for your changes
 4. **Mock API tests**: GitHub API interactions use fixtures
 
-**Testing update flows locally**:
+**Testing update flows via API**:
 
 ```bash
-# Simulate update check
-lighting-ctl update check --dry-run
+# Check for updates
+curl http://tau.local/api/system/update/check
 
-# Test backup/restore cycle
-lighting-ctl update backup --test
-lighting-ctl update restore --test --version v2.1.0
+# Get current status
+curl http://tau.local/api/system/update/status
 
-# Verify package installation
-lighting-ctl update apply --dry-run v2.2.0
+# List available releases
+curl http://tau.local/api/system/update/releases
+
+# List backups
+curl http://tau.local/api/system/update/backups
+
+# Apply update (returns job_id for tracking)
+curl -X POST http://tau.local/api/system/update/apply \
+  -H "Content-Type: application/json" \
+  -d '{"target_version": "1.6.0"}'
+
+# Rollback to previous version
+curl -X POST http://tau.local/api/system/update/rollback \
+  -H "Content-Type: application/json" \
+  -d '{"target_version": "1.5.0"}'
+```
+
+**Testing release script**:
+```bash
+# Dry run (no push, no GitHub release)
+./scripts/cut-release.sh --bump patch --no-push --skip-gh
+
+# Verify version files were updated correctly
+git diff
 ```
 
 ### CI/CD Integration
 
-The GitHub Actions workflow (`.github/workflows/release.yml`) handles:
-- Building the Debian package
-- Generating checksums
-- Creating draft releases
+Releases are created manually using `scripts/cut-release.sh`. The script:
+- Creates tarball via `git archive`
+- Computes SHA256 checksum
+- Attaches checksum to release notes
+- Creates GitHub Release with tarball asset
 
-When modifying this workflow:
-- Maintain the artifact naming convention
-- Ensure checksums are generated with SHA256
-- Keep releases as drafts until manually published
+**Tarball naming convention**: `tau-v{version}.tar.gz` (e.g., `tau-v1.6.0.tar.gz`)
 
-**Required secrets**:
-- `GITHUB_TOKEN` — Provided automatically
-- No other secrets required for public repo releases
+**Checksum format in release notes**:
+```markdown
+## Checksums
+SHA256: abc123def456...
+```
+
+**Required authentication**:
+- `gh auth login` — GitHub CLI must be authenticated
+- No secrets or tokens needed beyond your GitHub account
 
 ### Prohibited Practices
 
