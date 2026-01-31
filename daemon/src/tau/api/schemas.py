@@ -342,11 +342,32 @@ class SwitchModelResponse(SwitchModelBase):
 
 
 # Switch Schemas
+# Import AVAILABLE_GPIO_PINS from platform module (single source of truth)
+# Note: This import is deferred to avoid circular imports - validation uses the list from platform.py
+# For Pydantic validation, we just allow any int and let the API route validate against the list
+
+
 class SwitchBase(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     switch_model_id: int = Field(..., gt=0)
+    input_source: str = Field(
+        default="labjack",
+        pattern="^(labjack|gpio)$",
+        description="Input source: 'labjack' for LabJack U3-HV, 'gpio' for Raspberry Pi GPIO"
+    )
+    # LabJack pins (used when input_source='labjack')
     labjack_digital_pin: Optional[int] = Field(None, ge=0, le=15)
     labjack_analog_pin: Optional[int] = Field(None, ge=0, le=15)
+    # GPIO pins (used when input_source='gpio')
+    gpio_bcm_pin: Optional[int] = Field(
+        None,
+        description="BCM GPIO pin number (e.g., 17, 22, 27). Only valid GPIO pins allowed."
+    )
+    gpio_pull: Optional[str] = Field(
+        default="up",
+        pattern="^(up|down)$",
+        description="Pull resistor configuration: 'up' (default) or 'down'"
+    )
     switch_type: str = Field(default="normally-closed", pattern="^(normally-open|normally-closed)$")
     invert_reading: bool = Field(default=False)
     target_group_id: Optional[int] = None
@@ -362,8 +383,17 @@ class SwitchCreate(SwitchBase):
 class SwitchUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     switch_model_id: Optional[int] = Field(None, gt=0)
+    input_source: Optional[str] = Field(
+        None,
+        pattern="^(labjack|gpio)$",
+        description="Input source: 'labjack' for LabJack U3-HV, 'gpio' for Raspberry Pi GPIO"
+    )
+    # LabJack pins
     labjack_digital_pin: Optional[int] = Field(None, ge=0, le=15)
     labjack_analog_pin: Optional[int] = Field(None, ge=0, le=15)
+    # GPIO pins
+    gpio_bcm_pin: Optional[int] = Field(None, description="BCM GPIO pin number")
+    gpio_pull: Optional[str] = Field(None, pattern="^(up|down)$")
     switch_type: Optional[str] = Field(None, pattern="^(normally-open|normally-closed)$")
     invert_reading: Optional[bool] = None
     target_group_id: Optional[int] = None

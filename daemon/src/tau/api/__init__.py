@@ -313,7 +313,7 @@ Use this endpoint to monitor system performance and debug issues.
         return connection_manager.get_statistics()
 
     # Register API routers
-    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, switches, system_config, updates, software_updates, dtw
+    from tau.api.routes import fixtures, groups, scenes, control, circadian, labjack, discovery, switches, system_config, updates, software_updates, dtw, gpio
 
     app.include_router(fixtures.router, prefix="/api/fixtures", tags=["fixtures"])
     app.include_router(groups.router, prefix="/api/groups", tags=["groups"])
@@ -322,6 +322,7 @@ Use this endpoint to monitor system performance and debug issues.
     app.include_router(control.router, prefix="/api/control", tags=["control"])
     app.include_router(circadian.router, prefix="/api/circadian", tags=["circadian"])
     app.include_router(labjack.router, prefix="/api/labjack", tags=["hardware"])
+    app.include_router(gpio.router, prefix="/api/gpio", tags=["hardware"])
     app.include_router(discovery.router, prefix="/api/discovery", tags=["discovery"])
     app.include_router(system_config.router, prefix="/api/config", tags=["configuration"])
     app.include_router(updates.router, prefix="/api/updates", tags=["updates"])

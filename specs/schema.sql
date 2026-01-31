@@ -63,27 +63,53 @@ CREATE TABLE switches (
     id SERIAL PRIMARY KEY,
     name VARCHAR(100),
     switch_model_id INT NOT NULL REFERENCES switch_models(id) ON DELETE RESTRICT,
-    
-    -- Hardware Mapping
+
+    -- Input Source: 'labjack' or 'gpio'
+    input_source VARCHAR(20) NOT NULL DEFAULT 'labjack'
+        CHECK (input_source IN ('labjack', 'gpio')),
+
+    -- Hardware Mapping (LabJack) - used when input_source='labjack'
     labjack_digital_pin INT,
     labjack_analog_pin INT,
-    
+
+    -- Hardware Mapping (GPIO) - used when input_source='gpio'
+    -- BCM pin number (e.g., 17, 22, 27)
+    gpio_bcm_pin INT,
+    -- Pull resistor configuration: 'up' or 'down'
+    gpio_pull VARCHAR(10) DEFAULT 'up' CHECK (gpio_pull IN ('up', 'down') OR gpio_pull IS NULL),
+
+    -- Switch hardware configuration
+    switch_type VARCHAR(20) NOT NULL DEFAULT 'normally-closed'
+        CHECK (switch_type IN ('normally-open', 'normally-closed')),
+    invert_reading BOOLEAN NOT NULL DEFAULT FALSE,
+
     -- Polymorphic Target
     target_group_id INT REFERENCES groups(id) ON DELETE SET NULL,
     target_fixture_id INT REFERENCES fixtures(id) ON DELETE SET NULL,
 
     -- Double-tap scene recall (optional)
     double_tap_scene_id INT,
-    
+
     -- Optional photo for UI
     photo_url TEXT,
-    
+
     CONSTRAINT one_target_only CHECK (
         (target_group_id IS NOT NULL AND target_fixture_id IS NULL) OR
         (target_group_id IS NULL AND target_fixture_id IS NOT NULL)
+    ),
+
+    -- GPIO pin validation: required when input_source is 'gpio', must be valid BCM pin
+    CONSTRAINT gpio_pin_valid CHECK (
+        (input_source = 'labjack') OR
+        (input_source = 'gpio' AND gpio_bcm_pin IS NOT NULL AND
+         gpio_bcm_pin IN (4, 5, 6, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27))
     )
-    -- No overrides here.
 );
+
+-- Partial unique index to ensure GPIO pins are unique (prevents race conditions at DB level)
+CREATE UNIQUE INDEX switches_gpio_bcm_pin_unique
+ON switches (gpio_bcm_pin)
+WHERE input_source = 'gpio' AND gpio_bcm_pin IS NOT NULL;
 
 
 -- GROUPS (LOGICAL)

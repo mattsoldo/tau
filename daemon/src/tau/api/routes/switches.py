@@ -1,5 +1,7 @@
 """
 Switches API Routes - CRUD operations for switches and switch models
+
+Supports both LabJack and Raspberry Pi GPIO input sources.
 """
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends
@@ -21,9 +23,13 @@ from tau.api.schemas import (
     SwitchResponse,
 )
 from tau.api import get_daemon_instance
+from tau.hardware.platform import detect_platform, AVAILABLE_GPIO_PINS
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
+
+# Switch types that are compatible with GPIO (digital-only)
+GPIO_COMPATIBLE_INPUT_TYPES = ['retractive', 'switch_simple']
 
 
 async def _reload_switches() -> int:
@@ -216,41 +222,115 @@ async def create_switch(
         if not scene:
             raise HTTPException(status_code=404, detail="Scene not found")
 
-    # Validate pins based on model requirements
-    if model.requires_digital_pin and switch_data.labjack_digital_pin is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Switch model '{model.manufacturer} {model.model}' requires a digital pin"
-        )
-    if model.requires_analog_pin and switch_data.labjack_analog_pin is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Switch model '{model.manufacturer} {model.model}' requires an analog pin"
-        )
+    # Validate based on input source
+    input_source = switch_data.input_source or 'labjack'
 
-    # Check for pin conflicts
-    if switch_data.labjack_digital_pin is not None:
+    if input_source == 'gpio':
+        # GPIO-specific validation
+        # First, check that the platform supports GPIO
+        platform = detect_platform()
+        if not platform.gpio_available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"GPIO input is not available: {platform.reason or 'Platform does not support GPIO'}"
+            )
+
+        # Check that switch model is compatible with GPIO (digital-only)
+        if model.input_type not in GPIO_COMPATIBLE_INPUT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Switch model '{model.manufacturer} {model.model}' ({model.input_type}) "
+                       f"is not compatible with GPIO. GPIO only supports digital inputs: "
+                       f"{', '.join(GPIO_COMPATIBLE_INPUT_TYPES)}"
+            )
+
+        # Require GPIO pin
+        if switch_data.gpio_bcm_pin is None:
+            raise HTTPException(
+                status_code=400,
+                detail="GPIO BCM pin is required when input_source is 'gpio'"
+            )
+
+        # Validate GPIO pin is in allowed list
+        if switch_data.gpio_bcm_pin not in AVAILABLE_GPIO_PINS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"GPIO{switch_data.gpio_bcm_pin} is not available for switch input. "
+                       f"Available pins: {AVAILABLE_GPIO_PINS}"
+            )
+
+        # Check for GPIO pin conflicts
         result = await session.execute(
-            select(Switch).where(Switch.labjack_digital_pin == switch_data.labjack_digital_pin)
+            select(Switch).where(
+                Switch.input_source == 'gpio',
+                Switch.gpio_bcm_pin == switch_data.gpio_bcm_pin
+            )
         )
         existing = result.scalar_one_or_none()
         if existing:
             raise HTTPException(
                 status_code=409,
-                detail=f"Digital pin {switch_data.labjack_digital_pin} already in use"
-            )
-    if switch_data.labjack_analog_pin is not None:
-        result = await session.execute(
-            select(Switch).where(Switch.labjack_analog_pin == switch_data.labjack_analog_pin)
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Analog pin {switch_data.labjack_analog_pin} already in use"
+                detail=f"GPIO{switch_data.gpio_bcm_pin} is already in use by another switch"
             )
 
-    switch = Switch(**switch_data.model_dump())
+        # Clear LabJack pins when using GPIO
+        switch_data_dict = switch_data.model_dump()
+        switch_data_dict['labjack_digital_pin'] = None
+        switch_data_dict['labjack_analog_pin'] = None
+
+    else:
+        # LabJack-specific validation
+        # Validate pins based on model requirements
+        if model.requires_digital_pin and switch_data.labjack_digital_pin is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Switch model '{model.manufacturer} {model.model}' requires a digital pin"
+            )
+        if model.requires_analog_pin and switch_data.labjack_analog_pin is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Switch model '{model.manufacturer} {model.model}' requires an analog pin"
+            )
+
+        # Check for LabJack pin conflicts
+        if switch_data.labjack_digital_pin is not None:
+            result = await session.execute(
+                select(Switch).where(
+                    Switch.input_source == 'labjack',
+                    Switch.labjack_digital_pin == switch_data.labjack_digital_pin
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Digital pin {switch_data.labjack_digital_pin} already in use"
+                )
+        if switch_data.labjack_analog_pin is not None:
+            result = await session.execute(
+                select(Switch).where(
+                    Switch.input_source == 'labjack',
+                    Switch.labjack_analog_pin == switch_data.labjack_analog_pin
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Analog pin {switch_data.labjack_analog_pin} already in use"
+                )
+
+        # Clear GPIO pins when using LabJack
+        switch_data_dict = switch_data.model_dump()
+        switch_data_dict['gpio_bcm_pin'] = None
+        switch_data_dict['gpio_pull'] = None
+
+    # Create switch with appropriate data
+    if 'switch_data_dict' in dir():
+        switch = Switch(**switch_data_dict)
+    else:
+        switch = Switch(**switch_data.model_dump())
+
     session.add(switch)
     await session.commit()
     await session.refresh(switch)
@@ -330,48 +410,117 @@ async def update_switch(
         if not scene:
             raise HTTPException(status_code=404, detail="Scene not found")
 
-    # Validate pins based on model requirements
-    new_digital = update_data.get("labjack_digital_pin", switch.labjack_digital_pin)
-    new_analog = update_data.get("labjack_analog_pin", switch.labjack_analog_pin)
+    # Determine effective input source
+    new_input_source = update_data.get("input_source", switch.input_source)
 
-    if model.requires_digital_pin and new_digital is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Switch model '{model.manufacturer} {model.model}' requires a digital pin"
-        )
-    if model.requires_analog_pin and new_analog is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Switch model '{model.manufacturer} {model.model}' requires an analog pin"
-        )
+    if new_input_source == 'gpio':
+        # GPIO-specific validation
+        # First, check that the platform supports GPIO
+        platform = detect_platform()
+        if not platform.gpio_available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"GPIO input is not available: {platform.reason or 'Platform does not support GPIO'}"
+            )
 
-    # Check for pin conflicts (excluding current switch)
-    if "labjack_digital_pin" in update_data and update_data["labjack_digital_pin"] is not None:
-        result = await session.execute(
-            select(Switch).where(
-                Switch.labjack_digital_pin == update_data["labjack_digital_pin"],
-                Switch.id != switch_id
-            )
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
+        # Check that switch model is compatible with GPIO (digital-only)
+        if model.input_type not in GPIO_COMPATIBLE_INPUT_TYPES:
             raise HTTPException(
-                status_code=409,
-                detail=f"Digital pin {update_data['labjack_digital_pin']} already in use"
+                status_code=400,
+                detail=f"Switch model '{model.manufacturer} {model.model}' ({model.input_type}) "
+                       f"is not compatible with GPIO. GPIO only supports digital inputs: "
+                       f"{', '.join(GPIO_COMPATIBLE_INPUT_TYPES)}"
             )
-    if "labjack_analog_pin" in update_data and update_data["labjack_analog_pin"] is not None:
-        result = await session.execute(
-            select(Switch).where(
-                Switch.labjack_analog_pin == update_data["labjack_analog_pin"],
-                Switch.id != switch_id
-            )
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
+
+        # Get effective GPIO pin
+        new_gpio_pin = update_data.get("gpio_bcm_pin", switch.gpio_bcm_pin)
+
+        # Require GPIO pin
+        if new_gpio_pin is None:
             raise HTTPException(
-                status_code=409,
-                detail=f"Analog pin {update_data['labjack_analog_pin']} already in use"
+                status_code=400,
+                detail="GPIO BCM pin is required when input_source is 'gpio'"
             )
+
+        # Validate GPIO pin is in allowed list
+        if new_gpio_pin not in AVAILABLE_GPIO_PINS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"GPIO{new_gpio_pin} is not available for switch input. "
+                       f"Available pins: {AVAILABLE_GPIO_PINS}"
+            )
+
+        # Check for GPIO pin conflicts (excluding current switch)
+        if "gpio_bcm_pin" in update_data and update_data["gpio_bcm_pin"] is not None:
+            result = await session.execute(
+                select(Switch).where(
+                    Switch.input_source == 'gpio',
+                    Switch.gpio_bcm_pin == update_data["gpio_bcm_pin"],
+                    Switch.id != switch_id
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"GPIO{update_data['gpio_bcm_pin']} is already in use by another switch"
+                )
+
+        # Clear LabJack pins when switching to GPIO
+        if "input_source" in update_data and update_data["input_source"] == 'gpio':
+            update_data['labjack_digital_pin'] = None
+            update_data['labjack_analog_pin'] = None
+
+    else:
+        # LabJack-specific validation
+        new_digital = update_data.get("labjack_digital_pin", switch.labjack_digital_pin)
+        new_analog = update_data.get("labjack_analog_pin", switch.labjack_analog_pin)
+
+        if model.requires_digital_pin and new_digital is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Switch model '{model.manufacturer} {model.model}' requires a digital pin"
+            )
+        if model.requires_analog_pin and new_analog is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Switch model '{model.manufacturer} {model.model}' requires an analog pin"
+            )
+
+        # Check for LabJack pin conflicts (excluding current switch)
+        if "labjack_digital_pin" in update_data and update_data["labjack_digital_pin"] is not None:
+            result = await session.execute(
+                select(Switch).where(
+                    Switch.input_source == 'labjack',
+                    Switch.labjack_digital_pin == update_data["labjack_digital_pin"],
+                    Switch.id != switch_id
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Digital pin {update_data['labjack_digital_pin']} already in use"
+                )
+        if "labjack_analog_pin" in update_data and update_data["labjack_analog_pin"] is not None:
+            result = await session.execute(
+                select(Switch).where(
+                    Switch.input_source == 'labjack',
+                    Switch.labjack_analog_pin == update_data["labjack_analog_pin"],
+                    Switch.id != switch_id
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Analog pin {update_data['labjack_analog_pin']} already in use"
+                )
+
+        # Clear GPIO pins when switching to LabJack
+        if "input_source" in update_data and update_data["input_source"] == 'labjack':
+            update_data['gpio_bcm_pin'] = None
+            update_data['gpio_pull'] = None
 
     for field, value in update_data.items():
         setattr(switch, field, value)

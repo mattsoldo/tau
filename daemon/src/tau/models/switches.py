@@ -84,6 +84,10 @@ class Switch(Base):
 
     Represents an actual switch/dimmer installed in the system with its
     hardware pin assignments and target (fixture or group).
+
+    Supports two input sources:
+    - LabJack U3-HV: Analog and digital inputs
+    - Raspberry Pi GPIO: Digital inputs only (Pi 4/5)
     """
 
     __tablename__ = "switches"
@@ -101,9 +105,27 @@ class Switch(Base):
         nullable=False,
     )
 
-    # Hardware Mapping (LabJack pins)
+    # Input Source Selection
+    input_source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="labjack"
+    )  # 'labjack' or 'gpio'
+
+    # Hardware Mapping (LabJack pins) - used when input_source='labjack'
     labjack_digital_pin: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     labjack_analog_pin: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # GPIO Mapping (Raspberry Pi) - used when input_source='gpio'
+    gpio_bcm_pin: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True
+    )  # BCM pin number (e.g., 17, 22, 27)
+    gpio_pull: Mapped[Optional[str]] = mapped_column(
+        String(10),
+        nullable=True,
+        server_default="up"
+    )  # 'up' or 'down' for pull resistor configuration
 
     # Hardware Configuration
     switch_type: Mapped[str] = mapped_column(

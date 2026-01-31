@@ -72,6 +72,44 @@ All fixtures inherit behavior exclusively from their fixture model.
   - When the LabJack is reconnected, physical switch control resumes automatically
 - Note: Requires LabJack Exodriver library installation and proper USB permissions
 
+### 3.4 Raspberry Pi GPIO
+
+The system supports reading digital switch inputs directly from Raspberry Pi GPIO pins as an alternative to LabJack.
+
+**Platform Detection:**
+- The system automatically detects if it is running on a Raspberry Pi
+- Only Raspberry Pi 4 and 5 series are supported
+- GPIO input option is only available when running on a supported Pi
+
+**Graceful Degradation:**
+- The system starts successfully even if GPIO initialization fails
+- If GPIO is unavailable:
+  - A non-blocking warning is shown
+  - Software-based control remains fully available
+  - The system logs the specific failure reason
+
+**Supported Switch Types (GPIO):**
+
+GPIO pins are digital-only (HIGH/LOW). The following switch types are compatible:
+
+| Switch Type | GPIO Compatible |
+|-------------|-----------------|
+| Retractive (momentary) | Yes |
+| Latching (on/off) | Yes |
+| Simple on/off | Yes |
+| Absolute rotary (0-10V) | No |
+| Paddle dimmer (0-10V) | No |
+
+**Input Configuration:**
+- Default pull resistor: Pull-up (switch connects GPIO to GND)
+- Advanced option: Pull-down configuration available per-pin
+- Software debouncing applied per switch model
+
+**Pin Restrictions:**
+- Only general-purpose GPIO pins are selectable
+- Pins with special functions (I2C, SPI, UART, etc.) are disabled
+- Power pins (3.3V, 5V) and ground pins are not selectable
+
 ---
 
 ## 4. Fixture Models
@@ -250,7 +288,7 @@ Scenes do not store group-level values.
 ### 9.1 Switch Models vs Switches
 
 - **Switch Models** define hardware behavior.
-- **Switches** are physical instances wired to LabJack pins.
+- **Switches** are physical instances wired to hardware inputs.
 
 Switch model properties (non-overridable):
 - Input type
@@ -259,7 +297,8 @@ Switch model properties (non-overridable):
 - Required pin type (analog/digital)
 
 Switch instances define:
-- Physical LabJack pin mapping
+- Input source (LabJack or GPIO)
+- Pin mapping (based on input source)
 - Target fixture or group
 
 Each switch targets **exactly one** fixture or group.
@@ -267,12 +306,28 @@ Each switch targets **exactly one** fixture or group.
 ### 9.2 Supported Input Types
 
 - Retractive switch
-- Absolute rotary (0–10V)
-- Relative rotary (infinite encoder)
-- Decora-style paddle dimmer (0–10V)
+- Absolute rotary (0–10V) - LabJack only
+- Relative rotary (infinite encoder) - LabJack only
+- Decora-style paddle dimmer (0–10V) - LabJack only
 - Simple on/off switch
 
 Users may upload a reference photo per switch.
+
+### 9.3 Input Sources
+
+Switches can be connected via two input sources:
+
+1. **LabJack U3-HV** - Supports both analog (0-10V) and digital inputs
+2. **Raspberry Pi GPIO** - Digital inputs only (requires running on Pi 4/5)
+
+Each switch instance defines:
+- Input source (`labjack` or `gpio`)
+- Pin assignment (LabJack pin or GPIO BCM number)
+- Target fixture or group
+
+**GPIO-Specific Fields:**
+- `gpio_bcm_pin`: BCM pin number (e.g., 17, 27, 22)
+- `gpio_pull`: Pull resistor configuration (`up` or `down`, default: `up`)
 
 ---
 
@@ -468,8 +523,46 @@ The mobile UI provides a touch-optimized interface:
 
 - System health monitoring
 - Active overrides card with remove functionality
-- Hardware status (LabJack, OLA)
+- Hardware status (LabJack, OLA, GPIO)
 - Event loop performance metrics
+
+### 15.8 GPIO Pin Selection
+
+When configuring a switch to use Raspberry Pi GPIO, the UI presents an interactive pin selector:
+
+**Pin Diagram View (Selection Mode):**
+- Visual representation of the 40-pin GPIO header
+- Pins displayed in correct physical layout (2 columns x 20 rows)
+- Each pin shows:
+  - Physical pin number (1-40)
+  - BCM number for GPIO pins (e.g., "GPIO17")
+  - Function label for non-GPIO pins (e.g., "3.3V", "GND", "SDA")
+
+**Pin States (Color Key):**
+
+| State | Color | Description |
+|-------|-------|-------------|
+| Available | Green | Selectable GPIO pin |
+| In Use | Gray (disabled) | Already assigned to another switch |
+| Special Function | Orange (disabled) | Reserved pins (I2C, SPI, UART, etc.) |
+| Power/Ground | Red (disabled) | 3.3V, 5V, or GND pins |
+
+**Board Orientation View:**
+- Zoomed-out illustration of the entire Raspberry Pi board
+- Shows the GPIO header location relative to other components (USB, Ethernet, etc.)
+- Highlights the currently selected pin position
+- Non-interactive (orientation reference only)
+- Indicates board orientation markers (e.g., "USB ports this side")
+
+**Ground Pin Suggestion:**
+- When a GPIO pin is selected, the nearest ground pin is highlighted
+- Label displays "Suggested GND" with the physical pin number
+- Wiring instructions provided (e.g., "Connect switch between Pin 11 (GPIO17) and Pin 9 (GND)")
+
+**Mobile Considerations:**
+- Pin diagram uses minimum 44px touch targets
+- Horizontal scroll if needed on small screens
+- Tap to select, with confirmation before applying
 
 ---
 

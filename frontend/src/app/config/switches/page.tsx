@@ -1,13 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ToastContainer, ToastProps } from '@/components/ui/Toast';
 import { API_URL, getWsUrl } from '@/utils/api';
+import { GPIOPinDiagram, BoardOrientation } from '@/components/gpio';
 
 // === Types ===
 
 type SwitchInputType = 'retractive' | 'rotary_abs' | 'paddle_composite' | 'switch_simple';
 type DimmingCurve = 'linear' | 'logarithmic';
+type InputSource = 'labjack' | 'gpio';
+
+// Switch types compatible with GPIO (digital-only inputs)
+const GPIO_COMPATIBLE_INPUT_TYPES: SwitchInputType[] = ['retractive', 'switch_simple'];
 
 interface SwitchModel {
   id: number;
@@ -26,8 +31,11 @@ interface Switch {
   id: number;
   name: string | null;
   switch_model_id: number;
+  input_source: InputSource;
   labjack_digital_pin: number | null;
   labjack_analog_pin: number | null;
+  gpio_bcm_pin: number | null;
+  gpio_pull: 'up' | 'down' | null;
   switch_type: SwitchType;
   invert_reading: boolean;
   target_group_id: number | null;
@@ -53,13 +61,23 @@ interface Scene {
   name: string;
 }
 
+interface PlatformInfo {
+  is_raspberry_pi: boolean;
+  pi_model: string | null;
+  gpio_available: boolean;
+  reason: string | null;
+}
+
 type TargetType = 'group' | 'fixture';
 
 interface FormData {
   name: string;
   switch_model_id: string;
+  input_source: InputSource;
   labjack_digital_pin: string;
   labjack_analog_pin: string;
+  gpio_bcm_pin: number | null;
+  gpio_pull: 'up' | 'down';
   switch_type: SwitchType;
   invert_reading: boolean;
   target_type: TargetType;
@@ -71,8 +89,11 @@ interface FormData {
 const emptyFormData: FormData = {
   name: '',
   switch_model_id: '',
+  input_source: 'labjack',
   labjack_digital_pin: '',
   labjack_analog_pin: '',
+  gpio_bcm_pin: null,
+  gpio_pull: 'up',
   switch_type: 'normally-closed',
   invert_reading: false,
   target_type: 'group',
@@ -81,11 +102,11 @@ const emptyFormData: FormData = {
   double_tap_scene_id: '',
 };
 
-const inputTypeLabels: Record<SwitchInputType, { label: string; color: string }> = {
-  retractive: { label: 'Retractive', color: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
-  rotary_abs: { label: 'Rotary', color: 'bg-purple-500/15 text-purple-400 border-purple-500/30' },
-  paddle_composite: { label: 'Paddle', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
-  switch_simple: { label: 'Simple', color: 'bg-green-500/15 text-green-400 border-green-500/30' },
+const inputTypeLabels: Record<SwitchInputType, { label: string; color: string; gpioCompatible: boolean }> = {
+  retractive: { label: 'Retractive', color: 'bg-blue-500/15 text-blue-400 border-blue-500/30', gpioCompatible: true },
+  rotary_abs: { label: 'Rotary', color: 'bg-purple-500/15 text-purple-400 border-purple-500/30', gpioCompatible: false },
+  paddle_composite: { label: 'Paddle', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', gpioCompatible: false },
+  switch_simple: { label: 'Simple', color: 'bg-green-500/15 text-green-400 border-green-500/30', gpioCompatible: true },
 };
 
 // === Component ===
@@ -97,6 +118,7 @@ export default function SwitchesPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [scenes, setScenes] = useState<Scene[]>([]);
+  const [platformInfo, setPlatformInfo] = useState<PlatformInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -104,6 +126,7 @@ export default function SwitchesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSwitch, setEditingSwitch] = useState<Switch | null>(null);
   const [formData, setFormData] = useState<FormData>(emptyFormData);
+  const [selectedPhysicalPin, setSelectedPhysicalPin] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
@@ -120,12 +143,13 @@ export default function SwitchesPage() {
   // Fetch all data
   const fetchData = useCallback(async () => {
     try {
-      const [switchesRes, modelsRes, groupsRes, fixturesRes, scenesRes] = await Promise.all([
+      const [switchesRes, modelsRes, groupsRes, fixturesRes, scenesRes, platformRes] = await Promise.all([
         fetch(`${API_URL}/api/switches/`),
         fetch(`${API_URL}/api/switches/models`),
         fetch(`${API_URL}/api/groups/`),
         fetch(`${API_URL}/api/fixtures/`),
         fetch(`${API_URL}/api/scenes/`),
+        fetch(`${API_URL}/api/gpio/platform`),
       ]);
 
       if (!switchesRes.ok) throw new Error('Failed to fetch switches');
@@ -142,11 +166,18 @@ export default function SwitchesPage() {
         scenesRes.json(),
       ]);
 
+      // Platform info is optional - don't fail if not available
+      let platformData = null;
+      if (platformRes.ok) {
+        platformData = await platformRes.json();
+      }
+
       setSwitches(switchesData);
       setSwitchModels(modelsData);
       setGroups(groupsData);
       setFixtures(fixturesData);
       setScenes(scenesData);
+      setPlatformInfo(platformData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -336,8 +367,12 @@ export default function SwitchesPage() {
   // Modal operations
   const openCreateModal = () => {
     setEditingSwitch(null);
+    setSelectedPhysicalPin(null);
+    // Default to LabJack if GPIO not available
+    const defaultInputSource: InputSource = platformInfo?.gpio_available ? 'labjack' : 'labjack';
     setFormData({
       ...emptyFormData,
+      input_source: defaultInputSource,
       switch_model_id: switchModels.length > 0 ? switchModels[0].id.toString() : '',
     });
     setIsModalOpen(true);
@@ -345,11 +380,15 @@ export default function SwitchesPage() {
 
   const openEditModal = (sw: Switch) => {
     setEditingSwitch(sw);
+    setSelectedPhysicalPin(null); // Will be set when pin diagram loads
     setFormData({
       name: sw.name || '',
       switch_model_id: sw.switch_model_id.toString(),
+      input_source: sw.input_source || 'labjack',
       labjack_digital_pin: sw.labjack_digital_pin?.toString() || '',
       labjack_analog_pin: sw.labjack_analog_pin?.toString() || '',
+      gpio_bcm_pin: sw.gpio_bcm_pin,
+      gpio_pull: sw.gpio_pull || 'up',
       switch_type: sw.switch_type || 'normally-closed',
       invert_reading: sw.invert_reading || false,
       target_type: sw.target_group_id !== null ? 'group' : 'fixture',
@@ -359,6 +398,15 @@ export default function SwitchesPage() {
     });
     setIsModalOpen(true);
   };
+
+  // Filter switch models based on input source compatibility
+  const filteredSwitchModels = useMemo(() => {
+    if (formData.input_source === 'gpio') {
+      // Only show GPIO-compatible models (digital-only)
+      return switchModels.filter(m => GPIO_COMPATIBLE_INPUT_TYPES.includes(m.input_type));
+    }
+    return switchModels;
+  }, [switchModels, formData.input_source]);
 
   const handleSave = async () => {
     if (!formData.switch_model_id) {
@@ -370,6 +418,12 @@ export default function SwitchesPage() {
     const validSwitchTypes: SwitchType[] = ['normally-open', 'normally-closed'];
     if (!validSwitchTypes.includes(formData.switch_type)) {
       setError('Invalid switch type. Must be "normally-open" or "normally-closed"');
+      return;
+    }
+
+    // Validate GPIO pin if using GPIO source
+    if (formData.input_source === 'gpio' && formData.gpio_bcm_pin === null) {
+      setError('Please select a GPIO pin');
       return;
     }
 
@@ -389,17 +443,29 @@ export default function SwitchesPage() {
     setError(null);
 
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: formData.name.trim() || null,
         switch_model_id: parseInt(formData.switch_model_id),
-        labjack_digital_pin: formData.labjack_digital_pin ? parseInt(formData.labjack_digital_pin) : null,
-        labjack_analog_pin: formData.labjack_analog_pin ? parseInt(formData.labjack_analog_pin) : null,
+        input_source: formData.input_source,
         switch_type: formData.switch_type,
         invert_reading: formData.invert_reading,
         target_group_id: targetGroupId,
         target_fixture_id: targetFixtureId,
         double_tap_scene_id: formData.double_tap_scene_id ? parseInt(formData.double_tap_scene_id) : null,
       };
+
+      // Add input source-specific fields
+      if (formData.input_source === 'gpio') {
+        payload.gpio_bcm_pin = formData.gpio_bcm_pin;
+        payload.gpio_pull = formData.gpio_pull;
+        payload.labjack_digital_pin = null;
+        payload.labjack_analog_pin = null;
+      } else {
+        payload.labjack_digital_pin = formData.labjack_digital_pin ? parseInt(formData.labjack_digital_pin) : null;
+        payload.labjack_analog_pin = formData.labjack_analog_pin ? parseInt(formData.labjack_analog_pin) : null;
+        payload.gpio_bcm_pin = null;
+        payload.gpio_pull = null;
+      }
 
       const url = editingSwitch
         ? `${API_URL}/api/switches/${editingSwitch.id}`
@@ -585,18 +651,32 @@ export default function SwitchesPage() {
                     </td>
                     <td className="px-6 py-4 align-middle">
                       <div className="flex flex-col gap-1 min-h-[40px] justify-center">
-                        <div className="flex gap-2">
-                          {sw.labjack_digital_pin !== null && (
+                        <div className="flex gap-2 items-center">
+                          {/* Input source badge */}
+                          <span className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${
+                            sw.input_source === 'gpio'
+                              ? 'bg-green-500/10 text-green-400'
+                              : 'bg-blue-500/10 text-blue-400'
+                          }`}>
+                            {sw.input_source === 'gpio' ? 'GPIO' : 'LJ'}
+                          </span>
+                          {/* Pin assignments */}
+                          {sw.input_source === 'gpio' && sw.gpio_bcm_pin !== null && (
+                            <span className="px-2 py-0.5 text-xs bg-green-500/10 text-green-400 rounded font-mono">
+                              GPIO{sw.gpio_bcm_pin}
+                            </span>
+                          )}
+                          {sw.input_source !== 'gpio' && sw.labjack_digital_pin !== null && (
                             <span className="px-2 py-0.5 text-xs bg-blue-500/10 text-blue-400 rounded font-mono">
                               D{sw.labjack_digital_pin}
                             </span>
                           )}
-                          {sw.labjack_analog_pin !== null && (
+                          {sw.input_source !== 'gpio' && sw.labjack_analog_pin !== null && (
                             <span className="px-2 py-0.5 text-xs bg-purple-500/10 text-purple-400 rounded font-mono">
                               A{sw.labjack_analog_pin}
                             </span>
                           )}
-                          {sw.labjack_digital_pin === null && sw.labjack_analog_pin === null && (
+                          {sw.input_source !== 'gpio' && sw.labjack_digital_pin === null && sw.labjack_analog_pin === null && (
                             <span className="text-[#636366] text-sm">None</span>
                           )}
                         </div>
@@ -703,7 +783,67 @@ export default function SwitchesPage() {
                 />
               </div>
 
-              {/* Switch Model */}
+              {/* Input Source Selection */}
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-[#a1a1a6]">Input Source</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({
+                      ...formData,
+                      input_source: 'labjack',
+                      gpio_bcm_pin: null,
+                      switch_model_id: '', // Reset model when switching source
+                    })}
+                    className={`flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
+                      formData.input_source === 'labjack'
+                        ? 'bg-blue-500/15 border-blue-500/30 text-blue-400'
+                        : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
+                    }`}
+                  >
+                    <svg className="w-4 h-4 inline-block mr-2" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z" />
+                    </svg>
+                    LabJack U3
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({
+                      ...formData,
+                      input_source: 'gpio',
+                      labjack_digital_pin: '',
+                      labjack_analog_pin: '',
+                      switch_model_id: '', // Reset model when switching source
+                    })}
+                    disabled={!platformInfo?.gpio_available}
+                    className={`flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
+                      formData.input_source === 'gpio'
+                        ? 'bg-green-500/15 border-green-500/30 text-green-400'
+                        : platformInfo?.gpio_available
+                          ? 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
+                          : 'bg-[#111113] border-[#2a2a2f] text-[#636366] cursor-not-allowed opacity-50'
+                    }`}
+                  >
+                    <svg className="w-4 h-4 inline-block mr-2" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859M12 3v8.25m0 0l-3-3m3 3l3-3" />
+                    </svg>
+                    Raspberry Pi GPIO
+                  </button>
+                </div>
+                {/* GPIO availability message */}
+                {!platformInfo?.gpio_available && platformInfo && (
+                  <p className="text-xs text-[#636366]">
+                    {platformInfo.reason || 'GPIO not available on this system'}
+                  </p>
+                )}
+                {formData.input_source === 'gpio' && platformInfo?.pi_model && (
+                  <p className="text-xs text-green-400">
+                    Running on {platformInfo.pi_model}
+                  </p>
+                )}
+              </div>
+
+              {/* Switch Model - filtered by input source compatibility */}
               <div>
                 <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Switch Model</label>
                 <select
@@ -712,16 +852,21 @@ export default function SwitchesPage() {
                   className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
                 >
                   <option value="">Select a model...</option>
-                  {switchModels.map((model) => (
+                  {filteredSwitchModels.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.manufacturer} {model.model} ({inputTypeLabels[model.input_type].label})
                     </option>
                   ))}
                 </select>
+                {formData.input_source === 'gpio' && filteredSwitchModels.length < switchModels.length && (
+                  <p className="text-xs text-[#636366] mt-1">
+                    Only digital switch types shown (GPIO doesn&apos;t support analog inputs)
+                  </p>
+                )}
               </div>
 
-              {/* Pin Requirements Indicator */}
-              {selectedModel && (
+              {/* Pin Requirements Indicator (LabJack only) */}
+              {selectedModel && formData.input_source === 'labjack' && (
                 <div className="px-3 py-2 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg">
                   <div className="text-xs text-[#636366] mb-1">Pin Requirements</div>
                   <div className="flex gap-3">
@@ -738,41 +883,82 @@ export default function SwitchesPage() {
                 </div>
               )}
 
-              {/* LabJack Pins */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
-                    Digital Pin
-                    {selectedModel?.requires_digital_pin && <span className="text-red-400 ml-1">*</span>}
-                  </label>
-                  <select
-                    value={formData.labjack_digital_pin}
-                    onChange={(e) => setFormData({ ...formData, labjack_digital_pin: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                  >
-                    <option value="">None</option>
-                    {Array.from({ length: 16 }, (_, i) => (
-                      <option key={i} value={i}>FIO{i} / D{i}</option>
-                    ))}
-                  </select>
+              {/* GPIO Pin Selection */}
+              {formData.input_source === 'gpio' && (
+                <div className="space-y-4">
+                  {/* GPIO Pin Diagram */}
+                  <GPIOPinDiagram
+                    selectedBcmPin={formData.gpio_bcm_pin}
+                    onPinSelect={(bcmPin, physicalPin) => {
+                      setFormData({ ...formData, gpio_bcm_pin: bcmPin });
+                      setSelectedPhysicalPin(physicalPin);
+                    }}
+                    apiUrl={API_URL}
+                  />
+
+                  {/* Board Orientation Reference */}
+                  <BoardOrientation
+                    selectedPhysicalPin={selectedPhysicalPin}
+                    piModel={platformInfo?.pi_model}
+                  />
+
+                  {/* Pull Resistor Configuration */}
+                  {formData.gpio_bcm_pin !== null && (
+                    <div>
+                      <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Pull Resistor</label>
+                      <select
+                        value={formData.gpio_pull}
+                        onChange={(e) => setFormData({ ...formData, gpio_pull: e.target.value as 'up' | 'down' })}
+                        className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                      >
+                        <option value="up">Pull-up (recommended)</option>
+                        <option value="down">Pull-down</option>
+                      </select>
+                      <p className="text-xs text-[#636366] mt-1">
+                        Pull-up: Wire switch to GND. Pull-down: Wire switch to 3.3V.
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
-                    Analog Pin
-                    {selectedModel?.requires_analog_pin && <span className="text-red-400 ml-1">*</span>}
-                  </label>
-                  <select
-                    value={formData.labjack_analog_pin}
-                    onChange={(e) => setFormData({ ...formData, labjack_analog_pin: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                  >
-                    <option value="">None</option>
-                    {Array.from({ length: 16 }, (_, i) => (
-                      <option key={i} value={i}>AIN{i} / A{i}</option>
-                    ))}
-                  </select>
+              )}
+
+              {/* LabJack Pins (only shown for LabJack input source) */}
+              {formData.input_source === 'labjack' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
+                      Digital Pin
+                      {selectedModel?.requires_digital_pin && <span className="text-red-400 ml-1">*</span>}
+                    </label>
+                    <select
+                      value={formData.labjack_digital_pin}
+                      onChange={(e) => setFormData({ ...formData, labjack_digital_pin: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                    >
+                      <option value="">None</option>
+                      {Array.from({ length: 16 }, (_, i) => (
+                        <option key={i} value={i}>FIO{i} / D{i}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
+                      Analog Pin
+                      {selectedModel?.requires_analog_pin && <span className="text-red-400 ml-1">*</span>}
+                    </label>
+                    <select
+                      value={formData.labjack_analog_pin}
+                      onChange={(e) => setFormData({ ...formData, labjack_analog_pin: e.target.value })}
+                      className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                    >
+                      <option value="">None</option>
+                      {Array.from({ length: 16 }, (_, i) => (
+                        <option key={i} value={i}>AIN{i} / A{i}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Switch Type Configuration */}
               <div className="space-y-3">

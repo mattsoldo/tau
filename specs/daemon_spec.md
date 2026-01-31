@@ -101,6 +101,45 @@ Out of scope (v1)
 	•	Automatically poll for (re)connect every 10 seconds via health check loop
 	•	When OLA/ENTTEC device is connected, automatically initialize and resume DMX output
 
+4.4 Raspberry Pi GPIO
+
+**Platform Detection:**
+	•	On startup, daemon checks `/proc/cpuinfo` and `/sys/firmware/devicetree/base/model`
+	•	Supported models: Raspberry Pi 4 Model B, Raspberry Pi 5
+	•	Detection result is cached and exposed via `/api/gpio/platform` endpoint
+
+**Library:**
+	•	Uses `gpiozero` library for hardware abstraction
+	•	`gpiozero` handles differences between Pi 4 (BCM2711) and Pi 5 (RP1 chip) automatically
+
+**Initialization:**
+	•	GPIO pins are configured on daemon startup based on switch definitions
+	•	Each pin configured as input with specified pull resistor
+	•	Edge detection enabled for interrupt-based input (vs polling)
+
+**Pin Numbering:**
+	•	Internal storage uses BCM numbering (e.g., GPIO17 = BCM 17)
+	•	API accepts and returns BCM numbers
+	•	UI displays both physical pin number and BCM number
+
+**Available GPIO Pins (BCM):**
+
+The following BCM pins are available for switch input:
+	•	4, 5, 6, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27
+
+**Disabled Pins (Special Functions):**
+
+| BCM | Function | Reason |
+|-----|----------|--------|
+| 0, 1 | I2C (ID EEPROM) | Reserved for HAT detection |
+| 2, 3 | I2C1 (SDA/SCL) | Common peripheral bus |
+| 7, 8, 9, 10, 11 | SPI0 | SPI peripheral |
+| 14, 15 | UART | Serial console |
+
+**Mock Mode:**
+	•	When `GPIO_MOCK=true` or not running on Pi, GPIO inputs are simulated
+	•	Mock mode useful for development and testing on non-Pi systems
+
 ⸻
 
 5. DB Interaction (Schema-aligned)
@@ -199,8 +238,31 @@ When controlling a group, the daemon must:
 	•	target_group_id
 	•	target_fixture_id
 
+9.1.1 Input Source Selection
+
+Each switch specifies an input source:
+	•	`input_source`: 'labjack' | 'gpio'
+	•	Source determines which hardware subsystem reads the input
+
+**LabJack Source:**
+	•	`labjack_digital_pin`: Pin identifier (e.g., 0-15)
+	•	`labjack_analog_pin`: Analog pin identifier (e.g., 0-15)
+	•	Supports both analog and digital inputs
+
+**GPIO Source:**
+	•	`gpio_bcm_pin`: BCM pin number (integer, e.g., 17)
+	•	`gpio_pull`: 'up' | 'down' (default: 'up')
+	•	Digital inputs only
+
 9.2 Polling
+
+**LabJack:**
 	•	Poll analog and digital pins required by each switch model.
+
+**GPIO:**
+	•	Uses edge detection (interrupt-based) rather than polling
+	•	Callback registered per pin via `gpiozero`
+	•	Events queued and processed in input loop
 
 9.3 Debouncing
 	•	Use switch_models.debounce_ms per switch model.
@@ -397,6 +459,65 @@ Behavior:
 
 GET /config
 Returns effective daemon configuration.
+
+10.8.1 Platform Information
+
+GET /api/gpio/platform
+Response:
+```json
+{
+  "is_raspberry_pi": true,
+  "pi_model": "Raspberry Pi 5 Model B",
+  "gpio_available": true,
+  "reason": null,
+  "gpio_pins": {
+    "available": [4, 5, 6, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],
+    "in_use": [17, 22],
+    "disabled": [0, 1, 2, 3, 7, 8, 9, 10, 11, 14, 15]
+  }
+}
+```
+
+When not running on Raspberry Pi:
+```json
+{
+  "is_raspberry_pi": false,
+  "pi_model": null,
+  "gpio_available": false,
+  "reason": "Not running on a Raspberry Pi",
+  "gpio_pins": null
+}
+```
+
+10.8.2 GPIO Pin Layout
+
+GET /api/gpio/layout
+Response (for UI pin diagram):
+```json
+{
+  "header_pins": [
+    {"physical": 1, "type": "power", "label": "3.3V"},
+    {"physical": 2, "type": "power", "label": "5V"},
+    {"physical": 3, "type": "disabled", "bcm": 2, "label": "GPIO2 (SDA)", "in_use": false},
+    {"physical": 7, "type": "gpio", "bcm": 4, "label": "GPIO4", "in_use": false},
+    ...
+  ],
+  "ground_pins": [6, 9, 14, 20, 25, 30, 34, 39],
+  "available_bcm_pins": [4, 5, 6, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
+}
+```
+
+10.8.3 Nearest Ground Pin
+
+GET /api/gpio/nearest-ground/{bcm_pin}
+Response:
+```json
+{
+  "selected_physical_pin": 11,
+  "nearest_ground_physical": 9,
+  "wiring_instruction": "Connect switch between Pin 11 (GPIO17) and Pin 9 (GND)"
+}
+```
 
 10.9 Event stream (recommended)
 
