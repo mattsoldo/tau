@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tau-daemon"
-version = "1.6.3"
+version = "1.6.4"
 description = "Tau Smart Lighting Control Daemon"
 readme = "README.md"
 requires-python = ">=3.11"
