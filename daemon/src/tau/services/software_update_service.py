@@ -1529,19 +1529,35 @@ class SoftwareUpdateService:
         )
 
     async def _build_frontend(self) -> None:
-        """Build frontend static assets after update install."""
+        """
+        Build frontend static assets after update install.
+
+        IMPORTANT: This method does NOT delete out/ before building.
+        Next.js handles the out/ directory during its export phase,
+        which only takes a few seconds. This ensures:
+
+        1. nginx continues serving the OLD frontend during the entire build
+        2. Only a brief (~1-2 second) window during Next.js export phase
+        3. If build fails, old out/ may be corrupted but we'll know from the error
+
+        The build is verified by checking for index.html and minimum file count.
+        """
         frontend_dir = self.app_root / "frontend"
         package_json = frontend_dir / "package.json"
+        out_dir = frontend_dir / "out"
+
         if not frontend_dir.exists() or not package_json.exists():
             logger.warning("frontend_build_skipped", reason="frontend_missing", path=str(frontend_dir))
             return
 
         try:
-            # Clean previous build artifacts
-            for path in ("out", ".next", "node_modules/.cache"):
+            # Step 1: Clean build cache only (NOT out/ - nginx keeps serving old version)
+            for path in (".next", "node_modules/.cache"):
                 shutil.rmtree(frontend_dir / path, ignore_errors=True)
 
-            # Install dependencies
+            logger.info("frontend_build_prep_complete")
+
+            # Step 2: Install dependencies
             install_cmd = ["npm", "ci"] if (frontend_dir / "package-lock.json").exists() else ["npm", "install"]
             logger.info("frontend_deps_installing", command=" ".join(install_cmd))
             install_proc = await asyncio.create_subprocess_exec(
@@ -1558,10 +1574,14 @@ class SoftwareUpdateService:
                     f"Frontend dependency install failed: {stderr.decode().strip()}"
                 )
 
-            # Build static frontend
+            # Step 3: Build frontend
+            # IMPORTANT: We do NOT delete out/ here. Next.js will overwrite it
+            # during the export phase, which is quick (seconds). This ensures
+            # nginx can serve the old frontend during the entire build process.
             env = os.environ.copy()
             env["NODE_ENV"] = "production"
             logger.info("frontend_build_starting")
+
             build_proc = await asyncio.create_subprocess_exec(
                 "npm",
                 "run",
@@ -1577,12 +1597,31 @@ class SoftwareUpdateService:
             if build_proc.returncode != 0:
                 raise InstallationError(f"Frontend build failed: {stderr.decode().strip()}")
 
-            if not (frontend_dir / "out").exists():
+            # Step 4: Verify build output exists
+            # Next.js creates out/ during build with output:'export'
+            if not out_dir.exists():
                 raise InstallationError("Frontend build completed but output directory is missing")
 
-            logger.info("frontend_build_complete", path=str(frontend_dir / "out"))
+            # Verify it has expected files
+            index_html = out_dir / "index.html"
+            if not index_html.exists():
+                raise InstallationError("Frontend build completed but index.html is missing")
+
+            # Count files to ensure it's a real build
+            file_count = sum(1 for _ in out_dir.rglob("*") if _.is_file())
+            if file_count < 5:
+                raise InstallationError(f"Frontend build seems incomplete, only {file_count} files")
+
+            logger.info("frontend_build_verified", file_count=file_count)
+            logger.info("frontend_build_complete", path=str(out_dir))
+
         except asyncio.TimeoutError:
+            logger.error("frontend_build_timeout", timeout=FRONTEND_BUILD_TIMEOUT)
             raise InstallationError(f"Frontend build timed out after {FRONTEND_BUILD_TIMEOUT}s")
+
+        except Exception as e:
+            logger.error("frontend_build_failed", error=str(e))
+            raise
 
     async def _run_migrations(self):
         """Run database migrations (upgrade to head)"""
