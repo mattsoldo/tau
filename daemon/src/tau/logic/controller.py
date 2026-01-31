@@ -45,6 +45,7 @@ class LightingController:
         state_manager: "StateManager",
         hardware_manager: HardwareManager,
         dim_speed_ms: int = 700,
+        tap_window_ms: int = 500,
         dmx_dedupe_enabled: bool = True,
         dmx_dedupe_ttl_seconds: float = 1.0
     ):
@@ -55,6 +56,7 @@ class LightingController:
             state_manager: Reference to state manager
             hardware_manager: Reference to hardware manager
             dim_speed_ms: Time in ms for retractive switch dimming (0-100%)
+            tap_window_ms: Time window in ms for double-tap detection (200-900ms)
             dmx_dedupe_enabled: Whether to skip redundant DMX writes
             dmx_dedupe_ttl_seconds: How long to cache DMX values before resending
         """
@@ -70,6 +72,7 @@ class LightingController:
             state_manager,
             hardware_manager,
             dim_speed_ms=dim_speed_ms,
+            tap_window_ms=tap_window_ms,
             scene_engine=self.scenes
         )
         self.dtw = DTWEngine()
@@ -567,6 +570,15 @@ class LightingController:
             dim_speed_ms: Time in ms for full brightness range (0-100%)
         """
         self.switches.set_dim_speed_ms(dim_speed_ms)
+
+    def set_tap_window_ms(self, tap_window_ms: int) -> None:
+        """
+        Update the tap detection window at runtime (hot-reload)
+
+        Args:
+            tap_window_ms: Time window in ms for double-tap detection (200-900ms)
+        """
+        self.switches.set_tap_window_ms(tap_window_ms)
 
     async def reload_switches(self) -> int:
         """

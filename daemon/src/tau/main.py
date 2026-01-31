@@ -99,6 +99,16 @@ class TauDaemon:
         )
         logger.info("dim_speed_loaded", dim_speed_ms=dim_speed_ms)
 
+        # Load tap_window_ms from system settings (default 500ms, range 200-900ms per PRD)
+        tap_window_ms = await get_system_setting_typed(
+            key="tap_window_ms",
+            value_type="int",
+            default_value=500
+        )
+        # Clamp to valid range
+        tap_window_ms = max(200, min(900, tap_window_ms))
+        logger.info("tap_window_loaded", tap_window_ms=tap_window_ms)
+
         dmx_dedupe_enabled = await get_system_setting_typed(
             key="dmx_dedupe_enabled",
             value_type="bool",
@@ -119,6 +129,7 @@ class TauDaemon:
             self.state_manager,
             self.hardware_manager,
             dim_speed_ms=dim_speed_ms,
+            tap_window_ms=tap_window_ms,
             dmx_dedupe_enabled=dmx_dedupe_enabled,
             dmx_dedupe_ttl_seconds=dmx_dedupe_ttl_seconds
         )

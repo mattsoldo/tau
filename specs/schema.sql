@@ -273,6 +273,12 @@ INSERT INTO system_settings (key, value, description, value_type) VALUES
     'int'
 ),
 (
+    'tap_window_ms',
+    '500',
+    'Time window in milliseconds to detect double-tap on switches (200-900ms). Lower = faster toggle, less time for double-tap.',
+    'int'
+),
+(
     'street_address',
     '',
     'Street address for home location display in header',

@@ -137,6 +137,27 @@ class SwitchHandler:
             new_value=dim_speed_ms
         )
 
+    def set_tap_window_ms(self, tap_window_ms: int) -> None:
+        """
+        Update the tap detection window at runtime (hot-reload)
+
+        Args:
+            tap_window_ms: Time window in ms for double-tap detection (200-900ms recommended)
+
+        Note:
+            Thread-safe due to Python's GIL - simple integer assignment is atomic.
+            Lower values = faster single-tap toggle, but less time for double-tap.
+        """
+        # Clamp to valid range per PRD (200-900ms)
+        tap_window_ms = max(200, min(900, tap_window_ms))
+        old_value = self.tap_window_ms
+        self.tap_window_ms = tap_window_ms
+        logger.info(
+            "tap_window_updated",
+            old_value=old_value,
+            new_value=tap_window_ms
+        )
+
     async def load_switches(self) -> int:
         """
         Load all switch configurations from database

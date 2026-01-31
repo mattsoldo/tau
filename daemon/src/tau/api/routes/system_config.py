@@ -234,13 +234,20 @@ async def update_system_setting(key: str, update: SystemSettingUpdateRequest):
             )
 
             # Hot-reload specific settings that need runtime updates
-            if key in ("dim_speed_ms", "dmx_dedupe_enabled", "dmx_dedupe_ttl_seconds"):
+            hot_reload_keys = (
+                "dim_speed_ms", "tap_window_ms",
+                "dmx_dedupe_enabled", "dmx_dedupe_ttl_seconds"
+            )
+            if key in hot_reload_keys:
                 daemon = get_daemon_instance()
                 if daemon and daemon.lighting_controller:
                     try:
                         if key == "dim_speed_ms":
                             daemon.lighting_controller.set_dim_speed_ms(int(update.value))
                             logger.info("dim_speed_hot_reloaded", new_value=update.value)
+                        elif key == "tap_window_ms":
+                            daemon.lighting_controller.set_tap_window_ms(int(update.value))
+                            logger.info("tap_window_hot_reloaded", new_value=update.value)
                         elif key == "dmx_dedupe_enabled":
                             enabled = update.value.lower() in ("true", "1", "yes")
                             daemon.lighting_controller.set_dmx_dedupe_enabled(enabled)
