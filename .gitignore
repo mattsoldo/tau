@@ -77,3 +77,7 @@ coverage/
 
 # System files
 Thumbs.db
+
+# Local dev directories
+daemon/.venv312/
+figma_mobile/
