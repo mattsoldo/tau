@@ -97,6 +97,9 @@ export default function HomePage() {
   // Track pending API requests to avoid WebSocket race conditions
   const pendingRequestsRef = useRef<Set<string>>(new Set());
 
+  // Theme - must be called before any early returns
+  const { theme, setTheme } = useTheme();
+
   // WebSocket handlers
   const handleFixtureStateChanged = useCallback((event: FixtureStateChangedEvent) => {
     const key = `fixture-${event.fixture_id}`;
@@ -647,8 +650,6 @@ export default function HomePage() {
 
   // Global scenes (not scoped to any group)
   const globalScenes = scenes.filter(s => s.scope_group_id === null);
-
-  const { theme, setTheme } = useTheme();
 
   const navItems = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
