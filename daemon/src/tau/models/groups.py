@@ -76,6 +76,24 @@ class Group(Base):
         Integer, nullable=True
     )
 
+    # Sleep Mode Lock Configuration
+    # When enabled, controls are locked during the specified time window
+    sleep_lock_enabled: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True, server_default="false"
+    )
+    # Start time in HH:MM format (24-hour), e.g., "22:00" for 10 PM
+    sleep_lock_start_time: Mapped[Optional[str]] = mapped_column(
+        String(5), nullable=True
+    )
+    # End time in HH:MM format (24-hour), e.g., "07:00" for 7 AM
+    sleep_lock_end_time: Mapped[Optional[str]] = mapped_column(
+        String(5), nullable=True
+    )
+    # Duration in minutes that the unlock gesture grants access (0 = single action only)
+    sleep_lock_unlock_duration_minutes: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, server_default="5"
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,

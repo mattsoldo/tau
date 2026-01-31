@@ -101,7 +101,17 @@ export interface Group {
   description: string | null;
   circadian_enabled: boolean;
   circadian_profile_id: number | null;
+  default_max_brightness: number | null;
+  default_cct_kelvin: number | null;
+  is_system: boolean | null;
+  display_order: number | null;
   created_at: string;
+  // Sleep Mode Lock Settings
+  sleep_lock_enabled: boolean;
+  sleep_lock_start_time: string | null;  // HH:MM format
+  sleep_lock_end_time: string | null;    // HH:MM format
+  sleep_lock_unlock_duration_minutes: number | null;
+  sleep_lock_active: boolean | null;     // Computed field from server
 }
 
 // Circadian Types
