@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { ToastContainer, ToastProps } from '@/components/ui/Toast';
 import { API_URL, getWsUrl } from '@/utils/api';
-import { GPIOPinDiagram, BoardOrientation } from '@/components/gpio';
+import { GPIOPinDiagram } from '@/components/gpio';
 
 // === Types ===
 
@@ -752,10 +752,10 @@ export default function SwitchesPage() {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl w-full max-w-lg mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#161619] border border-[#2a2a2f] rounded-2xl w-full max-w-[1200px] shadow-2xl flex flex-col max-h-[90vh]">
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2a2f] sticky top-0 bg-[#161619]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#2a2a2f]">
               <h2 className="text-lg font-semibold">
                 {editingSwitch ? 'Edit Switch' : 'New Switch'}
               </h2>
@@ -769,346 +769,307 @@ export default function SwitchesPage() {
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-6 space-y-5">
-              {/* Name */}
-              <div>
-                <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Name (optional)</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white placeholder-[#636366] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                  placeholder="e.g., Living Room Dimmer"
-                />
-              </div>
+            {/* Modal Body - Two Column Layout */}
+            <div className="flex-1 overflow-y-auto">
+              <div className={`flex ${formData.input_source === 'gpio' ? 'flex-col lg:flex-row' : ''}`}>
+                {/* Left Column - Form */}
+                <div className={`p-6 space-y-5 ${formData.input_source === 'gpio' ? 'lg:w-1/2 lg:border-r lg:border-[#2a2a2f]' : 'w-full'}`}>
+                  {/* Name */}
+                  <div>
+                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Name (optional)</label>
+                    <input
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white placeholder-[#636366] focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                      placeholder="e.g., Living Room Dimmer"
+                    />
+                  </div>
 
-              {/* Input Source Selection */}
-              <div className="space-y-3">
-                <label className="block text-sm font-medium text-[#a1a1a6]">Input Source</label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({
-                      ...formData,
-                      input_source: 'labjack',
-                      gpio_bcm_pin: null,
-                      switch_model_id: '', // Reset model when switching source
-                    })}
-                    className={`flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
-                      formData.input_source === 'labjack'
-                        ? 'bg-blue-500/15 border-blue-500/30 text-blue-400'
-                        : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
-                    }`}
-                  >
-                    <svg className="w-4 h-4 inline-block mr-2" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z" />
-                    </svg>
-                    LabJack U3
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({
-                      ...formData,
-                      input_source: 'gpio',
-                      labjack_digital_pin: '',
-                      labjack_analog_pin: '',
-                      switch_model_id: '', // Reset model when switching source
-                    })}
-                    disabled={!platformInfo?.gpio_available}
-                    className={`flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
-                      formData.input_source === 'gpio'
-                        ? 'bg-green-500/15 border-green-500/30 text-green-400'
-                        : platformInfo?.gpio_available
-                          ? 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
-                          : 'bg-[#111113] border-[#2a2a2f] text-[#636366] cursor-not-allowed opacity-50'
-                    }`}
-                  >
-                    <svg className="w-4 h-4 inline-block mr-2" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859M12 3v8.25m0 0l-3-3m3 3l3-3" />
-                    </svg>
-                    Raspberry Pi GPIO
-                  </button>
-                </div>
-                {/* GPIO availability message */}
-                {!platformInfo?.gpio_available && platformInfo && (
-                  <p className="text-xs text-[#636366]">
-                    {platformInfo.reason || 'GPIO not available on this system'}
-                  </p>
-                )}
-                {formData.input_source === 'gpio' && platformInfo?.pi_model && (
-                  <p className="text-xs text-green-400">
-                    Running on {platformInfo.pi_model}
-                  </p>
-                )}
-              </div>
-
-              {/* Switch Model - filtered by input source compatibility */}
-              <div>
-                <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Switch Model</label>
-                <select
-                  value={formData.switch_model_id}
-                  onChange={(e) => setFormData({ ...formData, switch_model_id: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                >
-                  <option value="">Select a model...</option>
-                  {filteredSwitchModels.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.manufacturer} {model.model} ({inputTypeLabels[model.input_type].label})
-                    </option>
-                  ))}
-                </select>
-                {formData.input_source === 'gpio' && filteredSwitchModels.length < switchModels.length && (
-                  <p className="text-xs text-[#636366] mt-1">
-                    Only digital switch types shown (GPIO doesn&apos;t support analog inputs)
-                  </p>
-                )}
-              </div>
-
-              {/* Pin Requirements Indicator (LabJack only) */}
-              {selectedModel && formData.input_source === 'labjack' && (
-                <div className="px-3 py-2 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg">
-                  <div className="text-xs text-[#636366] mb-1">Pin Requirements</div>
-                  <div className="flex gap-3">
-                    {selectedModel.requires_digital_pin && (
-                      <span className="text-sm text-blue-400">Digital pin required</span>
-                    )}
-                    {selectedModel.requires_analog_pin && (
-                      <span className="text-sm text-purple-400">Analog pin required</span>
-                    )}
-                    {!selectedModel.requires_digital_pin && !selectedModel.requires_analog_pin && (
-                      <span className="text-sm text-[#636366]">No specific pins required</span>
+                  {/* Switch Model - immediately after name */}
+                  <div>
+                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Switch Model</label>
+                    <select
+                      value={formData.switch_model_id}
+                      onChange={(e) => setFormData({ ...formData, switch_model_id: e.target.value })}
+                      className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                    >
+                      <option value="">Select a model...</option>
+                      {filteredSwitchModels.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.manufacturer} {model.model} ({inputTypeLabels[model.input_type].label})
+                        </option>
+                      ))}
+                    </select>
+                    {formData.input_source === 'gpio' && filteredSwitchModels.length < switchModels.length && (
+                      <p className="text-xs text-[#636366] mt-1">
+                        Only digital switch types shown (GPIO doesn&apos;t support analog inputs)
+                      </p>
                     )}
                   </div>
-                </div>
-              )}
 
-              {/* GPIO Pin Selection */}
-              {formData.input_source === 'gpio' && (
-                <div className="space-y-4">
-                  {/* GPIO Pin Diagram */}
-                  <GPIOPinDiagram
-                    selectedBcmPin={formData.gpio_bcm_pin}
-                    onPinSelect={(bcmPin, physicalPin) => {
-                      setFormData({ ...formData, gpio_bcm_pin: bcmPin });
-                      setSelectedPhysicalPin(physicalPin);
-                    }}
-                    apiUrl={API_URL}
-                  />
-
-                  {/* Board Orientation Reference */}
-                  <BoardOrientation
-                    selectedPhysicalPin={selectedPhysicalPin}
-                    piModel={platformInfo?.pi_model}
-                  />
-
-                  {/* Pull Resistor Configuration */}
-                  {formData.gpio_bcm_pin !== null && (
-                    <div>
-                      <label className="block text-sm font-medium text-[#a1a1a6] mb-2">Pull Resistor</label>
-                      <select
-                        value={formData.gpio_pull}
-                        onChange={(e) => setFormData({ ...formData, gpio_pull: e.target.value as 'up' | 'down' })}
-                        className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                  {/* Input Source Selection - Radio Style */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-[#a1a1a6]">Input Source</label>
+                    <div className="flex flex-col gap-2">
+                      {/* LabJack Option */}
+                      <label
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${
+                          formData.input_source === 'labjack'
+                            ? 'bg-blue-500/10 border-blue-500/40'
+                            : 'bg-[#111113] border-[#2a2a2f] hover:border-[#3a3a3f]'
+                        }`}
                       >
-                        <option value="up">Pull-up (recommended)</option>
-                        <option value="down">Pull-down</option>
-                      </select>
-                      <p className="text-xs text-[#636366] mt-1">
-                        Pull-up: Wire switch to GND. Pull-down: Wire switch to 3.3V.
+                        <input
+                          type="radio"
+                          name="input_source"
+                          checked={formData.input_source === 'labjack'}
+                          onChange={() => setFormData({
+                            ...formData,
+                            input_source: 'labjack',
+                            gpio_bcm_pin: null,
+                          })}
+                          className="w-4 h-4 text-blue-500 bg-[#111113] border-[#3a3a3f] focus:ring-blue-500/30 focus:ring-offset-0"
+                        />
+                        <div className="flex-1 flex items-center gap-2">
+                          <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z" />
+                          </svg>
+                          <span className={formData.input_source === 'labjack' ? 'text-blue-400 font-medium' : 'text-[#a1a1a6]'}>
+                            LabJack U3
+                          </span>
+                        </div>
+                      </label>
+
+                      {/* GPIO Option */}
+                      <label
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                          !platformInfo?.gpio_available
+                            ? 'cursor-not-allowed opacity-50 bg-[#111113] border-[#2a2a2f]'
+                            : formData.input_source === 'gpio'
+                              ? 'bg-green-500/10 border-green-500/40 cursor-pointer'
+                              : 'bg-[#111113] border-[#2a2a2f] hover:border-[#3a3a3f] cursor-pointer'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="input_source"
+                          checked={formData.input_source === 'gpio'}
+                          disabled={!platformInfo?.gpio_available}
+                          onChange={() => setFormData({
+                            ...formData,
+                            input_source: 'gpio',
+                            labjack_digital_pin: '',
+                            labjack_analog_pin: '',
+                          })}
+                          className="w-4 h-4 text-green-500 bg-[#111113] border-[#3a3a3f] focus:ring-green-500/30 focus:ring-offset-0 disabled:opacity-50"
+                        />
+                        <div className="flex-1 flex items-center gap-2">
+                          <svg className={`w-4 h-4 ${formData.input_source === 'gpio' ? 'text-green-400' : 'text-[#636366]'}`} fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 3.75H6.912a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859M12 3v8.25m0 0l-3-3m3 3l3-3" />
+                          </svg>
+                          <span className={formData.input_source === 'gpio' ? 'text-green-400 font-medium' : 'text-[#a1a1a6]'}>
+                            Raspberry Pi GPIO
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                    {/* GPIO availability message */}
+                    {!platformInfo?.gpio_available && platformInfo && (
+                      <p className="text-xs text-[#636366]">
+                        {platformInfo.reason || 'GPIO not available on this system'}
                       </p>
+                    )}
+                    {formData.input_source === 'gpio' && platformInfo?.pi_model && (
+                      <p className="text-xs text-green-400">
+                        Running on {platformInfo.pi_model}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* LabJack Pin Configuration - only show required pins */}
+                  {formData.input_source === 'labjack' && selectedModel && (selectedModel.requires_digital_pin || selectedModel.requires_analog_pin) && (
+                    <div className={`grid gap-4 ${selectedModel.requires_digital_pin && selectedModel.requires_analog_pin ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                      {selectedModel.requires_digital_pin && (
+                        <div>
+                          <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
+                            Digital Pin <span className="text-red-400">*</span>
+                          </label>
+                          <select
+                            value={formData.labjack_digital_pin}
+                            onChange={(e) => setFormData({ ...formData, labjack_digital_pin: e.target.value })}
+                            className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          >
+                            <option value="">Select pin...</option>
+                            {Array.from({ length: 16 }, (_, i) => (
+                              <option key={i} value={i}>FIO{i} / D{i}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {selectedModel.requires_analog_pin && (
+                        <div>
+                          <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
+                            Analog Pin <span className="text-red-400">*</span>
+                          </label>
+                          <select
+                            value={formData.labjack_analog_pin}
+                            onChange={(e) => setFormData({ ...formData, labjack_analog_pin: e.target.value })}
+                            className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                          >
+                            <option value="">Select pin...</option>
+                            {Array.from({ length: 16 }, (_, i) => (
+                              <option key={i} value={i}>AIN{i} / A{i}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* LabJack Pins (only shown for LabJack input source) */}
-              {formData.input_source === 'labjack' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
-                      Digital Pin
-                      {selectedModel?.requires_digital_pin && <span className="text-red-400 ml-1">*</span>}
-                    </label>
+                  {/* Hardware Configuration */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-[#a1a1a6]">Hardware Configuration</label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs text-[#636366] mb-1">Switch Type</label>
+                        <select
+                          value={formData.switch_type}
+                          onChange={(e) => setFormData({ ...formData, switch_type: e.target.value as SwitchType })}
+                          className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                        >
+                          <option value="normally-closed">Normally Closed (NC)</option>
+                          <option value="normally-open">Normally Open (NO)</option>
+                        </select>
+                      </div>
+                      <div className="flex items-end pb-0.5">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.invert_reading}
+                            onChange={(e) => setFormData({ ...formData, invert_reading: e.target.checked })}
+                            className="w-4 h-4 rounded border-[#3a3a3f] bg-[#111113] text-amber-500 focus:ring-amber-500/30 focus:ring-offset-0"
+                          />
+                          <span className="text-sm text-[#a1a1a6]">Invert Logic</span>
+                        </label>
+                      </div>
+                    </div>
+                    <p className="text-xs text-[#636366]">
+                      NC: Circuit closed when not pressed. NO: Circuit open when not pressed.
+                    </p>
+                  </div>
+
+                  {/* Control Target */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-[#a1a1a6]">Control Target</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, target_type: 'group', target_fixture_id: '' })}
+                        className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                          formData.target_type === 'group'
+                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                            : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
+                        }`}
+                      >
+                        Group
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, target_type: 'fixture', target_group_id: '' })}
+                        className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                          formData.target_type === 'fixture'
+                            ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                            : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
+                        }`}
+                      >
+                        Fixture
+                      </button>
+                    </div>
+                    {formData.target_type === 'group' ? (
+                      <select
+                        value={formData.target_group_id}
+                        onChange={(e) => setFormData({ ...formData, target_group_id: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                      >
+                        <option value="">Select a group...</option>
+                        {groups.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.name}{group.description ? ` - ${group.description}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <select
+                        value={formData.target_fixture_id}
+                        onChange={(e) => setFormData({ ...formData, target_fixture_id: e.target.value })}
+                        className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                      >
+                        <option value="">Select a fixture...</option>
+                        {fixtures.map((fixture) => (
+                          <option key={fixture.id} value={fixture.id}>
+                            {fixture.name} (DMX {fixture.dmx_channel_start})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {formData.target_type === 'group' && groups.length === 0 && (
+                      <p className="text-xs text-amber-400">No groups available. Create a group first.</p>
+                    )}
+                    {formData.target_type === 'fixture' && fixtures.length === 0 && (
+                      <p className="text-xs text-amber-400">No fixtures available. Create a fixture first.</p>
+                    )}
+                  </div>
+
+                  {/* Double Tap Scene */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-[#a1a1a6]">Double Tap Scene</label>
                     <select
-                      value={formData.labjack_digital_pin}
-                      onChange={(e) => setFormData({ ...formData, labjack_digital_pin: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
+                      value={formData.double_tap_scene_id}
+                      onChange={(e) => setFormData({ ...formData, double_tap_scene_id: e.target.value })}
+                      className="w-full px-3 py-2 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
                     >
                       <option value="">None</option>
-                      {Array.from({ length: 16 }, (_, i) => (
-                        <option key={i} value={i}>FIO{i} / D{i}</option>
+                      {scenes.map((scene) => (
+                        <option key={scene.id} value={scene.id}>
+                          {scene.name}
+                        </option>
                       ))}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
-                      Analog Pin
-                      {selectedModel?.requires_analog_pin && <span className="text-red-400 ml-1">*</span>}
-                    </label>
-                    <select
-                      value={formData.labjack_analog_pin}
-                      onChange={(e) => setFormData({ ...formData, labjack_analog_pin: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                    >
-                      <option value="">None</option>
-                      {Array.from({ length: 16 }, (_, i) => (
-                        <option key={i} value={i}>AIN{i} / A{i}</option>
-                      ))}
-                    </select>
+                    <p className="text-xs text-[#636366]">
+                      Double tap recalls the scene while single tap toggles.
+                    </p>
                   </div>
                 </div>
-              )}
 
-              {/* Switch Type Configuration */}
-              <div className="space-y-3">
-                <label className="block text-sm font-medium text-[#a1a1a6]">Hardware Configuration</label>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-[#636366] mb-2">Switch Type</label>
-                    <select
-                      value={formData.switch_type}
-                      onChange={(e) => setFormData({ ...formData, switch_type: e.target.value as SwitchType })}
-                      className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                    >
-                      <option value="normally-closed">Normally Closed (NC)</option>
-                      <option value="normally-open">Normally Open (NO)</option>
-                    </select>
+                {/* Right Column - GPIO Pin Diagram (only when GPIO selected) */}
+                {formData.input_source === 'gpio' && (
+                  <div className="flex-1 p-6 bg-[#111113] lg:bg-transparent flex justify-center">
+                    <GPIOPinDiagram
+                      selectedBcmPin={formData.gpio_bcm_pin}
+                      onPinSelect={(bcmPin, physicalPin) => {
+                        setFormData({ ...formData, gpio_bcm_pin: bcmPin });
+                        setSelectedPhysicalPin(physicalPin);
+                      }}
+                      apiUrl={API_URL}
+                    />
                   </div>
-                  <div className="flex items-end pb-1">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.invert_reading}
-                        onChange={(e) => setFormData({ ...formData, invert_reading: e.target.checked })}
-                        className="w-5 h-5 rounded border-[#3a3a3f] bg-[#111113] text-amber-500 focus:ring-amber-500/30 focus:ring-offset-0"
-                      />
-                      <span className="text-sm text-[#a1a1a6]">Invert Logic</span>
-                    </label>
-                  </div>
-                </div>
-                <p className="text-xs text-[#636366]">
-                  NC: Circuit closed when not pressed. NO: Circuit open when not pressed. Invert Logic flips the reading in software.
-                </p>
-              </div>
-
-              {/* Target Selection */}
-              <div className="space-y-3">
-                <label className="block text-sm font-medium text-[#a1a1a6]">Control Target</label>
-
-                {/* Target Type Toggle */}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, target_type: 'group', target_fixture_id: '' })}
-                    className={`flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
-                      formData.target_type === 'group'
-                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
-                        : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
-                    }`}
-                  >
-                    <svg className="w-4 h-4 inline-block mr-2" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-                    </svg>
-                    Group
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, target_type: 'fixture', target_group_id: '' })}
-                    className={`flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors ${
-                      formData.target_type === 'fixture'
-                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
-                        : 'bg-[#111113] border-[#2a2a2f] text-[#a1a1a6] hover:border-[#3a3a3f]'
-                    }`}
-                  >
-                    <svg className="w-4 h-4 inline-block mr-2" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
-                    </svg>
-                    Fixture
-                  </button>
-                </div>
-
-                {/* Target Dropdown */}
-                {formData.target_type === 'group' ? (
-                  <select
-                    value={formData.target_group_id}
-                    onChange={(e) => setFormData({ ...formData, target_group_id: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                  >
-                    <option value="">Select a group...</option>
-                    {groups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}{group.description ? ` - ${group.description}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <select
-                    value={formData.target_fixture_id}
-                    onChange={(e) => setFormData({ ...formData, target_fixture_id: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                  >
-                    <option value="">Select a fixture...</option>
-                    {fixtures.map((fixture) => (
-                      <option key={fixture.id} value={fixture.id}>
-                        {fixture.name} (DMX {fixture.dmx_channel_start})
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {/* No targets warning */}
-                {formData.target_type === 'group' && groups.length === 0 && (
-                  <p className="text-xs text-amber-400">No groups available. Create a group first.</p>
-                )}
-                {formData.target_type === 'fixture' && fixtures.length === 0 && (
-                  <p className="text-xs text-amber-400">No fixtures available. Create a fixture first.</p>
-                )}
-              </div>
-
-              {/* Double Tap Scene */}
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-[#a1a1a6]">Double Tap Scene</label>
-                <select
-                  value={formData.double_tap_scene_id}
-                  onChange={(e) => setFormData({ ...formData, double_tap_scene_id: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-[#111113] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50"
-                >
-                  <option value="">None</option>
-                  {scenes.map((scene) => (
-                    <option key={scene.id} value={scene.id}>
-                      {scene.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-[#636366]">
-                  Double tap recalls the scene while single tap still toggles the target.
-                </p>
-                {selectedModel && selectedModel.input_type !== 'retractive' && (
-                  <p className="text-xs text-amber-400">
-                    Double tap requires a retractive switch model.
-                  </p>
-                )}
-                {scenes.length === 0 && (
-                  <p className="text-xs text-amber-400">
-                    No scenes available yet. Capture a scene first.
-                  </p>
                 )}
               </div>
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#2a2a2f] sticky bottom-0 bg-[#161619]">
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#2a2a2f]">
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2.5 text-[#a1a1a6] hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                className="px-4 py-2 text-[#a1a1a6] hover:text-white hover:bg-white/10 rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={isSaving}
-                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors"
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 disabled:cursor-not-allowed text-black font-medium rounded-lg transition-colors"
               >
                 {isSaving ? 'Saving...' : (editingSwitch ? 'Save Changes' : 'Create Switch')}
               </button>

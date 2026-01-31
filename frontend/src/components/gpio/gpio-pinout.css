@@ -1,0 +1,264 @@
+/**
+ * GPIO Pinout Styles - Based on pinout.xyz design
+ * https://github.com/pinout-xyz/Pinout.xyz
+ *
+ * Uses Solarized color palette
+ */
+
+.gpio-pinout-container {
+  font-family: Verdana, Geneva, Tahoma, sans-serif;
+  font-size: 13px;
+  width: 380px;
+}
+
+.gpio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.gpio-header h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #93a1a1;
+  margin: 0;
+}
+
+.pinout-link {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(38, 139, 210, 0.2);
+  color: #268BD2;
+  text-decoration: none;
+}
+
+.pinout-link:hover {
+  opacity: 0.8;
+}
+
+/* Main GPIO container - FIXED dimensions prevent any layout shifts */
+.gpio-pins {
+  display: grid;
+  grid-template-columns: 190px 190px;  /* Fixed px, not % */
+  width: 380px;
+  background: #5F8645;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.gpio-pins ul {
+  list-style: none;
+  margin: 0;
+  padding: 5px 0;
+  display: block;
+  width: 190px;  /* Fixed width matches grid column */
+}
+
+.gpio-pins li {
+  display: block;
+  width: 190px;  /* Fixed width */
+  height: 28px;  /* Fixed height */
+}
+
+.gpio-pins a {
+  display: block;
+  position: relative;
+  font-size: 13px;
+  line-height: 26px;
+  height: 26px;
+  margin-bottom: 2px;
+  color: #E9E5D2;
+  text-indent: 8px;
+  text-decoration: none;
+  font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", monospace;
+  /* Prevent text from affecting layout */
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.gpio-pins .pin-badge {
+  font-size: 11px;
+  line-height: 22px;
+  text-align: center;
+  text-indent: 0;
+  display: block;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  background: #002B36;
+  color: #E9E5D2;
+  position: absolute;
+  right: 3px;
+  top: 2px;
+}
+
+/* Right column (even pins) */
+.gpio-pins .col-right {
+  padding-left: 1px;
+  background: linear-gradient(90deg, #073642 32px, transparent 32px);
+}
+
+.gpio-pins .col-right a {
+  border-top-left-radius: 13px;
+  border-bottom-left-radius: 13px;
+  text-indent: 40px;
+}
+
+.gpio-pins .col-right .pin-badge {
+  left: 4px;
+  right: auto;
+}
+
+/* Left column (odd pins) */
+.gpio-pins .col-left {
+  padding-right: 1px;
+  background: linear-gradient(270deg, #073642 32px, transparent 32px);
+}
+
+.gpio-pins .col-left a {
+  border-top-right-radius: 13px;
+  border-bottom-right-radius: 13px;
+  text-align: right;
+  padding-right: 32px;
+  text-indent: 0;
+}
+
+/* Ground pins - dimmed text */
+.gpio-pins .type-gnd a {
+  color: rgba(233, 229, 210, 0.5);
+}
+
+/* Hover state - row highlight like pinout.xyz */
+.gpio-pins li.selectable a:hover {
+  background: #E9E5D2;
+  color: #073642;
+}
+
+.gpio-pins li.selectable a:hover .pin-badge {
+  box-shadow: 0 0 0 2px white;
+}
+
+/* Power pins - no background change, consistent with all rows */
+
+/* Disabled peripheral pins - dimmed text only, no background change */
+.gpio-pins .type-i2c a,
+.gpio-pins .type-spi a,
+.gpio-pins .type-uart a,
+.gpio-pins .type-pcm a {
+  color: rgba(233, 229, 210, 0.6);
+}
+
+/* Ground pins - NO background change, keep consistent with other rows */
+
+/* Ground indicator bar */
+.gpio-pins .overlay-ground .pin-badge:after {
+  display: block;
+  content: "";
+  background: #073642;
+  width: 6px;
+  height: 26px;
+  position: absolute;
+  top: -2px;
+}
+
+.gpio-pins .col-left .overlay-ground .pin-badge:after {
+  left: -14px;
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+
+.gpio-pins .col-right .overlay-ground .pin-badge:after {
+  left: 28px;
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+/* Pin 1 - square corner */
+.gpio-pins .pin-1 a,
+.gpio-pins .pin-1.active a,
+.gpio-pins .pin-1 .pin-badge {
+  border-radius: 0;
+}
+
+.gpio-pins .pin-1 a {
+  border-top-right-radius: 0 !important;
+}
+
+/* Pin type colors */
+.gpio-pins .type-pow3v3 .pin-badge { background: #B58900; }
+.gpio-pins .type-pow5v .pin-badge { background: #DC322F; }
+.gpio-pins .type-gpio .pin-badge { background: #859900; }
+.gpio-pins .type-i2c .pin-badge { background: #268BD2; }
+.gpio-pins .type-spi .pin-badge { background: #D33682; }
+.gpio-pins .type-pcm .pin-badge { background: #2aa198; }
+.gpio-pins .type-uart .pin-badge { background: #6c71c4; }
+
+/* Selected/active state - row highlight like pinout.xyz */
+.gpio-pins .active a {
+  background: #E9E5D2;
+  color: #073642;
+}
+
+.gpio-pins .active .pin-badge {
+  box-shadow: 0 0 0 2px white;
+}
+
+/* Suggested ground - subtle badge indicator */
+.gpio-pins .suggested-ground .pin-badge {
+  box-shadow: 0 0 0 2px #268BD2;
+}
+
+/* In-use indicator */
+.gpio-pins .in-use {
+  color: #DC322F;
+}
+
+/* Small text */
+.gpio-pins small {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+
+/* Wiring info box - fixed width to match diagram */
+.wiring-info {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(181, 137, 0, 0.15);
+  border-radius: 6px;
+  font-size: 13px;
+  color: #93a1a1;
+  width: 380px;
+  box-sizing: border-box;
+}
+
+.wiring-info strong {
+  color: #B58900;
+}
+
+.pin-ref {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.pin-ref.gpio {
+  background: rgba(133, 153, 0, 0.2);
+  color: #859900;
+}
+
+.pin-ref.gnd {
+  background: rgba(38, 139, 210, 0.2);
+  color: #268BD2;
+}
+
+/* Selectable cursor */
+.gpio-pins li.selectable {
+  cursor: pointer;
+}
+
+.gpio-pins li:not(.selectable) {
+  cursor: default;
+}
