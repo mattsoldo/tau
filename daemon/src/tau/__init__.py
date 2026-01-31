@@ -4,5 +4,5 @@ Tau Lighting Control Daemon
 A professional-grade smart lighting control system for residential and commercial environments.
 """
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 __author__ = "Tau Development Team"
