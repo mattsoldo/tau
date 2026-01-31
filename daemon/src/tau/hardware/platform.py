@@ -135,14 +135,45 @@ def _parse_pi_model(model_string: str) -> Tuple[Optional[str], Optional[int]]:
     return model_string, None
 
 
+def _check_pi_mock() -> Optional[PlatformInfo]:
+    """
+    Check if PI_MOCK environment variable is set.
+
+    When PI_MOCK=true, returns a mocked Pi 5 platform for testing
+    GPIO features on non-Pi systems (e.g., macOS development).
+    """
+    pi_mock = os.environ.get('PI_MOCK', 'false').lower()
+    if pi_mock in ('true', '1', 'yes'):
+        logger.info(
+            "pi_mock_enabled",
+            model="Raspberry Pi 5 Model B Rev 1.0 (Mock)",
+            model_number=5,
+            gpio_available=True
+        )
+        return PlatformInfo(
+            is_raspberry_pi=True,
+            model="Raspberry Pi 5 Model B Rev 1.0 (Mock)",
+            model_number=5,
+            gpio_available=True
+        )
+    return None
+
+
 @lru_cache(maxsize=1)
 def detect_platform() -> PlatformInfo:
     """
     Detect if running on a Raspberry Pi and which model.
 
+    Set PI_MOCK=true environment variable to simulate a Pi 5 for testing.
+
     Returns:
         PlatformInfo with detection results
     """
+    # Check for mock mode first (for development/testing)
+    mock_platform = _check_pi_mock()
+    if mock_platform:
+        return mock_platform
+
     # Try to read the device tree model
     model_content = _read_file_content('/sys/firmware/devicetree/base/model')
 
