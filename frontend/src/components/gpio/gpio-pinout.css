@@ -38,6 +38,13 @@
   opacity: 0.8;
 }
 
+/* Header right side (monitor mode) - holds LIVE badge + link */
+.gpio-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* Main GPIO container - FIXED dimensions prevent any layout shifts */
 .gpio-pins {
   display: grid;

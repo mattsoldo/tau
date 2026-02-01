@@ -342,10 +342,21 @@ export default function GPIOPinDiagram({
       {showHeader && (
         <div className="gpio-header">
           <h4>GPIO Header</h4>
-          <div className="flex items-center gap-2">
-            {mode === 'monitor' && statusData?.gpio_connected && (
-              <span className="status-badge connected">LIVE</span>
-            )}
+          {mode === 'monitor' ? (
+            <div className="gpio-header-right">
+              {statusData?.gpio_connected && (
+                <span className="status-badge connected">LIVE</span>
+              )}
+              <a
+                href="https://pinout.xyz"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pinout-link"
+              >
+                pinout.xyz
+              </a>
+            </div>
+          ) : (
             <a
               href="https://pinout.xyz"
               target="_blank"
@@ -354,7 +365,7 @@ export default function GPIOPinDiagram({
             >
               pinout.xyz
             </a>
-          </div>
+          )}
         </div>
       )}
 
