@@ -8,26 +8,16 @@ LabJack driver, allowing the system to work with either hardware.
 Installation (on Raspberry Pi):
     pip install gpiozero pigpio
 
-For hardware PWM and edge detection, the pigpio daemon must be running:
+For hardware PWM support, the pigpio daemon must be running:
     sudo pigpiod
 
 Supported GPIO Features:
 - Digital inputs for switch detection (with pull-up/pull-down)
-- Hardware edge detection via pigpio callbacks (interrupt-driven)
 - Hardware PWM outputs for LED dimming (via pigpio)
 - Analog input simulation via ADC (optional, requires MCP3008/MCP3208)
-
-Edge Detection (pigpio):
-When pigpiod is running, this driver uses hardware edge callbacks for
-switch inputs. This provides:
-- ~1μs response time vs ~30ms polling
-- CPU-efficient (no busy polling)
-- Automatic debouncing via glitch filter
-- Immediate state updates on pin changes
 """
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 import asyncio
-import time
 import structlog
 
 from tau.hardware.base import LabJackInterface
@@ -63,14 +53,8 @@ class GPIODriver(LabJackInterface):
 
     Features:
     - Digital input reading with configurable pull-up/pull-down
-    - Hardware edge detection via pigpio callbacks (interrupt-driven)
     - Hardware PWM output via pigpio for smooth dimming
     - Optional analog input via SPI ADC (MCP3008/MCP3208)
-
-    Edge Detection Mode:
-    When pigpiod is running, edge callbacks are used instead of polling.
-    This provides microsecond-level response times and CPU efficiency.
-    The driver maintains a state cache that is updated by callbacks.
     """
 
     def __init__(
@@ -86,7 +70,7 @@ class GPIODriver(LabJackInterface):
         Args:
             input_pins: Mapping of channel numbers to GPIO BCM pin numbers
             pwm_pins: Mapping of PWM channel numbers to GPIO BCM pin numbers
-            use_pigpio: Use pigpio for hardware PWM and edge detection (recommended)
+            use_pigpio: Use pigpio for hardware PWM (recommended)
             pull_up: Enable internal pull-up resistors on inputs
         """
         super().__init__("RaspberryPi-GPIO")
@@ -98,7 +82,7 @@ class GPIODriver(LabJackInterface):
 
         # GPIO library instances (set on connect)
         self._gpio = None
-        self._pi = None  # pigpio instance for hardware PWM and edge detection
+        self._pi = None  # pigpio instance for hardware PWM
 
         # Track digital input states
         self.digital_inputs: Dict[int, bool] = {i: False for i in range(16)}
@@ -118,22 +102,12 @@ class GPIODriver(LabJackInterface):
         self.read_count = 0
         self.write_count = 0
         self.error_count = 0
-        self.edge_callback_count = 0
 
         # Connection state
         self._connected = False
 
         # Per-switch inversion tracking (based on switch_type and invert_reading)
         self.inverted_channels: set = set()
-
-        # pigpio edge detection state
-        self._pigpio_callbacks: Dict[int, Any] = {}  # BCM pin -> callback object
-        self._pin_states: Dict[int, bool] = {}  # BCM pin -> current state (True=HIGH)
-        self._pin_last_edge_time: Dict[int, float] = {}  # BCM pin -> timestamp of last edge
-        self._edge_handler: Optional[Callable[[int, bool], None]] = None  # External edge handler
-
-        # Whether we're using pigpio edge callbacks (set during connect)
-        self._using_edge_callbacks = False
 
         logger.info(
             "gpio_driver_initialized",
@@ -146,16 +120,15 @@ class GPIODriver(LabJackInterface):
         """
         Connect to Raspberry Pi GPIO
 
-        Attempts to use pigpio edge callbacks for interrupt-driven input.
-        Falls back to gpiozero polling if pigpiod is not available.
-
         Returns:
             True if connection successful
         """
         try:
-            # Try to import gpiozero (used as fallback)
+            # Try to import gpiozero
             try:
                 from gpiozero import Button, LED, OutputDevice
+                from gpiozero.pins.pigpio import PiGPIOFactory
+
                 self._gpio_module = True
             except ImportError:
                 logger.error(
@@ -164,7 +137,7 @@ class GPIODriver(LabJackInterface):
                 )
                 return False
 
-            # Try to use pigpio for edge detection and hardware PWM
+            # Try to use pigpio for hardware PWM
             if self.use_pigpio:
                 try:
                     import pigpio
@@ -175,44 +148,45 @@ class GPIODriver(LabJackInterface):
                             message="pigpio daemon not running. Start with: sudo pigpiod"
                         )
                         self._pi = None
-                    else:
-                        self._using_edge_callbacks = True
-                        logger.info(
-                            "pigpio_connected",
-                            message="Using pigpio for edge detection and hardware PWM"
-                        )
                 except ImportError:
                     logger.warning(
                         "pigpio_not_installed",
-                        message="pigpio not installed. Using gpiozero polling."
+                        message="pigpio not installed. Using software PWM."
                     )
                     self._pi = None
 
-            # Configure input pins - use pigpio edge callbacks if available
-            self._input_buttons = {}  # gpiozero fallback
+            # Configure input pins
+            from gpiozero import Button
+            self._input_buttons = {}
             for channel, gpio_pin in self.input_pin_map.items():
-                if self._using_edge_callbacks:
-                    # Use pigpio edge callbacks (preferred)
-                    await self._configure_pigpio_input(channel, gpio_pin)
-                else:
-                    # Fallback to gpiozero polling
-                    await self._configure_gpiozero_input(channel, gpio_pin)
+                try:
+                    self._input_buttons[channel] = Button(
+                        gpio_pin,
+                        pull_up=self.pull_up,
+                        bounce_time=0.05  # 50ms debounce
+                    )
+                    logger.debug("gpio_input_configured", channel=channel, gpio=gpio_pin)
+                except Exception as e:
+                    logger.warning(
+                        "gpio_input_config_failed",
+                        channel=channel,
+                        gpio=gpio_pin,
+                        error=str(e)
+                    )
 
             # Configure PWM outputs
             self._pwm_outputs_hw = {}
-            if self._pi:
-                import pigpio
-                for pwm_channel, gpio_pin in self.pwm_pin_map.items():
+            for pwm_channel, gpio_pin in self.pwm_pin_map.items():
+                if self._pi:
                     # Use pigpio for hardware PWM
                     self._pi.set_mode(gpio_pin, pigpio.OUTPUT)
                     self._pi.set_PWM_frequency(gpio_pin, 1000)  # 1kHz PWM
                     self._pi.set_PWM_dutycycle(gpio_pin, 0)
                     self._pwm_outputs_hw[pwm_channel] = gpio_pin
                     logger.debug("gpio_pwm_configured_pigpio", channel=pwm_channel, gpio=gpio_pin)
-            else:
-                # Fallback to gpiozero software PWM
-                from gpiozero import PWMLED
-                for pwm_channel, gpio_pin in self.pwm_pin_map.items():
+                else:
+                    # Fallback to gpiozero software PWM
+                    from gpiozero import PWMLED
                     try:
                         self._pwm_outputs_hw[pwm_channel] = PWMLED(gpio_pin)
                         logger.debug("gpio_pwm_configured_software", channel=pwm_channel, gpio=gpio_pin)
@@ -225,13 +199,11 @@ class GPIODriver(LabJackInterface):
                         )
 
             self._connected = True
-            input_count = len(self._pigpio_callbacks) if self._using_edge_callbacks else len(self._input_buttons)
             logger.info(
                 "gpio_connected",
-                inputs=input_count,
+                inputs=len(self._input_buttons),
                 pwm_outputs=len(self._pwm_outputs_hw),
-                hardware_pwm=self._pi is not None,
-                edge_callbacks=self._using_edge_callbacks
+                hardware_pwm=self._pi is not None
             )
 
             # Load switch configuration from database (for switch_type inversion)
@@ -247,194 +219,31 @@ class GPIODriver(LabJackInterface):
             self.error_count += 1
             return False
 
-    async def _configure_pigpio_input(self, channel: int, bcm_pin: int) -> bool:
-        """
-        Configure a GPIO input using pigpio edge callbacks
-
-        Args:
-            channel: The channel number for this pin
-            bcm_pin: The BCM GPIO pin number
-
-        Returns:
-            True if configuration successful
-        """
-        try:
-            import pigpio
-
-            # Set pin mode to input
-            self._pi.set_mode(bcm_pin, pigpio.INPUT)
-
-            # Configure pull-up/pull-down resistor
-            if self.pull_up:
-                self._pi.set_pull_up_down(bcm_pin, pigpio.PUD_UP)
-            else:
-                self._pi.set_pull_up_down(bcm_pin, pigpio.PUD_DOWN)
-
-            # Set glitch filter (5000μs = 5ms software debounce)
-            # pigpio filters out state changes shorter than this
-            self._pi.set_glitch_filter(bcm_pin, 5000)
-
-            # Read initial state
-            level = self._pi.read(bcm_pin)
-            self._pin_states[bcm_pin] = bool(level)
-
-            # Create callback for both edges
-            def edge_callback(gpio, level, tick):
-                """Called by pigpio on GPIO edge detection"""
-                self._handle_edge(gpio, level, tick)
-
-            callback = self._pi.callback(bcm_pin, pigpio.EITHER_EDGE, edge_callback)
-            self._pigpio_callbacks[bcm_pin] = callback
-
-            logger.debug(
-                "gpio_pigpio_input_configured",
-                channel=channel,
-                bcm_pin=bcm_pin,
-                pull_up=self.pull_up,
-                initial_state="HIGH" if level else "LOW"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                "gpio_pigpio_input_config_failed",
-                channel=channel,
-                bcm_pin=bcm_pin,
-                error=str(e)
-            )
-            return False
-
-    async def _configure_gpiozero_input(self, channel: int, bcm_pin: int) -> bool:
-        """
-        Configure a GPIO input using gpiozero (polling fallback)
-
-        Args:
-            channel: The channel number for this pin
-            bcm_pin: The BCM GPIO pin number
-
-        Returns:
-            True if configuration successful
-        """
-        try:
-            from gpiozero import Button
-
-            self._input_buttons[channel] = Button(
-                bcm_pin,
-                pull_up=self.pull_up,
-                bounce_time=0.05  # 50ms debounce
-            )
-            logger.debug("gpio_gpiozero_input_configured", channel=channel, bcm_pin=bcm_pin)
-            return True
-
-        except Exception as e:
-            logger.warning(
-                "gpio_gpiozero_input_config_failed",
-                channel=channel,
-                bcm_pin=bcm_pin,
-                error=str(e)
-            )
-            return False
-
-    def _handle_edge(self, gpio: int, level: int, tick: int) -> None:
-        """
-        Handle GPIO edge callback from pigpio
-
-        This is called directly by pigpio on edge detection (interrupt-driven).
-        Updates the state cache and optionally triggers an external handler.
-
-        Args:
-            gpio: BCM pin number
-            level: 0=LOW, 1=HIGH, 2=watchdog timeout
-            tick: microsecond timestamp
-        """
-        if level == 2:
-            # Watchdog timeout, ignore
-            return
-
-        # Update state cache
-        state = bool(level)
-        old_state = self._pin_states.get(gpio, None)
-        self._pin_states[gpio] = state
-        self._pin_last_edge_time[gpio] = time.time()
-        self.edge_callback_count += 1
-
-        # Log edge detection
-        logger.debug(
-            "gpio_edge_detected",
-            bcm_pin=gpio,
-            state="HIGH" if state else "LOW",
-            old_state="HIGH" if old_state else "LOW" if old_state is not None else "unknown",
-            tick=tick
-        )
-
-        # Trigger external handler if registered
-        if self._edge_handler is not None:
-            try:
-                self._edge_handler(gpio, state)
-            except Exception as e:
-                logger.error("gpio_edge_handler_error", bcm_pin=gpio, error=str(e))
-                self.error_count += 1
-
-    def set_edge_handler(self, handler: Optional[Callable[[int, bool], None]]) -> None:
-        """
-        Set an external callback for edge detection
-
-        The handler is called synchronously from the pigpio callback thread
-        whenever an edge is detected on any configured input pin.
-
-        Args:
-            handler: Callback function(bcm_pin: int, state: bool) or None to disable
-        """
-        self._edge_handler = handler
-        logger.info("gpio_edge_handler_set", handler_set=handler is not None)
-
     async def disconnect(self) -> None:
         """Disconnect from GPIO and clean up"""
         try:
-            # Clean up pigpio callbacks
-            if hasattr(self, '_pigpio_callbacks'):
-                for bcm_pin, callback in self._pigpio_callbacks.items():
-                    try:
-                        callback.cancel()
-                    except Exception:
-                        pass
-                self._pigpio_callbacks = {}
-
-            # Clean up input buttons (gpiozero fallback)
+            # Clean up input buttons
             if hasattr(self, '_input_buttons'):
                 for button in self._input_buttons.values():
-                    try:
-                        button.close()
-                    except Exception:
-                        pass
+                    button.close()
                 self._input_buttons = {}
 
             # Clean up PWM outputs
             if hasattr(self, '_pwm_outputs_hw'):
                 if self._pi:
                     for gpio_pin in self._pwm_outputs_hw.values():
-                        try:
-                            self._pi.set_PWM_dutycycle(gpio_pin, 0)
-                        except Exception:
-                            pass
+                        self._pi.set_PWM_dutycycle(gpio_pin, 0)
                 else:
                     for pwm in self._pwm_outputs_hw.values():
                         if hasattr(pwm, 'close'):
-                            try:
-                                pwm.close()
-                            except Exception:
-                                pass
+                            pwm.close()
                 self._pwm_outputs_hw = {}
-
-            # Clear edge handler
-            self._edge_handler = None
 
             # Disconnect pigpio
             if self._pi:
                 self._pi.stop()
                 self._pi = None
 
-            self._using_edge_callbacks = False
             self._connected = False
             logger.info("gpio_disconnected")
 
@@ -545,8 +354,6 @@ class GPIODriver(LabJackInterface):
         """
         Configure a single GPIO input pin
 
-        Uses pigpio edge callbacks if available, otherwise gpiozero polling.
-
         Args:
             channel: The channel number for this pin
             bcm_pin: The BCM GPIO pin number
@@ -554,10 +361,30 @@ class GPIODriver(LabJackInterface):
         Returns:
             True if configuration successful
         """
-        if self._using_edge_callbacks:
-            return await self._configure_pigpio_input(channel, bcm_pin)
-        else:
-            return await self._configure_gpiozero_input(channel, bcm_pin)
+        try:
+            from gpiozero import Button
+
+            self._input_buttons[channel] = Button(
+                bcm_pin,
+                pull_up=self.pull_up,
+                bounce_time=0.05  # 50ms debounce
+            )
+            logger.debug(
+                "gpio_input_configured",
+                channel=channel,
+                bcm_pin=bcm_pin,
+                pull_up=self.pull_up
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "gpio_input_config_failed",
+                channel=channel,
+                bcm_pin=bcm_pin,
+                error=str(e)
+            )
+            return False
 
     def is_connected(self) -> bool:
         """Check if GPIO is connected"""
@@ -600,14 +427,7 @@ class GPIODriver(LabJackInterface):
                 voltage = self.analog_inputs.get(channel, 0.0)
             else:
                 # Fall back to digital read, convert to voltage
-                bcm_pin = self.input_pin_map.get(channel)
-                if bcm_pin is None:
-                    voltage = 0.0
-                elif self._using_edge_callbacks:
-                    # Use pigpio state cache
-                    state = self._pin_states.get(bcm_pin, False)
-                    voltage = 3.3 if state else 0.0
-                elif channel in self._input_buttons:
+                if channel in self._input_buttons:
                     is_pressed = self._input_buttons[channel].is_pressed
                     # With pull-up, pressed = LOW, not pressed = HIGH
                     if self.pull_up:
@@ -697,30 +517,18 @@ class GPIODriver(LabJackInterface):
             return False
 
         try:
-            # Get BCM pin for this channel
-            bcm_pin = self.input_pin_map.get(channel)
-            if bcm_pin is None:
+            if channel not in self._input_buttons:
                 logger.warning("gpio_input_channel_not_configured", channel=channel)
                 return False
 
-            # Read state based on backend
-            if self._using_edge_callbacks:
-                # Use pigpio state cache (updated by edge callbacks)
-                if bcm_pin not in self._pin_states:
-                    logger.warning("gpio_pin_not_in_cache", channel=channel, bcm_pin=bcm_pin)
-                    return False
-                state = self._pin_states[bcm_pin]
+            is_pressed = self._input_buttons[channel].is_pressed
+
+            # With pull-up resistors, pressed = LOW (connected to ground)
+            # Convert is_pressed to raw electrical state (HIGH/LOW)
+            if self.pull_up:
+                state = not is_pressed
             else:
-                # Use gpiozero polling
-                if channel not in self._input_buttons:
-                    logger.warning("gpio_input_button_not_configured", channel=channel)
-                    return False
-                is_pressed = self._input_buttons[channel].is_pressed
-                # With pull-up resistors, pressed = LOW (connected to ground)
-                if self.pull_up:
-                    state = not is_pressed
-                else:
-                    state = is_pressed
+                state = is_pressed
 
             # Apply per-switch inversion based on switch_type (for NO switches)
             if channel in self.inverted_channels:
@@ -732,10 +540,8 @@ class GPIODriver(LabJackInterface):
             logger.debug(
                 "gpio_digital_read",
                 channel=channel,
-                bcm_pin=bcm_pin,
                 state="HIGH" if state else "LOW",
-                inverted=channel in self.inverted_channels,
-                edge_callbacks=self._using_edge_callbacks
+                inverted=channel in self.inverted_channels
             )
 
             return state
@@ -823,25 +629,19 @@ class GPIODriver(LabJackInterface):
             return None
 
         try:
-            if self._using_edge_callbacks:
-                # Use pigpio state cache
-                if bcm_pin in self._pin_states:
-                    return self._pin_states[bcm_pin]
-                return None
-            else:
-                # Use gpiozero polling
-                bcm_to_channel = {bcm: ch for ch, bcm in self.input_pin_map.items()}
-                if bcm_pin in bcm_to_channel:
-                    channel = bcm_to_channel[bcm_pin]
-                    if channel in self._input_buttons:
-                        is_pressed = self._input_buttons[channel].is_pressed
-                        # With pull-up, pressed = LOW
-                        if self.pull_up:
-                            state = not is_pressed
-                        else:
-                            state = is_pressed
-                        return state
-                return None
+            # Check if this pin is configured
+            bcm_to_channel = {bcm: ch for ch, bcm in self.input_pin_map.items()}
+            if bcm_pin in bcm_to_channel:
+                channel = bcm_to_channel[bcm_pin]
+                if channel in self._input_buttons:
+                    is_pressed = self._input_buttons[channel].is_pressed
+                    # With pull-up, pressed = LOW
+                    if self.pull_up:
+                        state = not is_pressed
+                    else:
+                        state = is_pressed
+                    return state
+            return None
 
         except Exception as e:
             logger.debug("gpio_read_bcm_pin_error", bcm_pin=bcm_pin, error=str(e))
@@ -852,30 +652,25 @@ class GPIODriver(LabJackInterface):
         Read all available GPIO pins
 
         All pins are pre-configured at startup, so this is fast.
-        With pigpio edge callbacks, this just returns the cached state.
 
         Returns:
             Dictionary mapping BCM pin number to state (True=HIGH, False=LOW)
         """
-        if self._using_edge_callbacks:
-            # Return cached state from pigpio edge callbacks (instant)
-            return dict(self._pin_states)
-        else:
-            # Use gpiozero polling
-            states = {}
-            for channel, bcm_pin in self.input_pin_map.items():
-                if channel in self._input_buttons:
-                    try:
-                        is_pressed = self._input_buttons[channel].is_pressed
-                        # With pull-up, pressed = LOW
-                        if self.pull_up:
-                            state = not is_pressed
-                        else:
-                            state = is_pressed
-                        states[bcm_pin] = state
-                    except Exception as e:
-                        logger.debug("gpio_read_pin_error", bcm_pin=bcm_pin, error=str(e))
-            return states
+        states = {}
+        for channel, bcm_pin in self.input_pin_map.items():
+            if channel in self._input_buttons:
+                try:
+                    is_pressed = self._input_buttons[channel].is_pressed
+                    # With pull-up, pressed = LOW
+                    if self.pull_up:
+                        state = not is_pressed
+                    else:
+                        state = is_pressed
+                    states[bcm_pin] = state
+                except Exception as e:
+                    logger.debug("gpio_read_pin_error", bcm_pin=bcm_pin, error=str(e))
+
+        return states
 
     async def _configure_all_available_pins(self) -> None:
         """
@@ -911,27 +706,21 @@ class GPIODriver(LabJackInterface):
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get driver statistics"""
-        stats = {
+        return {
             "connected": self._connected,
             "driver_type": "Raspberry Pi GPIO",
             "hardware_pwm": self._pi is not None,
-            "edge_callbacks": self._using_edge_callbacks,
             "input_pins": self.input_pin_map,
             "pwm_pins": self.pwm_pin_map,
             "read_count": self.read_count,
             "write_count": self.write_count,
             "error_count": self.error_count,
-            "edge_callback_count": self.edge_callback_count,
             "analog_inputs": dict(self.analog_inputs),
             "digital_inputs": dict(self.digital_inputs),
             "digital_outputs": dict(self.digital_outputs),
             "channel_modes": dict(self.channel_modes),
             "pwm_outputs": dict(self.pwm_outputs),
         }
-        if self._using_edge_callbacks:
-            stats["pin_states"] = dict(self._pin_states)
-            stats["configured_callbacks"] = list(self._pigpio_callbacks.keys())
-        return stats
 
     def is_mock(self) -> bool:
         """Check if this is a mock driver"""
