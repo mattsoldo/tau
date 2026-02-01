@@ -209,6 +209,9 @@ class GPIODriver(LabJackInterface):
             # Load switch configuration from database (for switch_type inversion)
             await self.load_switch_config()
 
+            # Pre-configure all available GPIO pins for fast status reads
+            await self._configure_all_available_pins()
+
             return True
 
         except Exception as e:
@@ -611,10 +614,10 @@ class GPIODriver(LabJackInterface):
 
     async def read_bcm_pin(self, bcm_pin: int) -> Optional[bool]:
         """
-        Read any BCM GPIO pin directly, even if not pre-configured
+        Read any BCM GPIO pin directly
 
-        This method is useful for diagnostics and status display.
-        It creates a temporary Button to read the pin state.
+        This method reads from pre-configured pins. Pins are configured
+        at startup via _configure_all_available_pins().
 
         Args:
             bcm_pin: BCM GPIO pin number
@@ -626,58 +629,80 @@ class GPIODriver(LabJackInterface):
             return None
 
         try:
-            # Check if this pin is already configured
+            # Check if this pin is configured
             bcm_to_channel = {bcm: ch for ch, bcm in self.input_pin_map.items()}
             if bcm_pin in bcm_to_channel:
-                # Use the existing configured channel
                 channel = bcm_to_channel[bcm_pin]
-                return await self.read_digital_input(channel)
-
-            # Create a temporary Button to read the pin
-            from gpiozero import Button
-            from gpiozero.exc import BadPinFactory, GPIOPinInUse
-
-            try:
-                temp_button = Button(bcm_pin, pull_up=self.pull_up, bounce_time=None)
-                is_pressed = temp_button.is_pressed
-
-                # With pull-up, pressed = LOW
-                if self.pull_up:
-                    state = not is_pressed
-                else:
-                    state = is_pressed
-
-                temp_button.close()
-                return state
-
-            except GPIOPinInUse:
-                # Pin is in use by something else
-                logger.debug("gpio_pin_in_use", bcm_pin=bcm_pin)
-                return None
-            except Exception as e:
-                logger.debug("gpio_read_bcm_pin_error", bcm_pin=bcm_pin, error=str(e))
-                return None
+                if channel in self._input_buttons:
+                    is_pressed = self._input_buttons[channel].is_pressed
+                    # With pull-up, pressed = LOW
+                    if self.pull_up:
+                        state = not is_pressed
+                    else:
+                        state = is_pressed
+                    return state
+            return None
 
         except Exception as e:
-            logger.error("gpio_read_bcm_pin_error", bcm_pin=bcm_pin, error=str(e))
+            logger.debug("gpio_read_bcm_pin_error", bcm_pin=bcm_pin, error=str(e))
             return None
 
     async def read_all_available_pins(self) -> Dict[int, bool]:
         """
         Read all available GPIO pins
 
+        All pins are pre-configured at startup, so this is fast.
+
         Returns:
             Dictionary mapping BCM pin number to state (True=HIGH, False=LOW)
         """
-        from tau.hardware.platform import AVAILABLE_GPIO_PINS
-
         states = {}
-        for bcm_pin in AVAILABLE_GPIO_PINS:
-            state = await self.read_bcm_pin(bcm_pin)
-            if state is not None:
-                states[bcm_pin] = state
+        for channel, bcm_pin in self.input_pin_map.items():
+            if channel in self._input_buttons:
+                try:
+                    is_pressed = self._input_buttons[channel].is_pressed
+                    # With pull-up, pressed = LOW
+                    if self.pull_up:
+                        state = not is_pressed
+                    else:
+                        state = is_pressed
+                    states[bcm_pin] = state
+                except Exception as e:
+                    logger.debug("gpio_read_pin_error", bcm_pin=bcm_pin, error=str(e))
 
         return states
+
+    async def _configure_all_available_pins(self) -> None:
+        """
+        Configure all available GPIO pins at startup for fast reading
+
+        This pre-creates Button objects for all available pins so that
+        read_all_available_pins() doesn't need to create temporary objects.
+        """
+        from tau.hardware.platform import AVAILABLE_GPIO_PINS
+
+        # Find next available channel number
+        next_channel = max(self.input_pin_map.keys(), default=-1) + 1
+
+        configured_count = 0
+        for bcm_pin in AVAILABLE_GPIO_PINS:
+            # Skip if already configured
+            if bcm_pin in [p for p in self.input_pin_map.values()]:
+                continue
+
+            channel = next_channel
+            next_channel += 1
+
+            # Add to input_pin_map and configure
+            self.input_pin_map[channel] = bcm_pin
+            if await self._configure_input_pin(channel, bcm_pin):
+                configured_count += 1
+
+        logger.info(
+            "gpio_all_pins_configured",
+            newly_configured=configured_count,
+            total_pins=len(self.input_pin_map)
+        )
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get driver statistics"""
