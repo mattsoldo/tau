@@ -133,6 +133,15 @@ CREATE TABLE groups (
     -- Display order for UI sorting (null = sort by name)
     display_order INT,
 
+    -- Sleep Mode Lock Configuration
+    -- When enabled, controls are locked during the specified time window,
+    -- requiring a long-press unlock gesture to adjust lights.
+    -- This is a "soft lock" for preventing accidental adjustments, not security.
+    sleep_lock_enabled BOOLEAN DEFAULT FALSE,
+    sleep_lock_start_time VARCHAR(5) CHECK (sleep_lock_start_time ~ '^([0-1][0-9]|2[0-3]):[0-5][0-9]$'),  -- HH:MM format
+    sleep_lock_end_time VARCHAR(5) CHECK (sleep_lock_end_time ~ '^([0-1][0-9]|2[0-3]):[0-5][0-9]$'),      -- HH:MM format
+    sleep_lock_unlock_duration_minutes INT DEFAULT 5 CHECK (sleep_lock_unlock_duration_minutes BETWEEN 0 AND 60),
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
