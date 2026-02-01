@@ -106,6 +106,9 @@ class GPIODriver(LabJackInterface):
         # Connection state
         self._connected = False
 
+        # Per-switch inversion tracking (based on switch_type and invert_reading)
+        self.inverted_channels: set = set()
+
         logger.info(
             "gpio_driver_initialized",
             input_pins=self.input_pin_map,
@@ -202,6 +205,10 @@ class GPIODriver(LabJackInterface):
                 pwm_outputs=len(self._pwm_outputs_hw),
                 hardware_pwm=self._pi is not None
             )
+
+            # Load switch configuration from database (for switch_type inversion)
+            await self.load_switch_config()
+
             return True
 
         except Exception as e:
@@ -239,6 +246,142 @@ class GPIODriver(LabJackInterface):
 
         except Exception as e:
             logger.error("gpio_disconnect_error", error=str(e))
+
+    async def load_switch_config(self) -> None:
+        """
+        Load switch configuration from database
+
+        This method:
+        1. Queries the database for GPIO switches
+        2. Dynamically configures GPIO pins for those switches
+        3. Sets up inversion based on switch_type and invert_reading fields
+
+        Inversion logic (with pull-up resistors, which is the default):
+        - Normally-Open (NO) switches: Open=HIGH, Pressed=LOW → need inversion
+        - Normally-Closed (NC) switches: Closed=LOW, Pressed=HIGH → no inversion
+
+        The `invert_reading` field acts as an XOR override:
+        - NO + invert_reading=False → inverted (default for NO)
+        - NO + invert_reading=True → not inverted (user override)
+        - NC + invert_reading=False → not inverted (default for NC)
+        - NC + invert_reading=True → inverted (user override)
+        """
+        try:
+            from sqlalchemy import select
+            from tau.database import get_session
+            from tau.models.switches import Switch
+
+            async for session in get_session():
+                result = await session.execute(
+                    select(Switch).where(
+                        Switch.input_source == 'gpio',
+                        Switch.gpio_bcm_pin.isnot(None)
+                    )
+                )
+                switches = result.scalars().all()
+
+                # Clear and rebuild inverted channels set
+                self.inverted_channels.clear()
+
+                # Build BCM to channel mapping (reverse of input_pin_map)
+                bcm_to_channel = {bcm: ch for ch, bcm in self.input_pin_map.items()}
+
+                # Find next available channel number
+                next_channel = max(self.input_pin_map.keys(), default=-1) + 1
+
+                for switch in switches:
+                    if switch.gpio_bcm_pin is None:
+                        continue
+
+                    bcm_pin = switch.gpio_bcm_pin
+
+                    # Check if this BCM pin is already configured
+                    channel = bcm_to_channel.get(bcm_pin)
+
+                    if channel is None:
+                        # This BCM pin is not yet configured - add it dynamically
+                        channel = next_channel
+                        next_channel += 1
+
+                        # Add to input_pin_map
+                        self.input_pin_map[channel] = bcm_pin
+                        bcm_to_channel[bcm_pin] = channel
+
+                        # Configure the GPIO button for this pin
+                        await self._configure_input_pin(channel, bcm_pin)
+
+                        logger.info(
+                            "gpio_switch_pin_auto_configured",
+                            channel=channel,
+                            bcm_pin=bcm_pin,
+                            switch_name=switch.name
+                        )
+
+                    # Determine if this switch type needs inversion by default
+                    is_normally_open = switch.switch_type == 'normally-open'
+
+                    # XOR logic: switch_type default XOR invert_reading override
+                    should_invert = is_normally_open != switch.invert_reading
+
+                    if should_invert:
+                        self.inverted_channels.add(channel)
+
+                    logger.info(
+                        "gpio_switch_config_loaded",
+                        channel=channel,
+                        bcm_pin=bcm_pin,
+                        switch_type=switch.switch_type,
+                        invert_reading=switch.invert_reading,
+                        should_invert=should_invert,
+                        switch_name=switch.name
+                    )
+
+                logger.info(
+                    "gpio_switch_config_complete",
+                    inverted_channels=list(self.inverted_channels),
+                    total_switches=len(switches),
+                    configured_pins=self.input_pin_map
+                )
+                break  # Only need one iteration
+
+        except Exception as e:
+            logger.error("gpio_switch_config_failed", error=str(e))
+
+    async def _configure_input_pin(self, channel: int, bcm_pin: int) -> bool:
+        """
+        Configure a single GPIO input pin
+
+        Args:
+            channel: The channel number for this pin
+            bcm_pin: The BCM GPIO pin number
+
+        Returns:
+            True if configuration successful
+        """
+        try:
+            from gpiozero import Button
+
+            self._input_buttons[channel] = Button(
+                bcm_pin,
+                pull_up=self.pull_up,
+                bounce_time=0.05  # 50ms debounce
+            )
+            logger.debug(
+                "gpio_input_configured",
+                channel=channel,
+                bcm_pin=bcm_pin,
+                pull_up=self.pull_up
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "gpio_input_config_failed",
+                channel=channel,
+                bcm_pin=bcm_pin,
+                error=str(e)
+            )
+            return False
 
     def is_connected(self) -> bool:
         """Check if GPIO is connected"""
@@ -365,7 +508,7 @@ class GPIODriver(LabJackInterface):
             channel: Channel number (0-15)
 
         Returns:
-            True for HIGH, False for LOW
+            True for HIGH, False for LOW (after applying switch_type inversion)
         """
         if not self._connected:
             return False
@@ -378,10 +521,15 @@ class GPIODriver(LabJackInterface):
             is_pressed = self._input_buttons[channel].is_pressed
 
             # With pull-up resistors, pressed = LOW (connected to ground)
+            # Convert is_pressed to raw electrical state (HIGH/LOW)
             if self.pull_up:
                 state = not is_pressed
             else:
                 state = is_pressed
+
+            # Apply per-switch inversion based on switch_type (for NO switches)
+            if channel in self.inverted_channels:
+                state = not state
 
             self.digital_inputs[channel] = state
             self.read_count += 1
@@ -389,7 +537,8 @@ class GPIODriver(LabJackInterface):
             logger.debug(
                 "gpio_digital_read",
                 channel=channel,
-                state="HIGH" if state else "LOW"
+                state="HIGH" if state else "LOW",
+                inverted=channel in self.inverted_channels
             )
 
             return state
@@ -459,6 +608,76 @@ class GPIODriver(LabJackInterface):
             channel=channel,
             mode=mode
         )
+
+    async def read_bcm_pin(self, bcm_pin: int) -> Optional[bool]:
+        """
+        Read any BCM GPIO pin directly, even if not pre-configured
+
+        This method is useful for diagnostics and status display.
+        It creates a temporary Button to read the pin state.
+
+        Args:
+            bcm_pin: BCM GPIO pin number
+
+        Returns:
+            True for HIGH, False for LOW, None if pin cannot be read
+        """
+        if not self._connected:
+            return None
+
+        try:
+            # Check if this pin is already configured
+            bcm_to_channel = {bcm: ch for ch, bcm in self.input_pin_map.items()}
+            if bcm_pin in bcm_to_channel:
+                # Use the existing configured channel
+                channel = bcm_to_channel[bcm_pin]
+                return await self.read_digital_input(channel)
+
+            # Create a temporary Button to read the pin
+            from gpiozero import Button
+            from gpiozero.exc import BadPinFactory, GPIOPinInUse
+
+            try:
+                temp_button = Button(bcm_pin, pull_up=self.pull_up, bounce_time=None)
+                is_pressed = temp_button.is_pressed
+
+                # With pull-up, pressed = LOW
+                if self.pull_up:
+                    state = not is_pressed
+                else:
+                    state = is_pressed
+
+                temp_button.close()
+                return state
+
+            except GPIOPinInUse:
+                # Pin is in use by something else
+                logger.debug("gpio_pin_in_use", bcm_pin=bcm_pin)
+                return None
+            except Exception as e:
+                logger.debug("gpio_read_bcm_pin_error", bcm_pin=bcm_pin, error=str(e))
+                return None
+
+        except Exception as e:
+            logger.error("gpio_read_bcm_pin_error", bcm_pin=bcm_pin, error=str(e))
+            return None
+
+    async def read_all_available_pins(self) -> Dict[int, bool]:
+        """
+        Read all available GPIO pins
+
+        Returns:
+            Dictionary mapping BCM pin number to state (True=HIGH, False=LOW)
+        """
+        from tau.hardware.platform import AVAILABLE_GPIO_PINS
+
+        states = {}
+        for bcm_pin in AVAILABLE_GPIO_PINS:
+            state = await self.read_bcm_pin(bcm_pin)
+            if state is not None:
+                states[bcm_pin] = state
+
+        return states
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get driver statistics"""

@@ -266,6 +266,89 @@ async def get_all_channels():
     }
 
 
+@router.get(
+    "/diagnose/{channel}",
+    summary="Diagnose Channel",
+    description="Read the actual voltage on a channel (temporarily reconfigures as analog)"
+)
+async def diagnose_channel(channel: int):
+    """
+    Diagnose a channel by reading its actual voltage.
+
+    This temporarily reconfigures the channel as analog to measure voltage,
+    then restores its original configuration.
+
+    Useful for debugging switch wiring issues.
+    """
+    if channel < 0 or channel > 7:
+        raise HTTPException(status_code=400, detail="Only FIO channels 0-7 supported for diagnosis")
+
+    daemon = get_daemon_instance()
+
+    if not daemon or not daemon.hardware_manager:
+        raise HTTPException(status_code=503, detail="Hardware manager not available")
+
+    labjack = daemon.hardware_manager.labjack
+
+    if not labjack.is_connected():
+        raise HTTPException(status_code=503, detail="LabJack not connected")
+
+    try:
+        import u3
+
+        # Save current mode
+        original_mode = labjack.channel_modes.get(channel, 'analog')
+
+        # Temporarily configure as analog to read voltage
+        # Set bit for this channel to 1 (analog)
+        current_fio_analog = labjack._fio_analog_mask
+        temp_fio_analog = current_fio_analog | (1 << channel)
+        labjack.device.configIO(FIOAnalog=temp_fio_analog)
+
+        # Read voltage
+        voltage = labjack.device.getAIN(channel)
+
+        # Restore original configuration
+        labjack.device.configIO(FIOAnalog=current_fio_analog)
+
+        # If it was digital, reconfigure direction
+        if original_mode in ('digital-in', 'digital-out'):
+            direction = 1 if original_mode == 'digital-out' else 0
+            labjack.device.getFeedback(u3.BitDirWrite(channel, direction))
+
+        # Interpret the voltage
+        interpretation = ""
+        if voltage < 0.5:
+            interpretation = "LOW (connected to GND or switch closed to GND)"
+        elif voltage > 2.5:
+            interpretation = "HIGH (floating with pull-up or connected to VS)"
+        else:
+            interpretation = "INTERMEDIATE (possible floating or partial connection)"
+
+        logger.info(
+            "channel_diagnosed",
+            channel=channel,
+            voltage=voltage,
+            original_mode=original_mode,
+            interpretation=interpretation
+        )
+
+        return {
+            "channel": channel,
+            "voltage": round(voltage, 3),
+            "interpretation": interpretation,
+            "expected_for_nc_switch": {
+                "at_rest": "~0V (LOW) - switch closed, connected to GND",
+                "when_pressed": "~3.3V (HIGH) - switch open, pull-up active"
+            },
+            "wiring_tip": "For NC switch: one terminal to FIO, other terminal to GND"
+        }
+
+    except Exception as e:
+        logger.error("channel_diagnose_error", channel=channel, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Error diagnosing channel: {str(e)}")
+
+
 @router.post(
     "/reset",
     summary="Reset LabJack",

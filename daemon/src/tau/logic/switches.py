@@ -215,9 +215,14 @@ class SwitchHandler:
         # Reload from database
         new_count = await self.load_switches()
 
-        # Also reload LabJack switch config (for inversion settings)
+        # Reload LabJack switch config (for inversion settings)
         if hasattr(self.hardware_manager.labjack, 'load_switch_config'):
             await self.hardware_manager.labjack.load_switch_config()
+
+        # Reload GPIO switch config (for inversion settings)
+        if self.hardware_manager.gpio is not None:
+            if hasattr(self.hardware_manager.gpio, 'load_switch_config'):
+                await self.hardware_manager.gpio.load_switch_config()
 
         logger.info(
             "switches_reloaded",
@@ -229,43 +234,92 @@ class SwitchHandler:
 
     async def _configure_hardware_channels(self) -> None:
         """
-        Configure LabJack channels based on switch requirements
+        Configure hardware channels based on switch requirements
 
         This ensures pins are in the correct mode (digital/analog) for each switch.
+        Configures channels on the appropriate driver (LabJack or GPIO).
         """
-        if not hasattr(self.hardware_manager.labjack, 'configure_channel'):
-            # Hardware doesn't support dynamic channel configuration (e.g., mock mode)
-            return
+        # Build BCM to channel mapping for GPIO switches
+        gpio_bcm_to_channel = {}
+        if self.hardware_manager.gpio is not None and hasattr(self.hardware_manager.gpio, 'input_pin_map'):
+            gpio_bcm_to_channel = {
+                bcm: ch for ch, bcm in
+                self.hardware_manager.gpio.input_pin_map.items()
+            }
 
         try:
+            labjack_configured = 0
+            gpio_configured = 0
+
             for switch_id, (switch, model) in self.switches.items():
                 # Configure digital pin if required
-                if model.requires_digital_pin and switch.labjack_digital_pin is not None:
-                    await self.hardware_manager.labjack.configure_channel(
-                        switch.labjack_digital_pin,
-                        'digital-in'
-                    )
-                    logger.debug(
-                        "switch_channel_configured",
-                        switch_id=switch_id,
-                        channel=switch.labjack_digital_pin,
-                        mode="digital-in"
-                    )
+                if model.requires_digital_pin:
+                    if switch.input_source == 'gpio' and switch.gpio_bcm_pin is not None:
+                        # GPIO switch: configure on GPIO driver
+                        if self.hardware_manager.gpio is not None:
+                            channel = gpio_bcm_to_channel.get(switch.gpio_bcm_pin)
+                            if channel is not None:
+                                if hasattr(self.hardware_manager.gpio, 'configure_channel'):
+                                    await self.hardware_manager.gpio.configure_channel(
+                                        channel,
+                                        'digital-in'
+                                    )
+                                gpio_configured += 1
+                                logger.debug(
+                                    "gpio_channel_configured",
+                                    switch_id=switch_id,
+                                    bcm_pin=switch.gpio_bcm_pin,
+                                    channel=channel,
+                                    mode="digital-in"
+                                )
+                            else:
+                                logger.warning(
+                                    "gpio_pin_not_in_pin_map",
+                                    switch_id=switch_id,
+                                    gpio_bcm_pin=switch.gpio_bcm_pin,
+                                    available_pins=list(gpio_bcm_to_channel.keys())
+                                )
+                        else:
+                            logger.warning(
+                                "gpio_driver_not_available_for_switch",
+                                switch_id=switch_id,
+                                gpio_bcm_pin=switch.gpio_bcm_pin
+                            )
 
-                # Configure analog pin if required
+                    elif switch.labjack_digital_pin is not None:
+                        # LabJack switch: configure on LabJack driver
+                        if hasattr(self.hardware_manager.labjack, 'configure_channel'):
+                            await self.hardware_manager.labjack.configure_channel(
+                                switch.labjack_digital_pin,
+                                'digital-in'
+                            )
+                        labjack_configured += 1
+                        logger.debug(
+                            "labjack_channel_configured",
+                            switch_id=switch_id,
+                            channel=switch.labjack_digital_pin,
+                            mode="digital-in"
+                        )
+
+                # Configure analog pin if required (LabJack only, GPIO doesn't support analog)
                 if model.requires_analog_pin and switch.labjack_analog_pin is not None:
-                    await self.hardware_manager.labjack.configure_channel(
-                        switch.labjack_analog_pin,
-                        'analog'
-                    )
+                    if hasattr(self.hardware_manager.labjack, 'configure_channel'):
+                        await self.hardware_manager.labjack.configure_channel(
+                            switch.labjack_analog_pin,
+                            'analog'
+                        )
                     logger.debug(
-                        "switch_channel_configured",
+                        "labjack_analog_configured",
                         switch_id=switch_id,
                         channel=switch.labjack_analog_pin,
                         mode="analog"
                     )
 
-            logger.info("switch_channels_configured", count=len(self.switches))
+            logger.info(
+                "switch_channels_configured",
+                labjack_count=labjack_configured,
+                gpio_count=gpio_configured
+            )
 
         except Exception as e:
             logger.error(
@@ -280,8 +334,16 @@ class SwitchHandler:
 
         Reads hardware inputs, applies debouncing, detects events,
         and triggers appropriate actions.
+
+        Supports both LabJack and GPIO switches simultaneously.
         """
         current_time = time.time()
+
+        # Debug logging counter (log every 300 iterations = ~10 seconds at 30Hz)
+        if not hasattr(self, '_debug_counter'):
+            self._debug_counter = 0
+        self._debug_counter += 1
+        log_this_iteration = (self._debug_counter % 300 == 0)
 
         for switch_id, (switch, model) in self.switches.items():
             state = self.switch_states[switch_id]
@@ -290,19 +352,48 @@ class SwitchHandler:
             digital_value = None
             analog_value = None
 
-            if model.requires_digital_pin and switch.labjack_digital_pin is not None:
-                # Read digital pin (for simple switches, retractive)
-                # Digital reading returns voltage - convert to boolean
-                voltage = await self.hardware_manager.read_switch_inputs(
-                    [switch.labjack_digital_pin]
-                )
-                if voltage:
-                    # Consider > 1.5V as pressed (TTL logic)
-                    # voltage is a dict mapping channel to value
-                    digital_value = voltage.get(switch.labjack_digital_pin, 0.0) > 1.5
+            if model.requires_digital_pin:
+                if switch.input_source == 'gpio' and switch.gpio_bcm_pin is not None:
+                    # GPIO switch: use the GPIO driver directly
+                    if self.hardware_manager.gpio is not None:
+                        # Find the channel for this BCM pin
+                        if hasattr(self.hardware_manager.gpio, 'input_pin_map'):
+                            bcm_to_channel = {
+                                bcm: ch for ch, bcm in
+                                self.hardware_manager.gpio.input_pin_map.items()
+                            }
+                            channel = bcm_to_channel.get(switch.gpio_bcm_pin)
+                            if channel is not None:
+                                # Read from GPIO driver - returns bool directly
+                                gpio_state = await self.hardware_manager.gpio.read_digital_input(channel)
+                                # Convert to voltage-like value for compatibility
+                                digital_value = gpio_state
+                            else:
+                                logger.debug(
+                                    "gpio_pin_not_in_map",
+                                    switch_id=switch_id,
+                                    bcm_pin=switch.gpio_bcm_pin
+                                )
+                    else:
+                        logger.debug(
+                            "gpio_driver_not_available",
+                            switch_id=switch_id
+                        )
+
+                elif switch.labjack_digital_pin is not None:
+                    # LabJack switch: use the LabJack driver
+                    channel = switch.labjack_digital_pin
+                    # Read digital pin (for simple switches, retractive)
+                    # Digital reading returns voltage - convert to boolean
+                    voltage = await self.hardware_manager.read_switch_inputs([channel])
+                    if voltage:
+                        # Consider > 1.5V as pressed (TTL logic)
+                        # voltage is a dict mapping channel to value
+                        digital_value = voltage.get(channel, 0.0) > 1.5
 
             if model.requires_analog_pin and switch.labjack_analog_pin is not None:
                 # Read analog pin (for rotary encoders, analog dimmers)
+                # Note: GPIO doesn't support analog inputs
                 voltage = await self.hardware_manager.read_switch_inputs(
                     [switch.labjack_analog_pin]
                 )
@@ -310,6 +401,17 @@ class SwitchHandler:
                     # Normalize 0-2.4V to 0.0-1.0
                     # voltage is a dict mapping channel to value
                     analog_value = min(1.0, voltage.get(switch.labjack_analog_pin, 0.0) / 2.4)
+
+            # Debug logging (every ~10 seconds)
+            if log_this_iteration:
+                logger.info(
+                    "switch_input_debug",
+                    switch_id=switch_id,
+                    switch_name=switch.name,
+                    input_source=switch.input_source,
+                    digital_value=digital_value,
+                    last_value=state.last_digital_value
+                )
 
             # Process based on input type
             if model.input_type == "switch_simple":
@@ -500,6 +602,15 @@ class SwitchHandler:
                     # Start or continue dimming
                     await self._handle_hold_event(switch, state, current_time)
             return
+
+        # LOG STATE CHANGE
+        logger.info(
+            "switch_state_changed",
+            switch_id=switch.id,
+            switch_name=switch.name,
+            old_value=state.last_digital_value,
+            new_value=digital_value
+        )
 
         # Apply debouncing
         time_since_change = (current_time - state.last_change_time) * 1000  # ms

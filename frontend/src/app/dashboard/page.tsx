@@ -122,6 +122,28 @@ interface ActiveOverride {
   time_remaining_hours: number;
 }
 
+interface GPIOPinState {
+  physical: number;
+  type: 'gpio' | 'power' | 'ground' | 'disabled';
+  label: string;
+  bcm?: number;
+  disabled_reason?: string;
+  in_use: boolean;
+  switch_name?: string;
+  state?: boolean; // true = HIGH, false = LOW
+}
+
+interface GPIOStatus {
+  platform_available: boolean;
+  is_raspberry_pi: boolean;
+  pi_model?: string;
+  reason?: string;
+  gpio_connected: boolean;
+  pins: GPIOPinState[];
+  read_count: number;
+  error_count: number;
+}
+
 interface LightState {
   brightness: number;
   lightOn: boolean;
@@ -205,6 +227,7 @@ export default function DashboardPage() {
   const [fixtureCctModes, setFixtureCctModes] = useState<Map<number, CctMode>>(new Map());
   const [groupCctModes, setGroupCctModes] = useState<Map<number, CctMode>>(new Map());
   const [activeOverrides, setActiveOverrides] = useState<ActiveOverride[]>([]);
+  const [gpioStatus, setGpioStatus] = useState<GPIOStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedFixtures, setExpandedFixtures] = useState<Set<number>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -634,6 +657,25 @@ export default function DashboardPage() {
 
     fetchOverrides();
     const interval = setInterval(fetchOverrides, OVERRIDES_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Poll GPIO status every 2 seconds (same as overrides)
+  useEffect(() => {
+    const fetchGpioStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/gpio/status`);
+        if (response.ok) {
+          const data = await response.json();
+          setGpioStatus(data);
+        }
+      } catch {
+        // Ignore errors in GPIO status poll
+      }
+    };
+
+    fetchGpioStatus();
+    const interval = setInterval(fetchGpioStatus, STATUS_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
 
@@ -2151,6 +2193,217 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* GPIO Status Card - hidden on mobile */}
+          <div className="hidden lg:block lg:col-span-2 bg-[#161619] border border-[#2a2a2f] rounded-2xl p-6">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-11 h-11 rounded-xl bg-[#111113] border border-[#2a2a2f] flex items-center justify-center">
+                <svg className="w-[22px] h-[22px] stroke-amber-500" fill="none" strokeWidth="1.5" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/>
+                  <circle cx="15.5" cy="8.5" r="1.5" fill="currentColor" stroke="none"/>
+                  <circle cx="8.5" cy="15.5" r="1.5" fill="currentColor" stroke="none"/>
+                  <circle cx="15.5" cy="15.5" r="1.5" fill="currentColor" stroke="none"/>
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-medium">GPIO Header</h3>
+                <p className="font-mono text-[12px] text-[#636366] mt-0.5">
+                  {gpioStatus?.pi_model || 'Not on Raspberry Pi'}
+                </p>
+              </div>
+              <span className={`font-mono text-[11px] px-2.5 py-1 rounded-md border ${
+                gpioStatus?.gpio_connected
+                  ? 'bg-green-500/15 text-green-500 border-green-500/20'
+                  : gpioStatus?.platform_available
+                    ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                    : 'bg-red-500/15 text-red-500 border-red-500/20'
+              }`}>
+                {gpioStatus?.gpio_connected ? 'ACTIVE' : gpioStatus?.platform_available ? 'STANDBY' : 'N/A'}
+              </span>
+            </div>
+
+            {!gpioStatus?.platform_available ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-12 h-12 rounded-xl bg-[#111113] border border-[#2a2a2f] flex items-center justify-center mb-3">
+                  <svg className="w-6 h-6 stroke-[#636366]" fill="none" strokeWidth="1.5" viewBox="0 0 24 24">
+                    <path d="M12 9v2m0 4h.01M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
+                  </svg>
+                </div>
+                <p className="text-[13px] text-[#636366]">GPIO Not Available</p>
+                <p className="text-[11px] text-[#4a4a4f] mt-1">{gpioStatus?.reason || 'Not running on Raspberry Pi'}</p>
+              </div>
+            ) : (
+              <>
+                {/* GPIO Header Visual - 2 columns x 20 rows */}
+                <div className="flex gap-6">
+                  {/* Pin Layout */}
+                  <div className="flex-1">
+                    <div className="text-[10px] text-[#636366] mb-2 text-center font-mono">40-Pin Header</div>
+                    <div className="grid grid-cols-2 gap-1 p-2 bg-[#111113] rounded-lg">
+                      {Array.from({ length: 20 }).map((_, row) => {
+                        const leftPin = gpioStatus?.pins?.find(p => p.physical === row * 2 + 1);
+                        const rightPin = gpioStatus?.pins?.find(p => p.physical === row * 2 + 2);
+
+                        return (
+                          <div key={row} className="contents">
+                            {/* Left pin (odd) */}
+                            <div
+                              className={`flex items-center justify-between px-1.5 py-0.5 rounded text-[9px] font-mono ${
+                                leftPin?.type === 'power'
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : leftPin?.type === 'ground'
+                                    ? 'bg-zinc-700/50 text-zinc-400'
+                                    : leftPin?.type === 'disabled'
+                                      ? 'bg-orange-500/15 text-orange-400/70'
+                                      : leftPin?.in_use
+                                        ? leftPin?.state === true
+                                          ? 'bg-amber-500/30 text-amber-400 ring-1 ring-amber-500/50'
+                                          : leftPin?.state === false
+                                            ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/50'
+                                            : 'bg-blue-500/20 text-blue-400'
+                                        : 'bg-[#1a1a1d] text-[#636366]'
+                              }`}
+                              title={leftPin?.disabled_reason || leftPin?.switch_name || leftPin?.label}
+                            >
+                              <span className="w-4">{leftPin?.physical}</span>
+                              <span className="truncate flex-1 text-center text-[8px]">
+                                {leftPin?.in_use && leftPin?.state !== undefined
+                                  ? (leftPin.state ? 'HIGH' : 'LOW')
+                                  : leftPin?.type === 'gpio'
+                                    ? `G${leftPin.bcm}`
+                                    : leftPin?.type === 'power'
+                                      ? leftPin.label.includes('5V') ? '5V' : '3V3'
+                                      : leftPin?.type === 'ground'
+                                        ? 'GND'
+                                        : `G${leftPin?.bcm}`}
+                              </span>
+                            </div>
+                            {/* Right pin (even) */}
+                            <div
+                              className={`flex items-center justify-between px-1.5 py-0.5 rounded text-[9px] font-mono ${
+                                rightPin?.type === 'power'
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : rightPin?.type === 'ground'
+                                    ? 'bg-zinc-700/50 text-zinc-400'
+                                    : rightPin?.type === 'disabled'
+                                      ? 'bg-orange-500/15 text-orange-400/70'
+                                      : rightPin?.in_use
+                                        ? rightPin?.state === true
+                                          ? 'bg-amber-500/30 text-amber-400 ring-1 ring-amber-500/50'
+                                          : rightPin?.state === false
+                                            ? 'bg-green-500/20 text-green-400 ring-1 ring-green-500/50'
+                                            : 'bg-blue-500/20 text-blue-400'
+                                        : 'bg-[#1a1a1d] text-[#636366]'
+                              }`}
+                              title={rightPin?.disabled_reason || rightPin?.switch_name || rightPin?.label}
+                            >
+                              <span className="truncate flex-1 text-center text-[8px]">
+                                {rightPin?.in_use && rightPin?.state !== undefined
+                                  ? (rightPin.state ? 'HIGH' : 'LOW')
+                                  : rightPin?.type === 'gpio'
+                                    ? `G${rightPin?.bcm}`
+                                    : rightPin?.type === 'power'
+                                      ? rightPin?.label.includes('5V') ? '5V' : '3V3'
+                                      : rightPin?.type === 'ground'
+                                        ? 'GND'
+                                        : `G${rightPin?.bcm}`}
+                              </span>
+                              <span className="w-4 text-right">{rightPin?.physical}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Legend and Stats */}
+                  <div className="w-40 flex flex-col gap-4">
+                    {/* Legend */}
+                    <div className="bg-[#111113] rounded-lg p-3">
+                      <div className="text-[10px] text-[#636366] mb-2 font-mono">Legend</div>
+                      <div className="flex flex-col gap-1.5 text-[9px]">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-green-500/20 ring-1 ring-green-500/50"></div>
+                          <span className="text-[#a1a1a6]">LOW (Closed)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-amber-500/30 ring-1 ring-amber-500/50"></div>
+                          <span className="text-[#a1a1a6]">HIGH (Open)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-blue-500/20"></div>
+                          <span className="text-[#a1a1a6]">In Use (No Read)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-[#1a1a1d]"></div>
+                          <span className="text-[#a1a1a6]">Available GPIO</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-orange-500/15"></div>
+                          <span className="text-[#a1a1a6]">Reserved</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-red-500/20"></div>
+                          <span className="text-[#a1a1a6]">Power</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded bg-zinc-700/50"></div>
+                          <span className="text-[#a1a1a6]">Ground</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="bg-[#111113] rounded-lg p-3">
+                      <div className="text-[10px] text-[#636366] mb-2 font-mono">Statistics</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="text-center">
+                          <div className="font-mono text-lg font-medium text-amber-500">
+                            {formatNumber(gpioStatus?.read_count || 0)}
+                          </div>
+                          <div className="text-[9px] text-[#636366]">Reads</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="font-mono text-lg font-medium">
+                            {gpioStatus?.error_count || 0}
+                          </div>
+                          <div className="text-[9px] text-[#636366]">Errors</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Active Inputs Summary */}
+                    <div className="bg-[#111113] rounded-lg p-3">
+                      <div className="text-[10px] text-[#636366] mb-2 font-mono">Active Inputs</div>
+                      <div className="flex flex-col gap-1">
+                        {gpioStatus?.pins?.filter(p => p.in_use).length === 0 ? (
+                          <div className="text-[10px] text-[#4a4a4f]">No switches configured</div>
+                        ) : (
+                          gpioStatus?.pins?.filter(p => p.in_use).map(pin => (
+                            <div key={pin.physical} className="flex items-center justify-between text-[9px]">
+                              <span className="text-[#a1a1a6] truncate" title={pin.switch_name}>
+                                {pin.switch_name || `GPIO${pin.bcm}`}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded font-mono ${
+                                pin.state === true
+                                  ? 'bg-amber-500/20 text-amber-400'
+                                  : pin.state === false
+                                    ? 'bg-green-500/20 text-green-400'
+                                    : 'bg-[#2a2a2f] text-[#636366]'
+                              }`}>
+                                {pin.state === true ? 'HIGH' : pin.state === false ? 'LOW' : '--'}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>

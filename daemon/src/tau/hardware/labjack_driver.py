@@ -144,7 +144,17 @@ class LabJackDriver(LabJackInterface):
         """
         Load switch configuration from database
 
-        Reads switch settings to determine which channels need logic inversion
+        Reads switch settings to determine which channels need logic inversion.
+
+        Inversion logic (with pull-up resistors):
+        - Normally-Open (NO) switches: Open=HIGH, Pressed=LOW → need inversion
+        - Normally-Closed (NC) switches: Closed=LOW, Pressed=HIGH → no inversion
+
+        The `invert_reading` field acts as an XOR override:
+        - NO + invert_reading=False → inverted (default for NO)
+        - NO + invert_reading=True → not inverted (user override)
+        - NC + invert_reading=False → not inverted (default for NC)
+        - NC + invert_reading=True → inverted (user override)
         """
         try:
             async for session in get_session():
@@ -157,15 +167,30 @@ class LabJackDriver(LabJackInterface):
                 self.inverted_channels.clear()
 
                 for switch in switches:
-                    if switch.invert_reading and switch.labjack_digital_pin is not None:
+                    if switch.labjack_digital_pin is None:
+                        continue
+
+                    # Determine if this switch type needs inversion by default
+                    is_normally_open = switch.switch_type == 'normally-open'
+
+                    # XOR logic: switch_type default XOR invert_reading override
+                    # NO (needs inversion) XOR False = True (inverted)
+                    # NO (needs inversion) XOR True = False (not inverted - user override)
+                    # NC (no inversion) XOR False = False (not inverted)
+                    # NC (no inversion) XOR True = True (inverted - user override)
+                    should_invert = is_normally_open != switch.invert_reading
+
+                    if should_invert:
                         self.inverted_channels.add(switch.labjack_digital_pin)
-                        logger.info(
-                            "labjack_switch_config_loaded",
-                            channel=switch.labjack_digital_pin,
-                            switch_type=switch.switch_type,
-                            invert_reading=switch.invert_reading,
-                            switch_name=switch.name
-                        )
+
+                    logger.info(
+                        "labjack_switch_config_loaded",
+                        channel=switch.labjack_digital_pin,
+                        switch_type=switch.switch_type,
+                        invert_reading=switch.invert_reading,
+                        should_invert=should_invert,
+                        switch_name=switch.name
+                    )
 
                 logger.info(
                     "labjack_switch_config_complete",
@@ -327,12 +352,41 @@ class LabJackDriver(LabJackInterface):
             # Read digital state
             if channel < 8:
                 # FIO pins (0-7)
-                state = self.device.getFIOState(channel)
+                raw_state = self.device.getFIOState(channel)
             else:
                 # EIO pins (8-15)
-                state = self.device.getEIOState(channel - 8)
+                raw_state = self.device.getEIOState(channel - 8)
+
+            # Track raw state changes
+            if not hasattr(self, '_last_raw_state'):
+                self._last_raw_state = {}
+            previous_raw = self._last_raw_state.get(channel)
+            self._last_raw_state[channel] = bool(raw_state)
+
+            # Log when raw state CHANGES (switch press/release)
+            if previous_raw is not None and bool(raw_state) != previous_raw:
+                logger.info(
+                    "LABJACK_RAW_STATE_CHANGED",
+                    channel=channel,
+                    old_raw=previous_raw,
+                    new_raw=bool(raw_state),
+                    will_invert=channel in self.inverted_channels
+                )
+
+            # Also log periodically (every 3000 reads per channel, ~100 seconds)
+            if not hasattr(self, '_raw_log_counter'):
+                self._raw_log_counter = {}
+            self._raw_log_counter[channel] = self._raw_log_counter.get(channel, 0) + 1
+            if self._raw_log_counter[channel] % 3000 == 1:
+                logger.info(
+                    "labjack_raw_digital_read",
+                    channel=channel,
+                    raw_state=bool(raw_state),
+                    will_invert=channel in self.inverted_channels
+                )
 
             # Invert logic if this channel requires it (for switches without pull-ups)
+            state = raw_state
             if channel in self.inverted_channels:
                 state = not state
 

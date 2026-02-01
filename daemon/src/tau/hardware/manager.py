@@ -7,6 +7,7 @@ a unified interface for the control loop to interact with hardware.
 Supports:
 - LabJack U3 for switch inputs and PWM outputs
 - Raspberry Pi GPIO for switch inputs and PWM outputs
+- BOTH LabJack and GPIO can be used simultaneously for different switches
 - OLA (Open Lighting Architecture) for DMX512 control
 """
 import asyncio
@@ -47,11 +48,11 @@ class HardwareManager:
     """
     Central hardware manager
 
-    Coordinates LabJack/GPIO and OLA drivers, handles initialization,
+    Coordinates LabJack, GPIO, and OLA drivers, handles initialization,
     health monitoring, and provides unified hardware interface.
 
-    On Raspberry Pi, GPIO can be used instead of LabJack for switch
-    inputs and PWM outputs.
+    BOTH LabJack and GPIO can be active simultaneously - switches can be
+    configured to use either input source independently.
     """
 
     def __init__(
@@ -71,7 +72,7 @@ class HardwareManager:
         Args:
             labjack_driver: LabJack driver instance (or None to create default)
             ola_driver: OLA driver instance (or None to create default)
-            use_gpio: If True, use Raspberry Pi GPIO instead of LabJack
+            use_gpio: If True, also initialize GPIO driver (in addition to LabJack)
             gpio_use_pigpio: Use pigpio for hardware PWM on Raspberry Pi
             gpio_pull_up: Enable internal pull-up resistors on GPIO inputs
             gpio_input_pins: Custom GPIO input pin mapping string
@@ -83,32 +84,41 @@ class HardwareManager:
         self.gpio_input_pins_str = gpio_input_pins
         self.gpio_pwm_pins_str = gpio_pwm_pins
 
-        # Create drivers if not provided
-        if labjack_driver is None:
-            if use_gpio:
-                # Use Raspberry Pi GPIO driver
+        # Initialize LabJack driver (always, unless explicitly provided)
+        if labjack_driver is not None:
+            self.labjack = labjack_driver
+        else:
+            from tau.hardware.labjack_driver import LabJackDriver
+            self.labjack = LabJackDriver()
+
+        # Initialize GPIO driver (only on Raspberry Pi when use_gpio=True)
+        self.gpio: Optional[LabJackInterface] = None
+        if use_gpio:
+            try:
                 from tau.hardware.gpio_driver import GPIODriver
 
                 input_pins = parse_pin_mapping(gpio_input_pins)
                 pwm_pins = parse_pin_mapping(gpio_pwm_pins)
 
-                self.labjack = GPIODriver(
+                self.gpio = GPIODriver(
                     input_pins=input_pins,
                     pwm_pins=pwm_pins,
                     use_pigpio=gpio_use_pigpio,
                     pull_up=gpio_pull_up,
                 )
                 logger.info(
-                    "using_gpio_driver",
+                    "gpio_driver_created",
                     use_pigpio=gpio_use_pigpio,
                     pull_up=gpio_pull_up,
+                    input_pins=input_pins,
                 )
-            else:
-                from tau.hardware.labjack_driver import LabJackDriver
-
-                self.labjack = LabJackDriver()
-        else:
-            self.labjack = labjack_driver
+            except Exception as e:
+                logger.warning(
+                    "gpio_driver_creation_failed",
+                    error=str(e),
+                    message="GPIO switches will not be available"
+                )
+                self.gpio = None
 
         if ola_driver is None:
             from tau.hardware.ola_driver import OLADriver
@@ -128,6 +138,7 @@ class HardwareManager:
         logger.info(
             "hardware_manager_initialized",
             use_gpio=use_gpio,
+            gpio_available=self.gpio is not None,
             labjack=self.labjack.name,
             ola=self.ola.name,
         )
@@ -147,6 +158,15 @@ class HardwareManager:
             if not labjack_ok:
                 logger.warning("labjack_connection_failed", message="LabJack not available - will retry in background")
 
+            # Try to connect to GPIO if available (non-fatal if it fails)
+            gpio_ok = False
+            if self.gpio is not None:
+                gpio_ok = await self.gpio.connect()
+                if not gpio_ok:
+                    logger.warning("gpio_connection_failed", message="GPIO not available - will retry in background")
+                else:
+                    logger.info("gpio_connected_successfully")
+
             # Try to connect to OLA (non-fatal if it fails)
             ola_ok = await self.ola.connect()
             if not ola_ok:
@@ -156,8 +176,8 @@ class HardwareManager:
             # The health check loop will attempt reconnection
             self.health_check_task = asyncio.create_task(self._health_check_loop())
 
-            if labjack_ok or ola_ok:
-                logger.info("hardware_initialized", labjack_ok=labjack_ok, ola_ok=ola_ok)
+            if labjack_ok or gpio_ok or ola_ok:
+                logger.info("hardware_initialized", labjack_ok=labjack_ok, gpio_ok=gpio_ok, ola_ok=ola_ok)
                 return True
             else:
                 logger.warning("hardware_initialization_incomplete", message="No hardware available - running in software-only mode")
@@ -190,6 +210,13 @@ class HardwareManager:
         except Exception as e:
             logger.error("labjack_disconnect_error", error=str(e))
 
+        # Disconnect GPIO if available
+        if self.gpio is not None:
+            try:
+                await self.gpio.disconnect()
+            except Exception as e:
+                logger.error("gpio_disconnect_error", error=str(e))
+
         logger.info("hardware_shutdown_complete")
 
     async def _health_check_loop(self) -> None:
@@ -216,6 +243,19 @@ class HardwareManager:
                         logger.info("labjack_reconnected_successfully")
                         labjack_ok = True
 
+                # Check GPIO health if available
+                gpio_ok = True  # Default to True if GPIO not in use
+                if self.gpio is not None:
+                    gpio_ok = await self.gpio.health_check()
+
+                    # If GPIO failed health check, try to reconnect
+                    if not gpio_ok:
+                        logger.info("gpio_unhealthy_attempting_reconnect")
+                        reconnect_ok = await self.gpio.connect()
+                        if reconnect_ok:
+                            logger.info("gpio_reconnected_successfully")
+                            gpio_ok = True
+
                 # Check OLA health
                 ola_ok = await self.ola.health_check()
 
@@ -227,14 +267,15 @@ class HardwareManager:
                         logger.info("ola_reconnected_successfully")
                         ola_ok = True
 
-                if labjack_ok and ola_ok:
+                if labjack_ok and gpio_ok and ola_ok:
                     self.health_checks_passed += 1
-                    logger.debug("health_check_passed", labjack_ok=True, ola_ok=True)
+                    logger.debug("health_check_passed", labjack_ok=True, gpio_ok=gpio_ok, ola_ok=True)
                 else:
                     self.health_checks_failed += 1
                     logger.debug(
                         "health_check_incomplete",
                         labjack_ok=labjack_ok,
+                        gpio_ok=gpio_ok,
                         ola_ok=ola_ok,
                     )
 
@@ -315,6 +356,34 @@ class HardwareManager:
         """
         await self.ola.set_dmx_channels(universe, channels)
 
+    # GPIO convenience methods
+
+    async def read_gpio_input(self, bcm_pin: int) -> bool:
+        """
+        Read a GPIO input pin directly
+
+        Args:
+            bcm_pin: BCM GPIO pin number
+
+        Returns:
+            True if HIGH, False if LOW (after inversion logic applied)
+        """
+        if self.gpio is None:
+            logger.warning("gpio_read_no_driver", bcm_pin=bcm_pin)
+            return False
+
+        # Find the channel for this BCM pin
+        if hasattr(self.gpio, 'input_pin_map'):
+            bcm_to_channel = {
+                bcm: ch for ch, bcm in self.gpio.input_pin_map.items()
+            }
+            channel = bcm_to_channel.get(bcm_pin)
+            if channel is not None:
+                return await self.gpio.read_digital_input(channel)
+
+        logger.warning("gpio_pin_not_mapped", bcm_pin=bcm_pin)
+        return False
+
     # Status and statistics
 
     def is_healthy(self) -> bool:
@@ -324,7 +393,8 @@ class HardwareManager:
         Returns:
             True if all hardware is connected and healthy
         """
-        return self.labjack.is_connected() and self.ola.is_connected()
+        gpio_healthy = self.gpio.is_connected() if self.gpio is not None else True
+        return self.labjack.is_connected() and gpio_healthy and self.ola.is_connected()
 
     def get_statistics(self) -> dict:
         """
@@ -333,7 +403,7 @@ class HardwareManager:
         Returns:
             Dictionary with statistics from all drivers
         """
-        return {
+        stats = {
             "labjack": self.labjack.get_statistics(),
             "ola": self.ola.get_statistics(),
             "health_checks": {
@@ -346,3 +416,9 @@ class HardwareManager:
                 "use_gpio": self.use_gpio,
             },
         }
+
+        # Add GPIO stats if available
+        if self.gpio is not None:
+            stats["gpio"] = self.gpio.get_statistics()
+
+        return stats

@@ -20,6 +20,7 @@ Architecture:
 """
 import array
 import asyncio
+import subprocess
 import threading
 import time
 from typing import Dict, Optional
@@ -128,6 +129,10 @@ class OLADriver(OLAInterface):
 
             self._connected = True
             logger.info("ola_connected")
+
+            # Verify and auto-patch DMX device to Universe 0 using reliable method
+            await self._ensure_dmx_device_patched()
+
             return True
 
         except ImportError as e:
@@ -139,6 +144,119 @@ class OLADriver(OLAInterface):
             return False
         except Exception as e:
             logger.error("ola_connection_failed", error=str(e))
+            return False
+
+    async def _ensure_dmx_device_patched(self) -> bool:
+        """
+        Ensure DMX output device is patched to Universe 0.
+
+        Uses ola_dev_info and ola_patch commands for reliable patching.
+        This handles cases where OLA's Python API patching doesn't work correctly.
+
+        Returns:
+            True if patching verified/successful, False otherwise
+        """
+        try:
+            # Get device info to find DMX output device
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["ola_dev_info"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+            )
+
+            if result.returncode != 0:
+                logger.warning("ola_dev_info_failed", stderr=result.stderr)
+                return False
+
+            # Parse output to find ENTTEC USB DMX Pro (prioritize over other devices)
+            # Example line: "Device 10: Enttec Usb Pro Device, Serial #: 02312614, firmware 2.4"
+            device_id = None
+            fallback_device_id = None
+            lines = result.stdout.split('\n')
+
+            for line in lines:
+                line_lower = line.lower()
+                if line.startswith('Device '):
+                    try:
+                        current_id = int(line.split(':')[0].replace('Device ', '').strip())
+                        # First priority: ENTTEC devices
+                        if 'enttec' in line_lower:
+                            device_id = current_id
+                            logger.info(
+                                "ola_enttec_device_detected",
+                                device_id=device_id,
+                                device_line=line.strip()
+                            )
+                            break
+                        # Fallback: Other USB DMX devices (but not network protocols like E1.31, ArtNet)
+                        elif ('dmx' in line_lower and 'usb' in line_lower and
+                              'e1.31' not in line_lower and 'artnet' not in line_lower and
+                              fallback_device_id is None):
+                            fallback_device_id = current_id
+                    except (ValueError, IndexError):
+                        continue
+
+            # Use fallback if no Enttec found
+            if device_id is None and fallback_device_id is not None:
+                device_id = fallback_device_id
+                logger.info(
+                    "ola_fallback_dmx_device_detected",
+                    device_id=device_id
+                )
+
+            if device_id is None:
+                logger.warning("ola_no_dmx_device_found_for_patching")
+                return False
+
+            # Check if THIS specific device is already patched to Universe 0
+            # We can't easily check this via HTTP API, so we'll just patch it
+            # OLA handles re-patching gracefully (no error if already patched)
+
+            # Patch device to Universe 0
+            logger.info(
+                "ola_patching_device_to_universe_0",
+                device_id=device_id,
+                port=0
+            )
+
+            patch_result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["ola_patch", "--device", str(device_id), "--port", "0", "--universe", "0"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+            )
+
+            if patch_result.returncode == 0:
+                logger.info(
+                    "ola_device_patched_successfully",
+                    device_id=device_id,
+                    universe=0
+                )
+                return True
+            else:
+                logger.error(
+                    "ola_patch_command_failed",
+                    device_id=device_id,
+                    returncode=patch_result.returncode,
+                    stderr=patch_result.stderr
+                )
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error("ola_patching_timeout")
+            return False
+        except FileNotFoundError:
+            logger.error("ola_patch_command_not_found")
+            return False
+        except Exception as e:
+            logger.error("ola_patching_error", error=str(e))
             return False
 
     def _ola_thread_main(self) -> None:
@@ -183,20 +301,35 @@ class OLADriver(OLAInterface):
                         self._connect_event.set()
                         return
 
-                    # Find ENTTEC USB DMX Pro (or similar DMX output device)
+                    # Find ENTTEC USB DMX Pro (prioritize over other DMX devices)
                     enttec_device = None
+                    fallback_device = None
+
                     for device in devices:
                         device_name = device.name.lower()
-                        # Look for ENTTEC or common DMX output devices
-                        if 'enttec' in device_name or 'dmx' in device_name:
+                        # First priority: ENTTEC devices (USB DMX Pro, Open DMX)
+                        if 'enttec' in device_name:
                             enttec_device = device
                             logger.info(
-                                "ola_dmx_device_found",
+                                "ola_enttec_device_found",
                                 device_id=device.id,
                                 device_name=device.name,
                                 device_alias=device.alias
                             )
                             break
+                        # Fallback: Other USB DMX devices (but not network protocols)
+                        elif 'dmx' in device_name and 'usb' in device_name and fallback_device is None:
+                            fallback_device = device
+
+                    # Use fallback if no Enttec found
+                    if enttec_device is None and fallback_device is not None:
+                        enttec_device = fallback_device
+                        logger.info(
+                            "ola_fallback_dmx_device_found",
+                            device_id=fallback_device.id,
+                            device_name=fallback_device.name,
+                            device_alias=fallback_device.alias
+                        )
 
                     if not enttec_device:
                         logger.warning("ola_no_dmx_device_found")

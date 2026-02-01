@@ -6,7 +6,7 @@ Provides endpoints for:
 - GPIO pin layout for the interactive pin selector UI
 - GPIO pin availability based on configured switches
 """
-from typing import List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -238,3 +238,134 @@ async def validate_gpio_pin(
         "physical_pin": bcm_to_physical(bcm_pin),
         "nearest_ground": find_nearest_ground(bcm_to_physical(bcm_pin))
     }
+
+
+class GPIOPinStateResponse(BaseModel):
+    """Single GPIO pin with live state"""
+    physical: int = Field(..., description="Physical pin number (1-40)")
+    type: str = Field(..., description="Pin type: gpio, power, ground, disabled")
+    label: str = Field(..., description="Pin label for display")
+    bcm: Optional[int] = Field(None, description="BCM GPIO number (for GPIO pins)")
+    disabled_reason: Optional[str] = Field(None, description="Reason pin is disabled")
+    in_use: bool = Field(default=False, description="Whether pin is assigned to a switch")
+    switch_name: Optional[str] = Field(None, description="Name of switch using this pin")
+    state: Optional[bool] = Field(None, description="Live pin state: True=HIGH, False=LOW (only for monitored pins)")
+
+
+class GPIOStatusResponse(BaseModel):
+    """GPIO status with live pin states"""
+    platform_available: bool = Field(..., description="Whether GPIO is available on this platform")
+    is_raspberry_pi: bool = Field(..., description="Whether running on a Raspberry Pi")
+    pi_model: Optional[str] = Field(None, description="Pi model name")
+    reason: Optional[str] = Field(None, description="Why GPIO is unavailable (if applicable)")
+    gpio_connected: bool = Field(default=False, description="Whether GPIO driver is connected")
+    pins: List[GPIOPinStateResponse] = Field(default=[], description="All 40 header pins with states")
+    read_count: int = Field(default=0, description="Total GPIO reads")
+    error_count: int = Field(default=0, description="Total GPIO errors")
+
+
+@router.get("/status", response_model=GPIOStatusResponse)
+async def get_gpio_status(
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    Get live GPIO status including all pin states.
+
+    Returns:
+    - Platform detection info
+    - All 40 GPIO header pins with their types
+    - Live HIGH/LOW states for ALL available GPIO pins (not just configured ones)
+    - Read/error counts for monitoring
+    """
+    from tau.api import get_daemon_instance
+
+    platform = detect_platform()
+
+    # If GPIO not available, return early with platform info
+    if not platform.gpio_available:
+        return GPIOStatusResponse(
+            platform_available=False,
+            is_raspberry_pi=platform.is_raspberry_pi,
+            pi_model=platform.model,
+            reason=platform.reason,
+            gpio_connected=False,
+            pins=[],
+            read_count=0,
+            error_count=0
+        )
+
+    # Get hardware statistics from daemon
+    daemon = get_daemon_instance()
+    hardware_stats = {}
+    gpio_driver = None
+    if daemon and daemon.hardware_manager:
+        hardware_stats = daemon.hardware_manager.get_statistics()
+        gpio_driver = daemon.hardware_manager.gpio
+
+    # Get GPIO-specific stats from the separate GPIO driver
+    # (now we have both labjack and gpio drivers running simultaneously)
+    gpio_stats = hardware_stats.get("gpio", {})
+    use_gpio = hardware_stats.get("mode", {}).get("use_gpio", False)
+
+    gpio_connected = gpio_stats.get("connected", False) if use_gpio and gpio_stats else False
+    read_count = gpio_stats.get("read_count", 0) if gpio_stats else 0
+    error_count = gpio_stats.get("error_count", 0) if gpio_stats else 0
+
+    # Get switches using GPIO
+    result = await session.execute(
+        select(Switch.gpio_bcm_pin, Switch.name).where(
+            Switch.input_source == 'gpio',
+            Switch.gpio_bcm_pin.isnot(None)
+        )
+    )
+    gpio_switches = {row[0]: row[1] for row in result.all()}
+
+    # Read live states for ALL available GPIO pins
+    live_pin_states: Dict[int, bool] = {}
+    if gpio_driver and gpio_connected:
+        try:
+            live_pin_states = await gpio_driver.read_all_available_pins()
+        except Exception as e:
+            logger.warning("gpio_read_all_pins_error", error=str(e))
+
+    # Build layout from GPIO_HEADER_LAYOUT
+    layout = get_gpio_layout()
+    pins = []
+
+    for pin_info in layout["header_pins"]:
+        physical = pin_info["physical"]
+        bcm = pin_info.get("bcm")
+        pin_type = pin_info["type"]
+        label = pin_info["label"]
+        disabled_reason = pin_info.get("disabled_reason")
+
+        # Check if this pin is in use by a switch
+        in_use = bcm in gpio_switches if bcm is not None else False
+        switch_name = gpio_switches.get(bcm) if in_use else None
+
+        # Get live state for ALL available GPIO pins
+        state = None
+        if bcm is not None and pin_type == "gpio":
+            state = live_pin_states.get(bcm)
+
+        pins.append(GPIOPinStateResponse(
+            physical=physical,
+            type=pin_type,
+            label=label,
+            bcm=bcm,
+            disabled_reason=disabled_reason,
+            in_use=in_use,
+            switch_name=switch_name,
+            state=state
+        ))
+
+    return GPIOStatusResponse(
+        platform_available=True,
+        is_raspberry_pi=True,
+        pi_model=platform.model,
+        reason=None,
+        gpio_connected=gpio_connected,
+        pins=pins,
+        read_count=read_count,
+        error_count=error_count
+    )
