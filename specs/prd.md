@@ -228,6 +228,37 @@ Lower-level assignments override higher-level ones.
 - Group-level controls propagate to member fixtures.
 - Group-level controls **clear individual fixture overrides** for all member fixtures.
 
+### 7.3 Sleep Mode Lock
+
+Groups support a "sleep mode lock" feature that prevents accidental light adjustments during specified hours (e.g., bedtime for a bedroom). This is a "soft lock" for convenience, not a security feature.
+
+**Configuration:**
+- `sleep_lock_enabled`: Enables/disables the feature for the group
+- `sleep_lock_start_time`: Start of the lock period (HH:MM format, e.g., "22:00")
+- `sleep_lock_end_time`: End of the lock period (HH:MM format, e.g., "07:00")
+- `sleep_lock_unlock_duration_minutes`: How long controls remain unlocked after gesture (0-60 minutes, default: 5)
+
+**Time Handling:**
+- Times are interpreted as server local time
+- Overnight ranges are supported (e.g., 22:00 to 07:00)
+- Both start and end times must be set when enabled
+
+**Unlock Gesture:**
+- When locked, sliders are disabled and show a lock icon overlay
+- Users must perform a **long-press gesture (2 seconds)** to unlock
+- Visual feedback shows progress during the unlock gesture (circular progress ring)
+- After unlock, controls remain accessible for the configured duration
+
+**Unlock Duration Modes:**
+- **Timed unlock** (1-60 minutes): Controls unlock temporarily, then re-lock automatically
+- **Single action** (0 minutes): Controls unlock for one adjustment only, then immediately re-lock
+
+**UI Indicators:**
+- Locked sliders show dimmed appearance with lock icon
+- Long-press gesture shows animated progress ring filling over 2 seconds
+- Individual fixtures within a locked group inherit the lock state
+- Brightness percentage remains visible but grayed out when locked
+
 ---
 
 ## 8. Scenes

@@ -1,13 +1,20 @@
 "use client";
 
 import { useRef } from "react";
+import { Lock } from "lucide-react";
+import {
+  useUnlockGesture,
+  PROGRESS_RING_CIRCUMFERENCE_SMALL,
+} from "@/hooks/useUnlockGesture";
 
 interface IndividualLightProps {
   name: string;
   isOn: boolean;
   brightness: number; // 0-100
+  locked?: boolean;  // Whether the control is locked (passed from parent group)
   onToggle: () => void;
   onBrightnessChange: (value: number) => void;
+  onUnlock?: () => void;  // Callback when unlock gesture completes
 }
 
 // The leftmost portion of the slider is reserved for "off" (0% brightness)
@@ -18,9 +25,25 @@ export function IndividualLight({
   name,
   isOn,
   brightness,
+  locked = false,
   onBrightnessChange,
+  onUnlock,
 }: IndividualLightProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+
+  // Use the shared unlock gesture hook
+  const {
+    unlockProgress,
+    isHoldingToUnlock,
+    startUnlockHold,
+    cancelUnlockHold,
+  } = useUnlockGesture({
+    isLocked: locked,
+    onUnlock,
+    // Individual lights don't manage unlock duration - parent handles it
+    unlockDurationMinutes: 0,
+    lockActive: locked,
+  });
 
   // Convert slider position (0-100% of slider width) to brightness (0-100)
   // The first OFF_ZONE_PERCENT% of the slider maps to 0 brightness
@@ -44,6 +67,7 @@ export function IndividualLight({
   };
 
   const handleSliderInteraction = (e: React.MouseEvent | React.TouchEvent) => {
+    if (locked) return;
     e.preventDefault();
     const card = cardRef.current;
     if (!card) return;
@@ -58,6 +82,7 @@ export function IndividualLight({
   };
 
   const handleMouseMove = (e: MouseEvent) => {
+    if (locked) return;
     const card = cardRef.current;
     if (!card) return;
 
@@ -71,6 +96,18 @@ export function IndividualLight({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
+
+    // If locked, start unlock hold gesture
+    if (locked) {
+      startUnlockHold();
+      const handleMouseUp = () => {
+        cancelUnlockHold();
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+      document.addEventListener('mouseup', handleMouseUp);
+      return;
+    }
+
     handleSliderInteraction(e);
 
     const handleMouseUp = () => {
@@ -80,6 +117,21 @@ export function IndividualLight({
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (locked) {
+      e.preventDefault();
+      startUnlockHold();
+      return;
+    }
+    handleSliderInteraction(e);
+  };
+
+  const handleTouchEnd = () => {
+    if (isHoldingToUnlock) {
+      cancelUnlockHold();
+    }
   };
 
   // Calculate gradient colors based on brightness (dim to warm)
@@ -110,19 +162,24 @@ export function IndividualLight({
     <div
       ref={cardRef}
       onMouseDown={handleMouseDown}
-      onTouchStart={handleSliderInteraction}
-      onTouchMove={handleSliderInteraction}
-      className="relative overflow-hidden bg-gray-50 dark:bg-[#0f0f14] rounded-lg p-3 cursor-ew-resize"
+      onTouchStart={handleTouchStart}
+      onTouchMove={locked ? undefined : handleSliderInteraction}
+      onTouchEnd={handleTouchEnd}
+      className={`relative overflow-hidden bg-gray-50 dark:bg-[#0f0f14] rounded-lg p-3 ${
+        locked ? 'cursor-pointer' : 'cursor-ew-resize'
+      }`}
       style={{ touchAction: 'none' }}
     >
       {/* Off zone indicator - subtle left border */}
-      <div
-        className="absolute left-0 top-0 bottom-0 border-r border-dashed border-gray-200 dark:border-gray-700"
-        style={{ width: `${OFF_ZONE_PERCENT}%` }}
-      />
+      {!locked && (
+        <div
+          className="absolute left-0 top-0 bottom-0 border-r border-dashed border-gray-200 dark:border-gray-700"
+          style={{ width: `${OFF_ZONE_PERCENT}%` }}
+        />
+      )}
 
       {/* Brightness indicator background - no transition for instant response */}
-      {isOn && (
+      {isOn && !locked && (
         <>
           <div
             className={`absolute inset-0 bg-gradient-to-r ${getGradientColors(brightness)} to-transparent`}
@@ -136,11 +193,58 @@ export function IndividualLight({
         </>
       )}
 
+      {/* Locked overlay */}
+      {locked && (
+        <div className="absolute inset-0 bg-gray-900/40 dark:bg-gray-900/60 flex items-center justify-center">
+          {isHoldingToUnlock ? (
+            <div className="relative w-8 h-8">
+              <svg className="w-8 h-8 -rotate-90" viewBox="0 0 32 32">
+                <circle
+                  cx="16"
+                  cy="16"
+                  r="12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="text-gray-600"
+                />
+                <circle
+                  cx="16"
+                  cy="16"
+                  r="12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  className="text-amber-500"
+                  strokeDasharray={`${unlockProgress * PROGRESS_RING_CIRCUMFERENCE_SMALL} ${PROGRESS_RING_CIRCUMFERENCE_SMALL}`}
+                />
+              </svg>
+              <Lock className="absolute inset-0 m-auto w-3 h-3 text-amber-500" />
+            </div>
+          ) : (
+            <Lock className="w-3 h-3 text-gray-400" />
+          )}
+        </div>
+      )}
+
+      {/* Dimmed brightness indicator when locked */}
+      {isOn && locked && (
+        <div
+          className="absolute inset-0 bg-gradient-to-r from-gray-400/30 via-gray-300/20 to-transparent"
+          style={{ width: `${visualPosition}%` }}
+        />
+      )}
+
       <div className="relative flex items-center justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-gray-900 dark:text-white text-xs truncate">{name}</h4>
+          <h4 className={`font-medium text-xs truncate ${
+            locked ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white'
+          }`}>{name}</h4>
         </div>
-        <div className="text-xs font-medium text-gray-700 dark:text-gray-300 tabular-nums min-w-[3rem] text-right">
+        <div className={`text-xs font-medium tabular-nums min-w-[3rem] text-right ${
+          locked ? 'text-gray-500 dark:text-gray-400' : 'text-gray-700 dark:text-gray-300'
+        }`}>
           {isOn ? `${brightness}%` : 'Off'}
         </div>
       </div>

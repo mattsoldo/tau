@@ -1,9 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { useRef, useState, useCallback } from "react";
+import { MoreHorizontal, Plus, Lock } from "lucide-react";
 import { IndividualLight } from "@/components/mobile/IndividualLight";
 import { CompactScene } from "@/components/mobile/CompactScene";
+import {
+  useUnlockGesture,
+  PROGRESS_RING_CIRCUMFERENCE_LARGE,
+} from "@/hooks/useUnlockGesture";
 
 interface FixtureData {
   id: number;
@@ -18,6 +22,12 @@ interface SceneData {
   icon?: "sparkles" | "moon" | "sun" | "coffee" | "sunset" | "lightbulb";
 }
 
+interface SleepLockConfig {
+  enabled: boolean;
+  active: boolean;  // Whether lock is currently active based on time
+  unlockDurationMinutes: number;
+}
+
 interface LightGroupProps {
   name: string;
   description?: string;
@@ -26,6 +36,7 @@ interface LightGroupProps {
   fixtures: FixtureData[];
   scenes?: SceneData[];
   activeSceneId?: number | null;
+  sleepLock?: SleepLockConfig;
   onToggle: () => void;
   onBrightnessChange: (value: number) => void;
   onFixtureToggle: (fixtureId: number) => void;
@@ -46,6 +57,7 @@ export function LightGroup({
   fixtures,
   scenes = [],
   activeSceneId,
+  sleepLock,
   onToggle,
   onBrightnessChange,
   onFixtureToggle,
@@ -55,6 +67,25 @@ export function LightGroup({
 }: LightGroupProps) {
   const sliderRef = useRef<HTMLDivElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Use the shared unlock gesture hook
+  const {
+    isUnlocked,
+    unlockProgress,
+    isHoldingToUnlock,
+    startUnlockHold,
+    cancelUnlockHold,
+    handleControlAction,
+    setIsUnlocked,
+    unlockExpiryTimerRef,
+  } = useUnlockGesture({
+    isLocked: Boolean(sleepLock?.enabled && sleepLock?.active),
+    unlockDurationMinutes: sleepLock?.unlockDurationMinutes ?? 5,
+    lockActive: sleepLock?.active ?? false,
+  });
+
+  // Determine if the slider should be locked
+  const isLocked = sleepLock?.enabled && sleepLock?.active && !isUnlocked;
 
   // Convert slider position (0-100% of slider width) to brightness (0-100)
   // The first OFF_ZONE_PERCENT% of the slider maps to 0 brightness
@@ -79,6 +110,7 @@ export function LightGroup({
 
   const handleSliderInteraction = (e: React.MouseEvent | React.TouchEvent, isStart: boolean = false) => {
     if (isExpanded) return;
+    if (isLocked) return; // Don't allow slider interaction when locked
     e.preventDefault();
 
     const slider = sliderRef.current;
@@ -91,10 +123,12 @@ export function LightGroup({
     const newBrightness = positionToBrightness(positionPercent);
 
     onBrightnessChange(newBrightness);
+    handleControlAction();
   };
 
   const handleMouseMove = (e: MouseEvent) => {
     if (isExpanded) return;
+    if (isLocked) return;
     const slider = sliderRef.current;
     if (!slider) return;
 
@@ -108,16 +142,51 @@ export function LightGroup({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isExpanded) return;
+
+    // If locked, start the unlock hold gesture
+    if (isLocked) {
+      e.preventDefault();
+      startUnlockHold();
+
+      const handleMouseUp = () => {
+        cancelUnlockHold();
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+      document.addEventListener('mouseup', handleMouseUp);
+      return;
+    }
+
     e.preventDefault();
     handleSliderInteraction(e, true);
 
     const handleMouseUp = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      handleControlAction();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (isExpanded) return;
+
+    // If locked, start the unlock hold gesture
+    if (isLocked) {
+      e.preventDefault();
+      startUnlockHold();
+      return;
+    }
+
+    handleSliderInteraction(e, true);
+  };
+
+  const handleTouchEnd = () => {
+    if (isHoldingToUnlock) {
+      cancelUnlockHold();
+    }
+    handleControlAction();
   };
 
   // Calculate gradient colors based on brightness (dim to warm)
@@ -154,15 +223,16 @@ export function LightGroup({
         <div
           ref={sliderRef}
           onMouseDown={handleMouseDown}
-          onTouchStart={isExpanded ? undefined : (e) => handleSliderInteraction(e, true)}
-          onTouchMove={isExpanded ? undefined : handleSliderInteraction}
+          onTouchStart={isExpanded ? undefined : handleTouchStart}
+          onTouchMove={isExpanded || isLocked ? undefined : handleSliderInteraction}
+          onTouchEnd={handleTouchEnd}
           className={`relative overflow-hidden p-4 flex-1 min-w-0 ${
-            !isExpanded ? 'cursor-ew-resize' : 'cursor-default'
+            !isExpanded && !isLocked ? 'cursor-ew-resize' : isLocked ? 'cursor-pointer' : 'cursor-default'
           }`}
           style={{ touchAction: !isExpanded ? 'none' : 'auto' }}
         >
           {/* Off zone indicator - subtle left border when light is on */}
-          {!isExpanded && (
+          {!isExpanded && !isLocked && (
             <div
               className="absolute left-0 top-0 bottom-0 border-r border-dashed border-gray-200 dark:border-gray-700"
               style={{ width: `${OFF_ZONE_PERCENT}%` }}
@@ -170,7 +240,7 @@ export function LightGroup({
           )}
 
           {/* Brightness indicator background - no transition for instant response */}
-          {isOn && !isExpanded && (
+          {isOn && !isExpanded && !isLocked && (
             <>
               <div
                 className={`absolute inset-0 bg-gradient-to-r ${getGradientColors(brightness)} to-transparent`}
@@ -184,13 +254,69 @@ export function LightGroup({
             </>
           )}
 
+          {/* Locked overlay */}
+          {isLocked && !isExpanded && (
+            <div className="absolute inset-0 bg-gray-900/40 dark:bg-gray-900/60 flex items-center justify-center">
+              {/* Unlock progress ring */}
+              {isHoldingToUnlock ? (
+                <div className="relative w-12 h-12">
+                  {/* Background circle */}
+                  <svg className="w-12 h-12 -rotate-90" viewBox="0 0 48 48">
+                    <circle
+                      cx="24"
+                      cy="24"
+                      r="20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      className="text-gray-600"
+                    />
+                    {/* Progress circle */}
+                    <circle
+                      cx="24"
+                      cy="24"
+                      r="20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      className="text-amber-500"
+                      strokeDasharray={`${unlockProgress * PROGRESS_RING_CIRCUMFERENCE_LARGE} ${PROGRESS_RING_CIRCUMFERENCE_LARGE}`}
+                    />
+                  </svg>
+                  <Lock className="absolute inset-0 m-auto w-5 h-5 text-amber-500" />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-gray-400 dark:text-gray-500">
+                  <Lock className="w-4 h-4" />
+                  <span className="text-xs font-medium">Hold to unlock</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Dimmed brightness indicator when locked */}
+          {isOn && !isExpanded && isLocked && (
+            <div
+              className="absolute inset-0 bg-gradient-to-r from-gray-400/30 via-gray-300/20 to-transparent"
+              style={{ width: `${visualPosition}%` }}
+            />
+          )}
+
           <div className="relative flex items-center gap-3">
             <div className="flex-1 min-w-0 text-left">
-              <h3 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</h3>
+                {sleepLock?.enabled && sleepLock?.active && (
+                  <Lock className={`w-3 h-3 flex-shrink-0 ${isUnlocked ? 'text-amber-500' : 'text-gray-400'}`} />
+                )}
+              </div>
               {description && <p className="text-xs text-gray-500 dark:text-gray-400">{description}</p>}
             </div>
             {!isExpanded && (
-              <div className="text-sm font-medium text-gray-900 dark:text-white tabular-nums min-w-[3rem] text-right">
+              <div className={`text-sm font-medium tabular-nums min-w-[3rem] text-right ${
+                isLocked ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-white'
+              }`}>
                 {isOn ? `${brightness}%` : 'Off'}
               </div>
             )}
@@ -248,10 +374,23 @@ export function LightGroup({
                 name={fixture.name}
                 isOn={fixture.isOn}
                 brightness={fixture.brightness}
+                locked={isLocked}
                 onToggle={() => onFixtureToggle(fixture.id)}
-                onBrightnessChange={(value) =>
-                  onFixtureBrightnessChange(fixture.id, value)
-                }
+                onBrightnessChange={(value) => {
+                  onFixtureBrightnessChange(fixture.id, value);
+                  handleControlAction();
+                }}
+                onUnlock={() => {
+                  setIsUnlocked(true);
+                  // Set expiry timer for temporary unlock
+                  const durationMinutes = sleepLock?.unlockDurationMinutes ?? 5;
+                  if (durationMinutes > 0) {
+                    if (unlockExpiryTimerRef.current) clearTimeout(unlockExpiryTimerRef.current);
+                    unlockExpiryTimerRef.current = setTimeout(() => {
+                      setIsUnlocked(false);
+                    }, durationMinutes * 60 * 1000);
+                  }
+                }}
               />
             ))}
           </div>

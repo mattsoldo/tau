@@ -2,6 +2,7 @@
 Groups API Routes - CRUD operations for groups and membership management
 """
 from typing import List
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,76 @@ from tau.api.schemas import (
 
 logger = structlog.get_logger(__name__)
 
+
+def is_sleep_lock_active(group: Group) -> bool:
+    """
+    Check if sleep lock is currently active for a group based on current time.
+
+    Handles time ranges that span midnight (e.g., 22:00 to 07:00).
+    Returns False if sleep lock is not enabled or times are not configured.
+
+    Note on Timezone Handling:
+        This function uses the server's local time (datetime.now()) for comparison.
+        The sleep lock times (HH:MM format) are interpreted as server local time.
+        This is a "soft lock" intended to prevent accidental light adjustments,
+        not a security feature. Users in the same location as the server will
+        experience the expected behavior. If the server runs in a different
+        timezone than users, the lock schedule may not align with user expectations.
+    """
+    if not group.sleep_lock_enabled:
+        return False
+
+    if not group.sleep_lock_start_time or not group.sleep_lock_end_time:
+        return False
+
+    try:
+        now = datetime.now()
+        current_time = now.hour * 60 + now.minute  # Minutes since midnight
+
+        # Parse start and end times to minutes since midnight
+        start_parts = group.sleep_lock_start_time.split(":")
+        end_parts = group.sleep_lock_end_time.split(":")
+        start_minutes = int(start_parts[0]) * 60 + int(start_parts[1])
+        end_minutes = int(end_parts[0]) * 60 + int(end_parts[1])
+
+        if start_minutes <= end_minutes:
+            # Normal range (e.g., 08:00 to 17:00)
+            return start_minutes <= current_time < end_minutes
+        else:
+            # Range spans midnight (e.g., 22:00 to 07:00)
+            return current_time >= start_minutes or current_time < end_minutes
+    except (ValueError, AttributeError) as e:
+        logger.warning(
+            "invalid_sleep_lock_config",
+            group_id=group.id,
+            group_name=group.name,
+            start_time=group.sleep_lock_start_time,
+            end_time=group.sleep_lock_end_time,
+            error=str(e)
+        )
+        return False
+
+
+def group_to_response(group: Group) -> dict:
+    """Convert a Group model to a response dict with computed fields."""
+    return {
+        "id": group.id,
+        "name": group.name,
+        "description": group.description,
+        "circadian_enabled": group.circadian_enabled or False,
+        "circadian_profile_id": group.circadian_profile_id,
+        "default_max_brightness": group.default_max_brightness,
+        "default_cct_kelvin": group.default_cct_kelvin,
+        "is_system": group.is_system or False,
+        "display_order": group.display_order,
+        "created_at": group.created_at,
+        "sleep_lock_enabled": group.sleep_lock_enabled or False,
+        "sleep_lock_start_time": group.sleep_lock_start_time,
+        "sleep_lock_end_time": group.sleep_lock_end_time,
+        "sleep_lock_unlock_duration_minutes": group.sleep_lock_unlock_duration_minutes,
+        "sleep_lock_active": is_sleep_lock_active(group),
+    }
+
 router = APIRouter()
 
 
@@ -35,7 +106,7 @@ async def list_groups(
     """List all groups"""
     result = await session.execute(select(Group))
     groups = result.scalars().all()
-    return groups
+    return [group_to_response(g) for g in groups]
 
 
 @router.post("/", response_model=GroupResponse, status_code=201)
@@ -87,7 +158,7 @@ async def create_group(
                 error=str(e)
             )
 
-    return group
+    return group_to_response(group)
 
 
 @router.get("/{group_id}", response_model=GroupResponse)
@@ -99,7 +170,7 @@ async def get_group(
     group = await session.get(Group, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-    return group
+    return group_to_response(group)
 
 
 @router.patch("/{group_id}", response_model=GroupResponse)
@@ -128,7 +199,7 @@ async def update_group(
 
     await session.commit()
     await session.refresh(group)
-    return group
+    return group_to_response(group)
 
 
 @router.delete("/{group_id}", status_code=204)
@@ -310,4 +381,4 @@ async def reorder_groups(
     result = await session.execute(select(Group).order_by(Group.display_order.asc().nullslast()))
     groups = result.scalars().all()
     logger.info("groups_reordered", group_ids=reorder_data.group_ids)
-    return groups
+    return [group_to_response(g) for g in groups]

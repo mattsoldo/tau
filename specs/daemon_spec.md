@@ -166,6 +166,16 @@ On startup:
 5.2 Persistence guarantees
 	•	Any state change applied via input or API must be persisted immediately.
 
+5.3 Group Sleep Lock Configuration
+
+Groups may have sleep lock settings configured:
+	•	`sleep_lock_enabled` (boolean): Whether sleep lock is active for this group
+	•	`sleep_lock_start_time` (string, HH:MM): Start of lock period
+	•	`sleep_lock_end_time` (string, HH:MM): End of lock period
+	•	`sleep_lock_unlock_duration_minutes` (integer, 0-60): How long controls stay unlocked after gesture
+
+The daemon computes `sleep_lock_active` dynamically based on current server time and configured time window. This is returned in group API responses but not stored.
+
 ⸻
 
 6. Lighting Math and DMX Output Rules
@@ -423,6 +433,34 @@ Request:
 Behavior:
 	•	Sets display_order for each group based on array position
 	•	Returns updated groups sorted by new order
+
+10.6.1 Group response format
+
+All group endpoints return the following sleep lock fields:
+
+```json
+{
+  "id": 1,
+  "name": "Bedroom",
+  // ... other fields ...
+  "sleep_lock_enabled": true,
+  "sleep_lock_start_time": "22:00",
+  "sleep_lock_end_time": "07:00",
+  "sleep_lock_unlock_duration_minutes": 5,
+  "sleep_lock_active": true  // Computed at request time
+}
+```
+
+**`sleep_lock_active` computation:**
+	•	Returns `true` if sleep lock is enabled AND current server time falls within the configured window
+	•	Handles overnight time ranges (e.g., 22:00 to 07:00)
+	•	Returns `false` if sleep lock is disabled or times are not configured
+	•	Times are interpreted as server local time
+
+**Validation:**
+	•	When `sleep_lock_enabled` is true, both `sleep_lock_start_time` and `sleep_lock_end_time` must be provided
+	•	Time format must be HH:MM (24-hour format)
+	•	`sleep_lock_unlock_duration_minutes` must be between 0 and 60
 
 10.7 Circadian pause/resume
 

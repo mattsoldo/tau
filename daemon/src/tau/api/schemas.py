@@ -2,7 +2,7 @@
 API Schemas - Pydantic models for request/response validation
 """
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 
 
@@ -107,6 +107,19 @@ class GroupBase(BaseModel):
     circadian_profile_id: Optional[int] = None
     default_max_brightness: Optional[int] = Field(1000, ge=0, le=1000, description="Default maximum brightness (0-1000) when switch turns group on")
     default_cct_kelvin: Optional[int] = Field(None, ge=1000, le=10000, description="Default color temperature in Kelvin when switch turns group on")
+    # Sleep Mode Lock Settings
+    sleep_lock_enabled: bool = Field(False, description="Enable sleep mode lock for this group")
+    sleep_lock_start_time: Optional[str] = Field(None, pattern="^([0-1][0-9]|2[0-3]):[0-5][0-9]$", description="Start time in HH:MM format (24-hour)")
+    sleep_lock_end_time: Optional[str] = Field(None, pattern="^([0-1][0-9]|2[0-3]):[0-5][0-9]$", description="End time in HH:MM format (24-hour)")
+    sleep_lock_unlock_duration_minutes: Optional[int] = Field(5, ge=0, le=60, description="Minutes the unlock gesture grants access (0 = single action only)")
+
+    @model_validator(mode='after')
+    def validate_sleep_lock_times(self):
+        """Ensure both start and end times are provided when sleep lock is enabled."""
+        if self.sleep_lock_enabled:
+            if not self.sleep_lock_start_time or not self.sleep_lock_end_time:
+                raise ValueError("Both start and end times are required when sleep lock is enabled")
+        return self
 
 
 class GroupCreate(GroupBase):
@@ -121,6 +134,25 @@ class GroupUpdate(BaseModel):
     default_max_brightness: Optional[int] = Field(None, ge=0, le=1000, description="Default maximum brightness (0-1000) when switch turns group on")
     default_cct_kelvin: Optional[int] = Field(None, ge=1000, le=10000, description="Default color temperature in Kelvin when switch turns group on")
     display_order: Optional[int] = Field(None, ge=0, description="Display order for UI sorting")
+    # Sleep Mode Lock Settings
+    sleep_lock_enabled: Optional[bool] = Field(None, description="Enable sleep mode lock for this group")
+    sleep_lock_start_time: Optional[str] = Field(None, pattern="^([0-1][0-9]|2[0-3]):[0-5][0-9]$", description="Start time in HH:MM format (24-hour)")
+    sleep_lock_end_time: Optional[str] = Field(None, pattern="^([0-1][0-9]|2[0-3]):[0-5][0-9]$", description="End time in HH:MM format (24-hour)")
+    sleep_lock_unlock_duration_minutes: Optional[int] = Field(None, ge=0, le=60, description="Minutes the unlock gesture grants access (0 = single action only)")
+
+    @model_validator(mode='after')
+    def validate_sleep_lock_times(self):
+        """Ensure both start and end times are provided when enabling sleep lock.
+
+        Note: For updates, this only validates if sleep_lock_enabled is explicitly
+        set to True. The API route should handle the case where times already exist
+        on the group being updated.
+        """
+        if self.sleep_lock_enabled is True:
+            # When explicitly enabling sleep lock, times must be provided in the update
+            if not self.sleep_lock_start_time or not self.sleep_lock_end_time:
+                raise ValueError("Both start and end times are required when enabling sleep lock")
+        return self
 
 
 class GroupResponse(GroupBase):
@@ -128,6 +160,8 @@ class GroupResponse(GroupBase):
     is_system: Optional[bool] = False
     display_order: Optional[int] = None
     created_at: datetime
+    # Computed field for whether sleep lock is currently active
+    sleep_lock_active: Optional[bool] = Field(None, description="Whether sleep lock is currently active based on current time")
 
     class Config:
         from_attributes = True

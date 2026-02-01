@@ -46,6 +46,12 @@ interface Group {
   description?: string;
   is_system?: boolean;
   display_order?: number | null;
+  // Sleep Mode Lock Settings
+  sleep_lock_enabled?: boolean;
+  sleep_lock_start_time?: string | null;
+  sleep_lock_end_time?: string | null;
+  sleep_lock_unlock_duration_minutes?: number | null;
+  sleep_lock_active?: boolean | null;
 }
 
 interface Scene {
@@ -917,6 +923,11 @@ export default function HomePage() {
                         }))}
                         scenes={groupScenes}
                         activeSceneId={activeSceneId}
+                        sleepLock={group.sleep_lock_enabled ? {
+                          enabled: group.sleep_lock_enabled,
+                          active: group.sleep_lock_active ?? false,
+                          unlockDurationMinutes: group.sleep_lock_unlock_duration_minutes ?? 5,
+                        } : undefined}
                         onToggle={() => handleGroupToggle(group)}
                         onBrightnessChange={(brightness) => handleGroupBrightnessChange(group, brightness)}
                         onFixtureToggle={(fixtureId) => handleFixtureToggle(group.id, fixtureId)}

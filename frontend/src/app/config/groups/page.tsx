@@ -14,6 +14,12 @@ interface Group {
   default_max_brightness: number | null;
   default_cct_kelvin: number | null;
   created_at: string;
+  // Sleep Mode Lock Settings
+  sleep_lock_enabled: boolean;
+  sleep_lock_start_time: string | null;
+  sleep_lock_end_time: string | null;
+  sleep_lock_unlock_duration_minutes: number | null;
+  sleep_lock_active: boolean | null;
 }
 
 interface CircadianProfile {
@@ -35,6 +41,11 @@ interface GroupFormData {
   circadian_profile_id: string;
   default_max_brightness: string;
   default_cct_kelvin: string;
+  // Sleep Mode Lock Settings
+  sleep_lock_enabled: boolean;
+  sleep_lock_start_time: string;
+  sleep_lock_end_time: string;
+  sleep_lock_unlock_duration_minutes: string;
 }
 
 const emptyGroupFormData: GroupFormData = {
@@ -44,6 +55,11 @@ const emptyGroupFormData: GroupFormData = {
   circadian_profile_id: '',
   default_max_brightness: '1000',
   default_cct_kelvin: '',
+  // Sleep Mode Lock Settings
+  sleep_lock_enabled: false,
+  sleep_lock_start_time: '22:00',
+  sleep_lock_end_time: '07:00',
+  sleep_lock_unlock_duration_minutes: '5',
 };
 
 export default function GroupsPage() {
@@ -176,6 +192,11 @@ export default function GroupsPage() {
       circadian_profile_id: group.circadian_profile_id?.toString() || '',
       default_max_brightness: group.default_max_brightness?.toString() || '1000',
       default_cct_kelvin: group.default_cct_kelvin?.toString() || '',
+      // Sleep Mode Lock Settings
+      sleep_lock_enabled: group.sleep_lock_enabled || false,
+      sleep_lock_start_time: group.sleep_lock_start_time || '22:00',
+      sleep_lock_end_time: group.sleep_lock_end_time || '07:00',
+      sleep_lock_unlock_duration_minutes: group.sleep_lock_unlock_duration_minutes?.toString() || '5',
     });
     setIsGroupModalOpen(true);
   };
@@ -201,6 +222,17 @@ export default function GroupsPage() {
         default_cct_kelvin: groupFormData.default_cct_kelvin
           ? parseInt(groupFormData.default_cct_kelvin)
           : null,
+        // Sleep Mode Lock Settings
+        sleep_lock_enabled: groupFormData.sleep_lock_enabled,
+        sleep_lock_start_time: groupFormData.sleep_lock_enabled
+          ? groupFormData.sleep_lock_start_time
+          : null,
+        sleep_lock_end_time: groupFormData.sleep_lock_enabled
+          ? groupFormData.sleep_lock_end_time
+          : null,
+        sleep_lock_unlock_duration_minutes: groupFormData.sleep_lock_enabled
+          ? parseInt(groupFormData.sleep_lock_unlock_duration_minutes)
+          : 5,
       };
 
       const url = editingGroup
@@ -628,6 +660,102 @@ export default function GroupsPage() {
                     }
                   </p>
                 </div>
+              </div>
+
+              {/* Sleep Mode Lock Section */}
+              <div className="pt-4 border-t border-[#2a2a2f]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-sm font-medium text-white">Sleep Mode Lock</h3>
+                    <p className="text-xs text-[#636366]">
+                      Require unlock gesture to control lights during specified hours
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setGroupFormData({ ...groupFormData, sleep_lock_enabled: !groupFormData.sleep_lock_enabled })}
+                    className={`relative w-12 h-7 rounded-full transition-colors ${
+                      groupFormData.sleep_lock_enabled ? 'bg-amber-500' : 'bg-[#3a3a3f]'
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                        groupFormData.sleep_lock_enabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {groupFormData.sleep_lock_enabled && (
+                  <div className="space-y-3">
+                    {/* Time Range */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-[#a1a1a6] mb-1.5">
+                          Lock Start Time
+                        </label>
+                        <input
+                          type="time"
+                          value={groupFormData.sleep_lock_start_time}
+                          onChange={(e) => setGroupFormData({ ...groupFormData, sleep_lock_start_time: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-[#a1a1a6] mb-1.5">
+                          Lock End Time
+                        </label>
+                        <input
+                          type="time"
+                          value={groupFormData.sleep_lock_end_time}
+                          onChange={(e) => setGroupFormData({ ...groupFormData, sleep_lock_end_time: e.target.value })}
+                          className="w-full px-3 py-2 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-[#636366]">
+                      Controls will be locked from {groupFormData.sleep_lock_start_time || '22:00'} to {groupFormData.sleep_lock_end_time || '07:00'}
+                      {groupFormData.sleep_lock_start_time > groupFormData.sleep_lock_end_time && ' (overnight)'}
+                    </p>
+
+                    {/* Unlock Duration */}
+                    <div>
+                      <label className="block text-sm font-medium text-[#a1a1a6] mb-1.5">
+                        Unlock Duration
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <select
+                          value={groupFormData.sleep_lock_unlock_duration_minutes}
+                          onChange={(e) => setGroupFormData({ ...groupFormData, sleep_lock_unlock_duration_minutes: e.target.value })}
+                          className="flex-1 px-3 py-2 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="0">Single action only</option>
+                          <option value="1">1 minute</option>
+                          <option value="2">2 minutes</option>
+                          <option value="5">5 minutes</option>
+                          <option value="10">10 minutes</option>
+                          <option value="15">15 minutes</option>
+                          <option value="30">30 minutes</option>
+                          <option value="60">1 hour</option>
+                        </select>
+                      </div>
+                      <p className="text-xs text-[#636366] mt-1">
+                        {parseInt(groupFormData.sleep_lock_unlock_duration_minutes) === 0
+                          ? 'Unlock gesture allows one control action, then re-locks immediately'
+                          : `After unlock gesture, controls remain accessible for ${groupFormData.sleep_lock_unlock_duration_minutes} minute${parseInt(groupFormData.sleep_lock_unlock_duration_minutes) > 1 ? 's' : ''}`
+                        }
+                      </p>
+                    </div>
+
+                    {/* Unlock Instructions */}
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                      <p className="text-xs text-amber-400">
+                        <strong>To unlock:</strong> Long-press (hold for 2 seconds) on the group slider during lock hours.
+                        A progress indicator will show when unlocking.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="px-6 py-4 border-t border-[#2a2a2f] flex justify-end gap-3">
