@@ -591,6 +591,55 @@ class LightingController:
         """
         return await self.switches.reload_switches()
 
+    async def reload_circadian_mappings(self) -> int:
+        """
+        Hot-reload circadian profile mappings from database.
+
+        Call this after assigning/unassigning circadian profiles to groups.
+        This ensures the controller picks up changes immediately without restart.
+
+        Returns:
+            Number of groups with circadian profiles
+        """
+        # Clear existing mappings
+        old_profiles = set(self.group_circadian_profiles.keys())
+        self.group_circadian_profiles.clear()
+        self.circadian_enabled_groups.clear()
+
+        # Reload from database
+        await self._load_circadian_mappings()
+
+        # Log what changed
+        new_profiles = set(self.group_circadian_profiles.keys())
+        added = new_profiles - old_profiles
+        removed = old_profiles - new_profiles
+
+        if added or removed:
+            logger.info(
+                "circadian_mappings_reloaded",
+                groups_added=list(added),
+                groups_removed=list(removed),
+                total_groups=len(self.group_circadian_profiles),
+                enabled_groups=len(self.circadian_enabled_groups),
+            )
+
+        return len(self.group_circadian_profiles)
+
+    async def reload_circadian_profile(self, profile_id: int) -> bool:
+        """
+        Hot-reload a specific circadian profile from database.
+
+        Call this after updating a profile's keyframes so the changes
+        take effect immediately.
+
+        Args:
+            profile_id: ID of the profile to reload
+
+        Returns:
+            True if reloaded successfully
+        """
+        return await self.circadian.reload_profile(profile_id)
+
     def get_statistics(self) -> dict:
         """
         Get controller statistics

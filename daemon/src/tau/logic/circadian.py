@@ -278,3 +278,20 @@ class CircadianEngine:
         count = len(self.profiles)
         self.profiles.clear()
         logger.info("profile_cache_cleared", profiles_cleared=count)
+
+    async def reload_profile(self, profile_id: int) -> bool:
+        """
+        Reload a specific profile from database (e.g., after keyframes updated)
+
+        Args:
+            profile_id: ID of profile to reload
+
+        Returns:
+            True if reloaded successfully
+        """
+        # Remove from cache first
+        if profile_id in self.profiles:
+            del self.profiles[profile_id]
+
+        # Reload from database
+        return await self.load_profile(profile_id)

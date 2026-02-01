@@ -158,6 +158,22 @@ async def create_group(
                 error=str(e)
             )
 
+    # Hot-reload circadian mappings if profile was assigned
+    if group_data.circadian_profile_id and daemon and daemon.lighting_controller:
+        try:
+            await daemon.lighting_controller.reload_circadian_mappings()
+            logger.info(
+                "circadian_mappings_reloaded_after_group_create",
+                group_id=group.id,
+                profile_id=group_data.circadian_profile_id,
+            )
+        except Exception as e:
+            logger.error(
+                "circadian_reload_failed",
+                group_id=group.id,
+                error=str(e),
+            )
+
     return group_to_response(group)
 
 
@@ -187,8 +203,11 @@ async def update_group(
     # Update fields
     update_data = group_data.model_dump(exclude_unset=True)
 
+    # Track if circadian profile is changing
+    circadian_changed = "circadian_profile_id" in update_data
+
     # Verify circadian profile exists if being changed
-    if "circadian_profile_id" in update_data and update_data["circadian_profile_id"]:
+    if circadian_changed and update_data["circadian_profile_id"]:
         from tau.models.circadian import CircadianProfile
         profile = await session.get(CircadianProfile, update_data["circadian_profile_id"])
         if not profile:
@@ -199,6 +218,25 @@ async def update_group(
 
     await session.commit()
     await session.refresh(group)
+
+    # Hot-reload circadian mappings if profile changed
+    if circadian_changed:
+        daemon = get_daemon_instance()
+        if daemon and daemon.lighting_controller:
+            try:
+                await daemon.lighting_controller.reload_circadian_mappings()
+                logger.info(
+                    "circadian_mappings_reloaded_after_group_update",
+                    group_id=group_id,
+                    new_profile_id=update_data.get("circadian_profile_id"),
+                )
+            except Exception as e:
+                logger.error(
+                    "circadian_reload_failed",
+                    group_id=group_id,
+                    error=str(e),
+                )
+
     return group_to_response(group)
 
 

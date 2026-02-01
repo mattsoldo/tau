@@ -5,14 +5,18 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+import structlog
 
 from tau.database import get_session
 from tau.models.circadian import CircadianProfile
+from tau.api import get_daemon_instance
 from tau.api.schemas import (
     CircadianProfileCreate,
     CircadianProfileUpdate,
     CircadianProfileResponse,
 )
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -81,8 +85,11 @@ async def update_circadian_profile(
     # Update fields
     update_data = profile_data.model_dump(exclude_unset=True)
 
+    # Track if keyframes changed
+    keyframes_changed = "keyframes" in update_data and update_data["keyframes"]
+
     # Convert keyframes if provided
-    if "keyframes" in update_data and update_data["keyframes"]:
+    if keyframes_changed:
         keyframes_json = [
             {
                 "time": kf.time,
@@ -98,6 +105,25 @@ async def update_circadian_profile(
 
     await session.commit()
     await session.refresh(profile)
+
+    # Hot-reload profile in circadian engine if keyframes changed
+    if keyframes_changed:
+        daemon = get_daemon_instance()
+        if daemon and daemon.lighting_controller:
+            try:
+                await daemon.lighting_controller.reload_circadian_profile(profile_id)
+                logger.info(
+                    "circadian_profile_reloaded",
+                    profile_id=profile_id,
+                    keyframe_count=len(update_data["keyframes"]),
+                )
+            except Exception as e:
+                logger.error(
+                    "circadian_profile_reload_failed",
+                    profile_id=profile_id,
+                    error=str(e),
+                )
+
     return profile
 
 
