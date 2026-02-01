@@ -33,6 +33,14 @@ def is_sleep_lock_active(group: Group) -> bool:
 
     Handles time ranges that span midnight (e.g., 22:00 to 07:00).
     Returns False if sleep lock is not enabled or times are not configured.
+
+    Note on Timezone Handling:
+        This function uses the server's local time (datetime.now()) for comparison.
+        The sleep lock times (HH:MM format) are interpreted as server local time.
+        This is a "soft lock" intended to prevent accidental light adjustments,
+        not a security feature. Users in the same location as the server will
+        experience the expected behavior. If the server runs in a different
+        timezone than users, the lock schedule may not align with user expectations.
     """
     if not group.sleep_lock_enabled:
         return False
@@ -56,7 +64,15 @@ def is_sleep_lock_active(group: Group) -> bool:
         else:
             # Range spans midnight (e.g., 22:00 to 07:00)
             return current_time >= start_minutes or current_time < end_minutes
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError) as e:
+        logger.warning(
+            "invalid_sleep_lock_config",
+            group_id=group.id,
+            group_name=group.name,
+            start_time=group.sleep_lock_start_time,
+            end_time=group.sleep_lock_end_time,
+            error=str(e)
+        )
         return False
 
 

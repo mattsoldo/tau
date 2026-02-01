@@ -2,7 +2,7 @@
 API Schemas - Pydantic models for request/response validation
 """
 from typing import Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 
 
@@ -113,6 +113,14 @@ class GroupBase(BaseModel):
     sleep_lock_end_time: Optional[str] = Field(None, pattern="^([0-1][0-9]|2[0-3]):[0-5][0-9]$", description="End time in HH:MM format (24-hour)")
     sleep_lock_unlock_duration_minutes: Optional[int] = Field(5, ge=0, le=60, description="Minutes the unlock gesture grants access (0 = single action only)")
 
+    @model_validator(mode='after')
+    def validate_sleep_lock_times(self):
+        """Ensure both start and end times are provided when sleep lock is enabled."""
+        if self.sleep_lock_enabled:
+            if not self.sleep_lock_start_time or not self.sleep_lock_end_time:
+                raise ValueError("Both start and end times are required when sleep lock is enabled")
+        return self
+
 
 class GroupCreate(GroupBase):
     pass
@@ -131,6 +139,20 @@ class GroupUpdate(BaseModel):
     sleep_lock_start_time: Optional[str] = Field(None, pattern="^([0-1][0-9]|2[0-3]):[0-5][0-9]$", description="Start time in HH:MM format (24-hour)")
     sleep_lock_end_time: Optional[str] = Field(None, pattern="^([0-1][0-9]|2[0-3]):[0-5][0-9]$", description="End time in HH:MM format (24-hour)")
     sleep_lock_unlock_duration_minutes: Optional[int] = Field(None, ge=0, le=60, description="Minutes the unlock gesture grants access (0 = single action only)")
+
+    @model_validator(mode='after')
+    def validate_sleep_lock_times(self):
+        """Ensure both start and end times are provided when enabling sleep lock.
+
+        Note: For updates, this only validates if sleep_lock_enabled is explicitly
+        set to True. The API route should handle the case where times already exist
+        on the group being updated.
+        """
+        if self.sleep_lock_enabled is True:
+            # When explicitly enabling sleep lock, times must be provided in the update
+            if not self.sleep_lock_start_time or not self.sleep_lock_end_time:
+                raise ValueError("Both start and end times are required when enabling sleep lock")
+        return self
 
 
 class GroupResponse(GroupBase):

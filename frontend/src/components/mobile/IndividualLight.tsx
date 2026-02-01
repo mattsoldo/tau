@@ -1,7 +1,11 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef } from "react";
 import { Lock } from "lucide-react";
+import {
+  useUnlockGesture,
+  PROGRESS_RING_CIRCUMFERENCE_SMALL,
+} from "@/hooks/useUnlockGesture";
 
 interface IndividualLightProps {
   name: string;
@@ -12,9 +16,6 @@ interface IndividualLightProps {
   onBrightnessChange: (value: number) => void;
   onUnlock?: () => void;  // Callback when unlock gesture completes
 }
-
-// Long press duration in milliseconds
-const UNLOCK_HOLD_DURATION_MS = 2000;
 
 // The leftmost portion of the slider is reserved for "off" (0% brightness)
 // This makes it easier to turn off lights by tapping the left side
@@ -30,61 +31,19 @@ export function IndividualLight({
 }: IndividualLightProps) {
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Unlock hold state
-  const [unlockProgress, setUnlockProgress] = useState(0);
-  const [isHoldingToUnlock, setIsHoldingToUnlock] = useState(false);
-  const unlockTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const unlockStartTimeRef = useRef<number | null>(null);
-  const unlockAnimationRef = useRef<number | null>(null);
-
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (unlockTimerRef.current) clearTimeout(unlockTimerRef.current);
-      if (unlockAnimationRef.current) cancelAnimationFrame(unlockAnimationRef.current);
-    };
-  }, []);
-
-  const startUnlockHold = useCallback(() => {
-    if (!locked) return;
-
-    setIsHoldingToUnlock(true);
-    unlockStartTimeRef.current = Date.now();
-
-    const animateProgress = () => {
-      if (!unlockStartTimeRef.current) return;
-
-      const elapsed = Date.now() - unlockStartTimeRef.current;
-      const progress = Math.min(1, elapsed / UNLOCK_HOLD_DURATION_MS);
-      setUnlockProgress(progress);
-
-      if (progress < 1) {
-        unlockAnimationRef.current = requestAnimationFrame(animateProgress);
-      }
-    };
-    unlockAnimationRef.current = requestAnimationFrame(animateProgress);
-
-    unlockTimerRef.current = setTimeout(() => {
-      setIsHoldingToUnlock(false);
-      setUnlockProgress(0);
-      onUnlock?.();
-    }, UNLOCK_HOLD_DURATION_MS);
-  }, [locked, onUnlock]);
-
-  const cancelUnlockHold = useCallback(() => {
-    setIsHoldingToUnlock(false);
-    setUnlockProgress(0);
-    unlockStartTimeRef.current = null;
-
-    if (unlockTimerRef.current) {
-      clearTimeout(unlockTimerRef.current);
-      unlockTimerRef.current = null;
-    }
-    if (unlockAnimationRef.current) {
-      cancelAnimationFrame(unlockAnimationRef.current);
-      unlockAnimationRef.current = null;
-    }
-  }, []);
+  // Use the shared unlock gesture hook
+  const {
+    unlockProgress,
+    isHoldingToUnlock,
+    startUnlockHold,
+    cancelUnlockHold,
+  } = useUnlockGesture({
+    isLocked: locked,
+    onUnlock,
+    // Individual lights don't manage unlock duration - parent handles it
+    unlockDurationMinutes: 0,
+    lockActive: locked,
+  });
 
   // Convert slider position (0-100% of slider width) to brightness (0-100)
   // The first OFF_ZONE_PERCENT% of the slider maps to 0 brightness
@@ -258,7 +217,7 @@ export function IndividualLight({
                   strokeWidth="2"
                   strokeLinecap="round"
                   className="text-amber-500"
-                  strokeDasharray={`${unlockProgress * 75.4} 75.4`}
+                  strokeDasharray={`${unlockProgress * PROGRESS_RING_CIRCUMFERENCE_SMALL} ${PROGRESS_RING_CIRCUMFERENCE_SMALL}`}
                 />
               </svg>
               <Lock className="absolute inset-0 m-auto w-3 h-3 text-amber-500" />

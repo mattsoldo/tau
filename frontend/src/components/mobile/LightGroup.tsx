@@ -1,9 +1,13 @@
 "use client";
 
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { MoreHorizontal, Plus, Lock } from "lucide-react";
 import { IndividualLight } from "@/components/mobile/IndividualLight";
 import { CompactScene } from "@/components/mobile/CompactScene";
+import {
+  useUnlockGesture,
+  PROGRESS_RING_CIRCUMFERENCE_LARGE,
+} from "@/hooks/useUnlockGesture";
 
 interface FixtureData {
   id: number;
@@ -41,9 +45,6 @@ interface LightGroupProps {
   onCaptureScene?: () => void;
 }
 
-// Long press duration in milliseconds
-const UNLOCK_HOLD_DURATION_MS = 2000;
-
 // The leftmost portion of the slider is reserved for "off" (0% brightness)
 // This makes it easier to turn off lights by tapping the left side
 const OFF_ZONE_PERCENT = 10;
@@ -67,93 +68,24 @@ export function LightGroup({
   const sliderRef = useRef<HTMLDivElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Sleep lock unlock state
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [unlockProgress, setUnlockProgress] = useState(0);
-  const [isHoldingToUnlock, setIsHoldingToUnlock] = useState(false);
-  const unlockTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const unlockStartTimeRef = useRef<number | null>(null);
-  const unlockAnimationRef = useRef<number | null>(null);
-  const unlockExpiryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Use the shared unlock gesture hook
+  const {
+    isUnlocked,
+    unlockProgress,
+    isHoldingToUnlock,
+    startUnlockHold,
+    cancelUnlockHold,
+    handleControlAction,
+    setIsUnlocked,
+    unlockExpiryTimerRef,
+  } = useUnlockGesture({
+    isLocked: Boolean(sleepLock?.enabled && sleepLock?.active),
+    unlockDurationMinutes: sleepLock?.unlockDurationMinutes ?? 5,
+    lockActive: sleepLock?.active ?? false,
+  });
 
   // Determine if the slider should be locked
   const isLocked = sleepLock?.enabled && sleepLock?.active && !isUnlocked;
-
-  // Clear unlock state when lock becomes inactive
-  useEffect(() => {
-    if (!sleepLock?.active) {
-      setIsUnlocked(false);
-      setUnlockProgress(0);
-    }
-  }, [sleepLock?.active]);
-
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => {
-      if (unlockTimerRef.current) clearTimeout(unlockTimerRef.current);
-      if (unlockAnimationRef.current) cancelAnimationFrame(unlockAnimationRef.current);
-      if (unlockExpiryTimerRef.current) clearTimeout(unlockExpiryTimerRef.current);
-    };
-  }, []);
-
-  const startUnlockHold = useCallback(() => {
-    if (!isLocked) return;
-
-    setIsHoldingToUnlock(true);
-    unlockStartTimeRef.current = Date.now();
-
-    // Animate progress
-    const animateProgress = () => {
-      if (!unlockStartTimeRef.current) return;
-
-      const elapsed = Date.now() - unlockStartTimeRef.current;
-      const progress = Math.min(1, elapsed / UNLOCK_HOLD_DURATION_MS);
-      setUnlockProgress(progress);
-
-      if (progress < 1) {
-        unlockAnimationRef.current = requestAnimationFrame(animateProgress);
-      }
-    };
-    unlockAnimationRef.current = requestAnimationFrame(animateProgress);
-
-    // Set timer for unlock completion
-    unlockTimerRef.current = setTimeout(() => {
-      setIsUnlocked(true);
-      setIsHoldingToUnlock(false);
-      setUnlockProgress(0);
-
-      // Set expiry timer for temporary unlock
-      const durationMinutes = sleepLock?.unlockDurationMinutes ?? 5;
-      if (durationMinutes > 0) {
-        unlockExpiryTimerRef.current = setTimeout(() => {
-          setIsUnlocked(false);
-        }, durationMinutes * 60 * 1000);
-      }
-    }, UNLOCK_HOLD_DURATION_MS);
-  }, [isLocked, sleepLock?.unlockDurationMinutes]);
-
-  const cancelUnlockHold = useCallback(() => {
-    setIsHoldingToUnlock(false);
-    setUnlockProgress(0);
-    unlockStartTimeRef.current = null;
-
-    if (unlockTimerRef.current) {
-      clearTimeout(unlockTimerRef.current);
-      unlockTimerRef.current = null;
-    }
-    if (unlockAnimationRef.current) {
-      cancelAnimationFrame(unlockAnimationRef.current);
-      unlockAnimationRef.current = null;
-    }
-  }, []);
-
-  // Handle single-action unlock mode (re-lock after one action)
-  const handleControlAction = useCallback(() => {
-    if (sleepLock?.unlockDurationMinutes === 0 && isUnlocked) {
-      // Re-lock immediately after single action
-      setIsUnlocked(false);
-    }
-  }, [sleepLock?.unlockDurationMinutes, isUnlocked]);
 
   // Convert slider position (0-100% of slider width) to brightness (0-100)
   // The first OFF_ZONE_PERCENT% of the slider maps to 0 brightness
@@ -349,7 +281,7 @@ export function LightGroup({
                       strokeWidth="3"
                       strokeLinecap="round"
                       className="text-amber-500"
-                      strokeDasharray={`${unlockProgress * 125.6} 125.6`}
+                      strokeDasharray={`${unlockProgress * PROGRESS_RING_CIRCUMFERENCE_LARGE} ${PROGRESS_RING_CIRCUMFERENCE_LARGE}`}
                     />
                   </svg>
                   <Lock className="absolute inset-0 m-auto w-5 h-5 text-amber-500" />
