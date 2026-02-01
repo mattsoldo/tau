@@ -239,6 +239,11 @@ When controlling a group, the daemon must:
 	•	Manual control actions affecting a group or fixture should suspend circadian for the impacted group (only).
 	•	The daemon must support explicit pause/resume via API.
 
+8.4 Hot-Reload Behavior
+	•	When a circadian profile is assigned or unassigned from a group, the daemon immediately reloads its in-memory mappings without requiring a restart.
+	•	When a profile's keyframes are updated, the daemon reloads that specific profile in the circadian engine cache.
+	•	Newly assigned profiles take effect on the next control loop iteration (~33ms at 30Hz).
+
 ⸻
 
 9. Input Handling

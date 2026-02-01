@@ -24,6 +24,17 @@ The Circadian Engine runs continuously. User manual interaction triggers a "Susp
 | Suspended | Time advances (e.g., Day → Evening) | Suspended | No change. Light stays at user's manual setting regardless of time. |
 | Suspended | User clicks "Resume" (UI) | Active (Auto) | Light fades immediately to the calculated brightness/CCT for the current time of day. |
 | Suspended | System Reboot | Suspended | State persists. User's manual override is honored even after power loss. |
+| Any | Profile assigned to group | Active (Auto) | Profile immediately hot-reloaded; lights transition to calculated values on next loop. |
+| Any | Profile keyframes updated | No change | Profile cache reloaded; lights reflect new keyframes on next calculation. |
+
+### Hot-Reload Behavior
+
+When a circadian profile is assigned to a group or a profile's keyframes are edited:
+
+1. The API triggers a hot-reload in the lighting controller
+2. The circadian engine reloads the profile from the database
+3. On the next control loop iteration (~33ms), new values are calculated and applied
+4. No daemon restart is required
 
 ## Fixture Override System
 
