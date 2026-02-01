@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { API_URL } from '@/utils/api';
 
 // === Types ===
@@ -113,6 +113,13 @@ export default function CircadianPage() {
   type SortDirection = 'asc' | 'desc';
   const [sortColumn, setSortColumn] = useState<SortColumn>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  // Preview state
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [previewGroupId, setPreviewGroupId] = useState<number | null>(null);
+  const [isPreviewRunning, setIsPreviewRunning] = useState(false);
+  const [currentKeyframeIndex, setCurrentKeyframeIndex] = useState(0);
+  const previewCancelledRef = useRef(false);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -335,6 +342,97 @@ export default function CircadianPage() {
     }
   };
 
+  // Preview functions
+  const openPreviewModal = () => {
+    // Default to first group if available
+    if (groups.length > 0 && previewGroupId === null) {
+      setPreviewGroupId(groups[0].id);
+    }
+    setIsPreviewModalOpen(true);
+  };
+
+  const startPreview = useCallback(async () => {
+    if (previewGroupId === null) return;
+
+    // Sort keyframes by time
+    const sorted = [...formData.keyframes].sort(
+      (a, b) => timeToMinutesValue(a.time) - timeToMinutesValue(b.time)
+    );
+
+    setIsPreviewRunning(true);
+    setCurrentKeyframeIndex(0);
+    previewCancelledRef.current = false;
+    setIsPreviewModalOpen(false);
+
+    for (let i = 0; i < sorted.length; i++) {
+      if (previewCancelledRef.current) break;
+      setCurrentKeyframeIndex(i);
+
+      const kf = sorted[i];
+      try {
+        const res = await fetch(`${API_URL}/api/control/groups/${previewGroupId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            brightness: parseFloat(kf.brightness) / 100,
+            color_temp: parseInt(kf.cct, 10),
+            transition_duration: 3,
+            easing: 'ease_in_out',
+          }),
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to send lighting command');
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Preview failed');
+        break;
+      }
+
+      // Wait 3.5s (3s transition + 0.5s hold)
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 3500);
+        // Check for cancellation during wait
+        const checkInterval = setInterval(() => {
+          if (previewCancelledRef.current) {
+            clearTimeout(timeout);
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+        setTimeout(() => clearInterval(checkInterval), 3500);
+      });
+    }
+
+    setIsPreviewRunning(false);
+  }, [formData.keyframes, previewGroupId]);
+
+  const cancelPreview = useCallback(() => {
+    previewCancelledRef.current = true;
+    setIsPreviewRunning(false);
+  }, []);
+
+  // Cleanup on modal close
+  useEffect(() => {
+    if (!isModalOpen && isPreviewRunning) {
+      cancelPreview();
+    }
+  }, [isModalOpen, isPreviewRunning, cancelPreview]);
+
+  // Get sorted keyframes for preview display
+  const sortedPreviewKeyframes = useMemo(() => {
+    return [...formData.keyframes].sort(
+      (a, b) => timeToMinutesValue(a.time) - timeToMinutesValue(b.time)
+    );
+  }, [formData.keyframes]);
+
+  // Calculate preview duration
+  const previewDuration = useMemo(() => {
+    const seconds = formData.keyframes.length * 3.5;
+    if (seconds < 60) return `~${Math.round(seconds)}s`;
+    return `~${Math.round(seconds / 60 * 10) / 10}m`;
+  }, [formData.keyframes.length]);
+
   // Catmull-Rom to Bezier conversion for smooth curves
   const catmullRomToBezier = (points: { x: number; y: number }[], tension = 0.5) => {
     if (points.length < 2) return '';
@@ -377,7 +475,19 @@ export default function CircadianPage() {
   };
 
   // Preview curve component - smooth area chart
-  const CurvePreview = ({ keyframes, showCurrentTime = true }: { keyframes: KeyframeFormData[]; showCurrentTime?: boolean }) => {
+  const CurvePreview = ({
+    keyframes,
+    showCurrentTime = true,
+    previewRunning = false,
+    previewKeyframeIndex = 0,
+    onCancelPreview,
+  }: {
+    keyframes: KeyframeFormData[];
+    showCurrentTime?: boolean;
+    previewRunning?: boolean;
+    previewKeyframeIndex?: number;
+    onCancelPreview?: () => void;
+  }) => {
     const [currentTime, setCurrentTime] = useState(getCurrentTimePercent());
 
     useEffect(() => {
@@ -437,10 +547,10 @@ export default function CircadianPage() {
     const gradientId = useMemo(() => `curve-gradient-${Math.random().toString(36).substr(2, 9)}`, []);
 
     return (
-      <div className="bg-[#0a0a0b] border border-[#2a2a2f] rounded-xl p-4">
+      <div className="relative bg-[#0a0a0b] border border-[#2a2a2f] rounded-xl p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-[#8e8e93]">Brightness Curve</span>
-          {showCurrentTime && (
+          {showCurrentTime && !previewRunning && (
             <span className="text-xs text-amber-500/70">
               Now: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
@@ -587,7 +697,74 @@ export default function CircadianPage() {
               {label.time}
             </text>
           ))}
+
+          {/* Highlight current preview keyframe */}
+          {previewRunning && points[previewKeyframeIndex] && (
+            <circle
+              cx={points[previewKeyframeIndex].x}
+              cy={points[previewKeyframeIndex].y}
+              r="10"
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth="2"
+              opacity="0.8"
+              className="animate-pulse"
+            />
+          )}
         </svg>
+
+        {/* Preview Progress Overlay */}
+        {previewRunning && (
+          <div className="absolute inset-0 bg-[#0a0a0b]/80 rounded-xl flex flex-col items-center justify-center">
+            <div className="text-center space-y-3">
+              {/* Progress indicator */}
+              <div className="flex items-center justify-center gap-2">
+                <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-amber-400 font-medium">
+                  Keyframe {previewKeyframeIndex + 1} of {sortedKf.length}
+                </span>
+              </div>
+
+              {/* Current keyframe values */}
+              {sortedKf[previewKeyframeIndex] && (
+                <div className="text-sm text-[#a1a1a6] space-y-1">
+                  <div>Time: <span className="text-white">{sortedKf[previewKeyframeIndex].time}</span></div>
+                  <div>Brightness: <span className="text-white">{sortedKf[previewKeyframeIndex].brightness}%</span></div>
+                  <div>CCT: <span className="text-white">{formatCCT(parseInt(sortedKf[previewKeyframeIndex].cct, 10) || 4000)}</span></div>
+                </div>
+              )}
+
+              {/* Progress dots */}
+              <div className="flex items-center justify-center gap-1.5 py-2">
+                {sortedKf.map((_, i) => (
+                  <div
+                    key={i}
+                    className={`w-2 h-2 rounded-full transition-colors ${
+                      i < previewKeyframeIndex
+                        ? 'bg-amber-500'
+                        : i === previewKeyframeIndex
+                        ? 'bg-amber-400 animate-pulse'
+                        : 'bg-[#3a3a3f]'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              {/* Stop button */}
+              {onCancelPreview && (
+                <button
+                  onClick={onCancelPreview}
+                  className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 text-red-400 rounded-lg transition-colors flex items-center gap-2 mx-auto"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="6" y="6" width="12" height="12" rx="1" />
+                  </svg>
+                  Stop Preview
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -884,7 +1061,12 @@ export default function CircadianPage() {
               </div>
 
               {/* Curve Preview */}
-              <CurvePreview keyframes={formData.keyframes} />
+              <CurvePreview
+                keyframes={formData.keyframes}
+                previewRunning={isPreviewRunning}
+                previewKeyframeIndex={currentKeyframeIndex}
+                onCancelPreview={cancelPreview}
+              />
 
               {/* Keyframes */}
               <div>
@@ -984,20 +1166,117 @@ export default function CircadianPage() {
               </div>
             </div>
 
-            <div className="px-6 py-4 border-t border-[#2a2a2f] flex justify-end gap-3 flex-shrink-0">
+            <div className="px-6 py-4 border-t border-[#2a2a2f] flex justify-between flex-shrink-0">
               <button
-                onClick={() => setIsModalOpen(false)}
+                onClick={openPreviewModal}
+                disabled={formData.keyframes.length < 2 || isPreviewRunning}
+                className="px-4 py-2 bg-[#2a2a2f] hover:bg-[#3a3a3f] text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={formData.keyframes.length < 2 ? 'Need at least 2 keyframes to preview' : 'Preview on actual lights'}
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                Preview on Lights
+              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 bg-[#2a2a2f] hover:bg-[#3a3a3f] text-white rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black font-medium rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {isSaving ? 'Saving...' : editingProfile ? 'Save Changes' : 'Create Profile'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group Selection Modal for Preview */}
+      {isPreviewModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-[#1a1a1f] rounded-xl border border-[#2a2a2f] w-full max-w-md">
+            <div className="px-6 py-4 border-b border-[#2a2a2f]">
+              <h3 className="text-lg font-semibold">Preview on Lights</h3>
+              <p className="text-sm text-[#636366] mt-1">
+                Select a group to preview this profile on actual fixtures
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {groups.length === 0 ? (
+                <div className="text-center py-4">
+                  <p className="text-[#636366]">No groups available</p>
+                  <p className="text-sm text-[#4a4a4f] mt-1">Create a group first to preview the profile</p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-[#a1a1a6] mb-2">
+                      Target Group
+                    </label>
+                    <select
+                      value={previewGroupId ?? ''}
+                      onChange={(e) => setPreviewGroupId(Number(e.target.value))}
+                      className="w-full px-3 py-2.5 bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg text-white focus:outline-none focus:border-amber-500"
+                    >
+                      {groups.map((group) => (
+                        <option key={group.id} value={group.id}>
+                          {group.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="bg-[#0a0a0b] border border-[#2a2a2f] rounded-lg p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <div className="font-medium">{formData.keyframes.length} keyframes</div>
+                        <div className="text-sm text-[#636366]">
+                          Total duration: {previewDuration}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-[#636366]">
+                    Each keyframe will play for 3 seconds with a smooth transition.
+                    The lights will step through each time point in the profile.
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-[#2a2a2f] flex justify-end gap-3">
+              <button
+                onClick={() => setIsPreviewModalOpen(false)}
                 className="px-4 py-2 bg-[#2a2a2f] hover:bg-[#3a3a3f] text-white rounded-lg transition-colors"
               >
                 Cancel
               </button>
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black font-medium rounded-lg transition-colors disabled:opacity-50"
-              >
-                {isSaving ? 'Saving...' : editingProfile ? 'Save Changes' : 'Create Profile'}
-              </button>
+              {groups.length > 0 && (
+                <button
+                  onClick={startPreview}
+                  disabled={previewGroupId === null}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black font-medium rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  Start Preview
+                </button>
+              )}
             </div>
           </div>
         </div>
